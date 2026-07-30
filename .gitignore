@@ -55,3 +55,6 @@ scratch/
 .bmad-loop/runs/
 .bmad-loop/cache/
 .bmad-loop/policy.toml
+
+# Personal BMad settings — not shared
+_bmad/config.user.yaml
