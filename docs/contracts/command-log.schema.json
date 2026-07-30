@@ -1,0 +1,237 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/RudraO2/tokenbrawl/docs/contracts/command-log.schema.json",
+  "title": "Tokenbrawl Command Log",
+  "description": "The canonical record of one Match. Every consumer binds to this file: the replay player, the local CLI, the CI tournament runner, the leaderboard generator, and every Environment Adapter. A Command Log stores decisions, not frames — the player reproduces visual state by re-running the deterministic engine from (seed, config, ordered actions), which is why this document stays small enough to serve a fight in under two seconds.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "matchId",
+    "environment",
+    "seed",
+    "configHash",
+    "agents",
+    "decisions",
+    "result",
+    "finalStateHash"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "description": "Exact-match semantics. A consumer that does not implement this precise version MUST reject the document and MUST NOT attempt a partial read. Silent partial reads of an evolved schema are how a leaderboard quietly becomes wrong.",
+      "const": "1.0.0"
+    },
+    "matchId": {
+      "type": "string",
+      "pattern": "^[a-z0-9-]{8,64}$",
+      "description": "Stable identifier. Derived deterministically from (environment, seed, configHash, agent ids) so the same Match always produces the same id."
+    },
+    "environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "version"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Environment Adapter identifier, e.g. 'fighter'. Opaque to the Harness.",
+          "pattern": "^[a-z0-9-]{1,32}$"
+        },
+        "version": {
+          "type": "string",
+          "description": "Environment rules version. A change to simulation behaviour MUST bump this, because replays across versions are not comparable.",
+          "pattern": "^\\d+\\.\\d+\\.\\d+$"
+        }
+      }
+    },
+    "seed": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 4294967295,
+      "description": "Unsigned 32-bit seed for the match PRNG. Threaded through simulation state, never read from a global."
+    },
+    "configHash": {
+      "$ref": "#/$defs/sha256",
+      "description": "SHA-256 over the canonical serialisation of every parameter that can affect simulation outcome — tick rate, decision cadence, match cap, action frame data, token bank size, fallback action. If a change can alter a Match, it MUST change this hash."
+    },
+    "tokenBankStart": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Starting Token Bank per Agent, in completion tokens. Provisional default 25000. Config value, never hard-coded. Absent means the Match ran with banking disabled (Baseline-Bot-only matches)."
+    },
+    "agents": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "items": { "$ref": "#/$defs/agentIdentity" },
+      "description": "Index 0 is side P1, index 1 is side P2. Side swaps are separate Matches with a separate matchId, never a flag on one log."
+    },
+    "decisions": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/decision" },
+      "description": "Ordered by tick ascending, then by agentIndex ascending. Both Agents at one Decision Point appear as two entries sharing a tick; simultaneity is a property of the simulation, not of ordering."
+    },
+    "result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["outcome", "endTick", "endReason"],
+      "properties": {
+        "outcome": {
+          "enum": ["p1", "p2", "draw"],
+          "description": "Winner by side index, or draw."
+        },
+        "endTick": { "type": "integer", "minimum": 0 },
+        "endReason": {
+          "enum": ["ko", "timeout"],
+          "description": "'ko' when a health pool reached zero; 'timeout' when the Match hit its tick cap."
+        },
+        "healthRemaining": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": { "type": "integer", "minimum": 0 }
+        }
+      }
+    },
+    "finalStateHash": {
+      "$ref": "#/$defs/sha256",
+      "description": "SHA-256 over the canonical serialisation of terminal simulation state. Replaying this log MUST reproduce this value exactly. This is the machine expression of INV-2."
+    },
+    "reasoningSidecar": {
+      "type": ["string", "null"],
+      "description": "Relative path to a sidecar holding reasoning text, when reasoning has been externalised to keep this document small. When present, decision entries omit 'reasoning' and the sidecar is fetched lazily. Playback MUST NOT block on it.",
+      "default": null
+    }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$",
+      "description": "Lowercase hex SHA-256."
+    },
+    "action": {
+      "enum": ["advance", "retreat", "attack", "block", "special", "stand"],
+      "description": "The five Actions an Agent may choose, plus 'stand' — which an Agent may never choose. 'stand' is the Fallback Action applied on a Parse Failure, and is deliberately the least useful legal behaviour so that failing to follow the format is never rewarded."
+    },
+    "agentIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9._:-]{1,96}$",
+          "description": "Stable Agent identifier. For a Deployment, 'provider:model'. For a Baseline Bot, 'bot:name'."
+        },
+        "kind": {
+          "enum": ["deployment", "bot"],
+          "description": "A Deployment consumes tokens; a Baseline Bot never does."
+        },
+        "deployment": {
+          "$ref": "#/$defs/deployment",
+          "description": "Required when kind is 'deployment'. Tokenbrawl ranks Deployments, not models — see INV-6."
+        },
+        "track": {
+          "enum": ["main", "reflex"],
+          "description": "'reflex' when this Deployment failed the Metering Probe and ran permanently in Reflex Mode. Reflex-Track results MUST NOT be merged into the main leaderboard.",
+          "default": "main"
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "kind": { "const": "deployment" } }, "required": ["kind"] },
+          "then": { "required": ["deployment"] }
+        },
+        {
+          "if": { "properties": { "kind": { "const": "bot" } }, "required": ["kind"] },
+          "then": { "not": { "required": ["deployment"] } }
+        }
+      ]
+    },
+    "deployment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "endpoint", "model"],
+      "description": "The unit Tokenbrawl ranks. Two endpoints serving the same model name are two distinct Deployments and occupy two leaderboard rows — free endpoints may serve quantised weights.",
+      "properties": {
+        "provider": {
+          "enum": ["groq", "cerebras", "google-ai-studio", "openrouter", "xai", "byok"],
+          "description": "'byok' marks a Match run in a visitor's browser with their own key. BYOK Matches MUST NOT enter the leaderboard."
+        },
+        "endpoint": {
+          "type": "string",
+          "format": "uri",
+          "description": "The base URL actually called. Recorded per INV-6."
+        },
+        "model": { "type": "string", "minLength": 1 },
+        "meteringProbe": {
+          "enum": ["reports-reasoning", "reports-completion-only", "no-usage-reported"],
+          "description": "Result of the Metering Probe for this Deployment at the time this Match ran. Anything other than 'reports-reasoning' forces the Reflex Track."
+        }
+      }
+    },
+    "decision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tick", "agentIndex", "action"],
+      "properties": {
+        "tick": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Simulation Tick of this Decision Point. Ticks, never seconds — see INV-1."
+        },
+        "agentIndex": { "enum": [0, 1] },
+        "action": { "$ref": "#/$defs/action" },
+        "tokensSpent": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Completion tokens actually consumed by this call, including reasoning tokens where the provider reports them. Absent for Baseline Bots."
+        },
+        "reasoningTokens": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "The reasoning-token portion of tokensSpent, when reported separately. Absent means not reported — which is a probe result, not a zero."
+        },
+        "bankRemaining": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Token Bank after this call was debited."
+        },
+        "reflexMode": {
+          "type": "boolean",
+          "default": false,
+          "description": "True when this call was served under a depleted Token Bank at max_tokens=8."
+        },
+        "parseFailure": {
+          "type": "boolean",
+          "default": false,
+          "description": "True when no valid Action could be extracted and the Fallback Action ('stand') was applied. Never retried — a retry hands extra compute to whichever Deployment is worst at following the format."
+        },
+        "reasoning": {
+          "type": ["string", "null"],
+          "description": "Reasoning text for this exact Decision Point. Surfaced on hover in the player. Omitted when reasoningSidecar is set."
+        },
+        "rawResponse": {
+          "type": ["string", "null"],
+          "description": "Verbatim provider response. Required when parseFailure is true, so a failure can be audited rather than trusted."
+        },
+        "provider": {
+          "type": "string",
+          "description": "Provider that served this specific call. Per-call rather than per-Match, because a fallback may route mid-Match. See INV-6."
+        },
+        "endpoint": {
+          "type": "string",
+          "description": "Endpoint that served this specific call."
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "parseFailure": { "const": true } }, "required": ["parseFailure"] },
+          "then": {
+            "required": ["rawResponse"],
+            "properties": { "action": { "const": "stand" } }
+          }
+        }
+      ]
+    }
+  }
+}
