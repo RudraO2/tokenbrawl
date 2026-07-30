@@ -1,0 +1,54 @@
+# Dependencies
+node_modules/
+.pnp/
+.pnp.js
+
+# Build output
+dist/
+build/
+.next/
+out/
+*.tsbuildinfo
+
+# Environment and secrets — never commit
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+secrets.json
+
+# Local Claude Code settings (machine-specific)
+.claude/settings.local.json
+
+# Vendored BMad agent skills — reinstallable tooling, ~4.8MB of noise in a
+# repo meant to showcase the product. Kept on disk, out of Git.
+# `_bmad/` (config + scripts) and `_bmad-output/` (planning artifacts) ARE committed.
+.agents/
+.claude/skills/
+
+# Test and coverage output
+coverage/
+.nyc_output/
+*.lcov
+
+# Logs
+*.log
+npm-debug.log*
+yarn-error.log*
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.swp
+
+# Scratch
+tmp/
+.tmp/
+scratch/
