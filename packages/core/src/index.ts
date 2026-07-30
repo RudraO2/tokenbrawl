@@ -28,3 +28,17 @@ export type { MockEnvironmentConfig, MockState } from './testing/mock-environmen
 
 export { createScriptedAgent } from './testing/mock-agent';
 export type { ScriptedAgent, ScriptedAgentConfig } from './testing/mock-agent';
+
+// ---------------------------------------------------------------------------
+// Story 1.3: Command Log persistence and schema validation.
+// ---------------------------------------------------------------------------
+
+export { canonicalStringify, canonicalSha256, sha256Hex } from './canonical-hash';
+
+export {
+  buildCommandLog,
+  computeConfigHash,
+  computeMatchId,
+  validateCommandLog,
+} from './command-log';
+export type { BuildCommandLogParams, ComputeMatchIdParams } from './command-log';

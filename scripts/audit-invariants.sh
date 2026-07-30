@@ -36,7 +36,9 @@ grep_core() {
   local dirs
   mapfile -t dirs < <(existing_core)
   [ ${#dirs[@]} -eq 0 ] && return 1
-  grep -rnE --include='*.ts' --include='*.tsx' "$pattern" "${dirs[@]}" 2>/dev/null
+  grep -rnE --include='*.ts' --include='*.tsx' \
+    --exclude-dir=node_modules --exclude-dir=dist --exclude-dir=build --exclude-dir=coverage --exclude-dir=.turbo \
+    "$pattern" "${dirs[@]}" 2>/dev/null
 }
 
 echo
@@ -103,6 +105,7 @@ echo
 echo "INV-4  thinking budget is metered, never set"
 if [ -d packages ]; then
   hits=$(grep -rnE --include='*.ts' \
+          --exclude-dir=node_modules --exclude-dir=dist --exclude-dir=build --exclude-dir=coverage --exclude-dir=.turbo \
           '"(reasoning|reasoning_effort|thinking|thinkingLevel|thinking_budget)"|\b(reasoning_effort|thinkingLevel|thinking_budget)\s*:' \
           packages 2>/dev/null | grep -vE '(reasoningTokens|reasoningSidecar|\.test\.ts|\.spec\.ts|//)')
   if [ -n "$hits" ]; then
@@ -120,6 +123,7 @@ echo
 echo "INV-7  scaffolds are identical across deployments"
 if [ -d packages ]; then
   hits=$(grep -rnE --include='*.ts' \
+          --exclude-dir=node_modules --exclude-dir=dist --exclude-dir=build --exclude-dir=coverage --exclude-dir=.turbo \
           '(promptOverride|systemPromptFor|scaffoldFor|perModelPrompt|modelSpecificPrompt)' \
           packages 2>/dev/null | grep -vE '\.test\.ts|\.spec\.ts')
   if [ -n "$hits" ]; then
