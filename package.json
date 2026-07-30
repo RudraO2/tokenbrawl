@@ -1,0 +1,23 @@
+{
+  "name": "tokenbrawl",
+  "version": "0.0.0",
+  "private": true,
+  "engines": {
+    "node": ">=22 <23"
+  },
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "pretest": "eslint .",
+    "test": "npm test --workspaces --if-present"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.0",
+    "@typescript-eslint/parser": "^8.65.0",
+    "eslint": "^9.39.0",
+    "typescript": "^5.9.0",
+    "vitest": "^4.1.0"
+  }
+}
