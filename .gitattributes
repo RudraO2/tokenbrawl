@@ -1,0 +1,19 @@
+# Normalise line endings. Authoring happens on Windows; CI runs on Linux.
+* text=auto eol=lf
+
+# Shell scripts MUST be LF — CRLF makes bash fail with an unhelpful
+# "bad interpreter" error inside GitHub Actions.
+*.sh text eol=lf
+
+# Windows-only files keep CRLF.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Binary — never touch.
+*.png binary
+*.jpg binary
+*.gif binary
+*.webp binary
+*.woff binary
+*.woff2 binary
+*.mp4 binary
