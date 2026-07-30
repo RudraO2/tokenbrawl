@@ -13,3 +13,18 @@ export const placeholder = true;
  * runtime and never needs module resolution outside of `tsc`.
  */
 export type PlaceholderAction = Action;
+
+// ---------------------------------------------------------------------------
+// Story 1.2: Agent port, mock environment, and the blocking match runner.
+// ---------------------------------------------------------------------------
+
+export { runMatch } from './match-runner';
+export type { MatchDecisionEntry, MatchResult } from './match-runner';
+
+export { yieldMicrotasks } from './testing/async-delay';
+
+export { createMockEnvironment, DEFAULT_MOCK_ENVIRONMENT_CONFIG } from './testing/mock-environment';
+export type { MockEnvironmentConfig, MockState } from './testing/mock-environment';
+
+export { createScriptedAgent } from './testing/mock-agent';
+export type { ScriptedAgent, ScriptedAgentConfig } from './testing/mock-agent';
