@@ -169,8 +169,15 @@ export interface DecisionEntry {
   readonly tick: number;
   readonly agentIndex: 0 | 1;
   readonly action: LoggedAction;
-  readonly tokensSpent?: number;
-  readonly reasoningTokens?: number;
+  /**
+   * Absent for a Baseline Bot (it consumes nothing). `null` for a Deployment
+   * whose provider reported no usage — a Metering Probe result, never to be
+   * collapsed to `0`. INV-5 depends on that distinction surviving to disk,
+   * so it is carried here exactly as `Decision.tokensSpent` reports it.
+   */
+  readonly tokensSpent?: number | null;
+  /** `null` means the provider did not report reasoning tokens separately. */
+  readonly reasoningTokens?: number | null;
   readonly bankRemaining?: number;
   readonly reflexMode?: boolean;
   readonly parseFailure?: boolean;

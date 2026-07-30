@@ -73,7 +73,7 @@
     "result": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["outcome", "endTick", "endReason"],
+      "required": ["outcome", "endTick", "endReason", "healthRemaining"],
       "properties": {
         "outcome": {
           "enum": ["p1", "p2", "draw"],
@@ -182,14 +182,14 @@
         "agentIndex": { "enum": [0, 1] },
         "action": { "$ref": "#/$defs/action" },
         "tokensSpent": {
-          "type": "integer",
+          "type": ["integer", "null"],
           "minimum": 0,
-          "description": "Completion tokens actually consumed by this call, including reasoning tokens where the provider reports them. Absent for Baseline Bots."
+          "description": "Completion tokens actually consumed by this call, including reasoning tokens where the provider reports them. Absent for Baseline Bots, which consume nothing. Explicit null for a Deployment whose provider reported no usage at all — a Metering Probe result that MUST NOT be collapsed to 0, because INV-5 depends on telling 'reported nothing' apart from 'spent nothing'."
         },
         "reasoningTokens": {
-          "type": "integer",
+          "type": ["integer", "null"],
           "minimum": 0,
-          "description": "The reasoning-token portion of tokensSpent, when reported separately. Absent means not reported — which is a probe result, not a zero."
+          "description": "The reasoning-token portion of tokensSpent, when reported separately. Absent or null means not reported — which is a probe result, not a zero."
         },
         "bankRemaining": {
           "type": "integer",
