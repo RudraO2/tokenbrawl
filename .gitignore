@@ -58,3 +58,4 @@ scratch/
 
 # Personal BMad settings — not shared
 _bmad/config.user.yaml
+.bmad-loop/archive/
