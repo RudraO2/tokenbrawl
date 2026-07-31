@@ -1,0 +1,22 @@
+Departure Mono
+Copyright 2024 Helena Zhang  (from the font's own name table, version 1.500)
+
+Licensed under the SIL Open Font License.
+
+PROVENANCE NOTE, recorded 2026-08-01:
+
+The distributed font file carries no OFL.txt and embeds no licence string in
+its name table. The licence statement above is taken from the author's own
+site, https://departuremono.com, which states verbatim:
+
+    "Departure Mono is a monospaced pixel font by Helena Zhang, licensed
+     under the SIL OFL."
+
+That is a first-party statement from the author, but it is NOT the same
+standard of evidence as the Martial Hero pack, whose full CC-0 text ships
+inside the archive. The copyright line above was read out of the font binary's
+name table. Full OFL 1.1 text: https://openfontlicense.org
+
+If this project ever needs a stricter paper trail (a redistribution audit, a
+legal review), obtain the OFL.txt from the author directly rather than relying
+on this note.

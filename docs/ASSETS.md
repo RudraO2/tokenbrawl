@@ -53,17 +53,20 @@ third-party host is a dependency someone else can withdraw.
 
 | Asset | Source | Licence | Checked |
 |---|---|---|---|
-| Bricolage Grotesque | https://github.com/ateliertriay/bricolage | SIL Open Font License 1.1 — **verify before committing the binary** | pending |
-| Departure Mono | https://departuremono.com | SIL Open Font License 1.1 — **verify before committing the binary** | pending |
+| Bricolage Grotesque (variable, 200–800) | Google Fonts, upstream https://github.com/ateliertriay/bricolage | **SIL Open Font License 1.1** — full text in `bricolage-grotesque.OFL.txt` | 2026-08-01 |
+| Departure Mono 1.500 | https://departuremono.com | **SIL OFL** — see the provenance note below | 2026-08-01 |
 
-**The font binaries are not committed yet.** `app.css` declares both
-`@font-face` rules and `tokens.css` names both families, so the moment the two
-`woff2` files are dropped into `apps/web/public/fonts/` the site picks them up
-with no code change. Until then the fallbacks (`Arial Black` and the platform
-monospace) render, which is why the stacks in `tokens.css` are chosen rather
-than incidental.
+Bricolage's licence was read from the project's own `OFL.txt`, which is
+committed beside the font.
 
-Whoever adds the binaries must fill in the **Checked** column with the date the
-`OFL.txt` in the downloaded archive was actually read, and change the licence
-cell to remove the warning. Both are believed to be OFL 1.1 from their public
-pages; believed is not checked.
+**Departure Mono is held to a weaker standard, and the difference is
+recorded rather than smoothed over.** The distributed file ships no `OFL.txt`
+and embeds no licence string in its name table. The licence claim comes from
+the author's own site, which states: *"Departure Mono is a monospaced pixel
+font by Helena Zhang, licensed under the SIL OFL."* The copyright line
+(`2024 Helena Zhang`) was read out of the font binary. That is a first-party
+statement, but it is not the archive-shipped licence text that Martial Hero and
+Bricolage both have. `departure-mono.LICENSE.txt` says so in full. If this
+project ever needs a stricter paper trail, get the OFL text from the author
+directly.
+
