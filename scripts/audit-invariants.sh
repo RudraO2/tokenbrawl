@@ -237,6 +237,55 @@ else
   fi
 fi
 
+# --- FR-3: the skill separation gate ----------------------------------------
+#
+# Story 2.4's thresholds were committed in the story file before a single Match
+# was played, precisely so that they could not be moved to fit a result. The
+# story says it twice and in bold: a failing gate is fixed by deepening the
+# game, never by lowering a number.
+#
+# That intent is worth nothing if editing `6500` to `5000` is a one-line change
+# no gate notices -- the suite would go green and report a passing gate,
+# because it *would* be passing, against a threshold that no longer means
+# anything. So the three values are pinned here, where changing them is a
+# visible edit to the audit script itself rather than a quiet edit to a
+# constant. The report's existence is checked for the same reason: AC3 asks
+# for a committed record, and a gate whose evidence can be deleted without
+# comment is a gate on nothing.
+echo
+echo "FR-3  skill separation gate thresholds are the committed ones"
+ladder="packages/env-fighter/src/testing/skill-ladder.ts"
+if [ ! -f "$ladder" ]; then
+  skip "no skill-separation ladder yet"
+else
+  gate_broken=""
+  grep -qE '^export const SPACING_OVER_RANDOM_THRESHOLD_BASIS_POINTS = 6500;' "$ladder" \
+    || gate_broken="$gate_broken spacing-over-random-threshold-is-not-6500"
+  grep -qE '^export const SPACING_OVER_AGGRESSIVE_THRESHOLD_BASIS_POINTS = 5500;' "$ladder" \
+    || gate_broken="$gate_broken spacing-over-aggressive-threshold-is-not-5500"
+  grep -qE '^export const AGGRESSIVE_OVER_RANDOM_THRESHOLD_BASIS_POINTS = 5000;' "$ladder" \
+    || gate_broken="$gate_broken aggressive-over-random-threshold-is-not-5000"
+  # 100 seeds x 2 side swaps is the 200-Match floor AC1 sets. Halving the seed
+  # count would widen every confidence interval and is the other way to make a
+  # marginal gate pass without touching a threshold.
+  grep -qE '^export const LADDER_SEED_COUNT = 100;' "$ladder" \
+    || gate_broken="$gate_broken ladder-seed-count-is-not-100"
+  for f in docs/reports/skill-separation-gate.json docs/reports/skill-separation-gate.md; do
+    [ -f "$f" ] || gate_broken="$gate_broken missing-report:$f"
+  done
+  # A report recording a *failed* gate must never sit committed and green.
+  if [ -f docs/reports/skill-separation-gate.json ] \
+     && ! grep -q '"passed": true' docs/reports/skill-separation-gate.json; then
+    gate_broken="$gate_broken committed-report-records-a-failing-gate"
+  fi
+
+  if [ -n "$gate_broken" ]; then
+    fail "skill separation gate weakened:$gate_broken"
+  else
+    pass "gate thresholds pinned at 6500/5500/5000 bp over 100 seeds, with a committed passing report"
+  fi
+fi
+
 # --- INV-3: rendering decoupled from decision-making ------------------------
 echo
 echo "INV-3  rendering is decoupled from decision-making"

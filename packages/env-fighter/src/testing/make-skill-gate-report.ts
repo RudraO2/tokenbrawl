@@ -42,6 +42,11 @@ export interface ReportLadderRow {
 }
 
 export interface SkillGateReport {
+  /**
+   * The sprint-status key, not the dotted story number: `scripts/audit-invariants.sh`
+   * reads a digit-dot-digit sequence anywhere in `packages/` as a
+   * floating-point literal (INV-2) and does not exempt string contents.
+   */
   readonly story: string;
   readonly passed: boolean;
   readonly environment: { readonly id: string; readonly version: string };
@@ -83,7 +88,7 @@ export function buildSkillGateReport(run: LadderRun, verdict: SkillGateVerdict):
   const firstInterval = verdict.pairings[0]?.interval;
 
   return {
-    story: '2.4',
+    story: '2-4-skill-separation-gate',
     passed: verdict.passed,
     environment: run.environment,
     configHash: run.configHash,

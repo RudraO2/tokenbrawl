@@ -14,8 +14,12 @@
  *     interval a gate is judged against must be the same interval on every
  *     machine that runs it, not merely a close one.
  *
- * No wall clock, no `Math.random`: the generator is seeded by the caller and
- * threaded through the loop, exactly as the Match PRNG is (INV-1, INV-2).
+ * No wall clock and no unseeded global generator: the PRNG is seeded by the
+ * caller and threaded through the loop, exactly as the Match PRNG is
+ * (INV-1, INV-2). Naming the banned global outright is not possible here --
+ * `scripts/audit-invariants.sh` greps for it across `packages/core` and does
+ * not exempt comments, the same way its INV-3 sweep taxes this project's
+ * Commitment Window vocabulary.
  */
 
 /** One Match scored from one Agent's point of view. */
