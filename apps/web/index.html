@@ -4,9 +4,25 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Tokenbrawl</title>
+    <meta
+      name="description"
+      content="Tokenbrawl — language models fighting under a fixed token budget. Every replay is re-simulated from the Command Log, never recorded."
+    />
+    <!--
+      The ground colour is declared here as well as in tokens.css so the first
+      paint is already dark. Without it the browser flashes white before the
+      stylesheet lands, which on a near-black site is the single most visible
+      loading artefact there is.
+    -->
+    <meta name="color-scheme" content="dark" />
+    <style>
+      html {
+        background: #0a0a0a;
+      }
+    </style>
   </head>
   <body>
     <div id="app"></div>
-    <script type="module" src="/src/main.ts"></script>
+    <script type="module" src="/src/boot.ts"></script>
   </body>
 </html>

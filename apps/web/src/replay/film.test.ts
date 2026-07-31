@@ -3,7 +3,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { replayCommandLog } from '../../../../packages/core/src/replay';
 import { createFighterEnvironment } from '../../../../packages/env-fighter/src/environment';
 import { createMockEnvironment } from '../../../../packages/core/src/testing/mock-environment';
-import { buildFixtureLog } from '../testing/fixture-log';
+import { buildDemoLog } from './demo-log';
 import { BASIS_POINTS_FULL, FRAMES_PER_DECISION, PLAYBACK_FPS, buildReplayFilm } from './film';
 
 /**
@@ -22,7 +22,7 @@ describe('the replay film', () => {
   let log: CommandLog;
 
   beforeAll(async () => {
-    log = await buildFixtureLog(SEED);
+    log = await buildDemoLog(SEED);
   });
 
   it('reproduces visual state by re-running the engine, not by reading stored positions (AC1)', () => {

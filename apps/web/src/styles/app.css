@@ -1,0 +1,176 @@
+/*
+ * The Tokenbrawl shell. Every value comes from tokens.css; there is no hex
+ * literal, no font family and no border width in this file.
+ *
+ * House style, from docs/DESIGN.md: 4px ink borders, hard offset shadows with
+ * zero blur, square corners everywhere, flat fills, press-displaces
+ * interaction, stepped motion. `style-discipline.test.ts` enforces the parts
+ * that are greppable.
+ */
+
+@import './tokens.css';
+
+/* --- Self-hosted faces. No CDN: the site must render identically offline. -
+ *
+ * The files are dropped into public/fonts/ and their licences recorded in
+ * docs/ASSETS.md. `font-display: block` rather than `swap` on the display face
+ * is deliberate -- a brutalist headline reflowing from Arial Black to
+ * Bricolage mid-read is a worse first impression than a beat of nothing.
+ */
+@font-face {
+  font-family: 'Bricolage Grotesque';
+  src: url('/fonts/bricolage-grotesque.woff2') format('woff2');
+  font-weight: 400 800;
+  font-display: block;
+}
+
+@font-face {
+  font-family: 'Departure Mono';
+  src: url('/fonts/departure-mono.woff2') format('woff2');
+  font-weight: 400;
+  font-display: block;
+}
+
+* {
+  box-sizing: border-box;
+  border-radius: var(--tb-radius);
+}
+
+body {
+  margin: 0;
+  padding: var(--tb-space-3);
+  background: var(--tb-bg);
+  color: var(--tb-ink);
+  font-family: var(--tb-font-display);
+  /* Deliberately not a centred column. Content runs to the edge. */
+  max-width: none;
+}
+
+/* --- Masthead ---------------------------------------------------------- */
+
+.tb-masthead {
+  display: flex;
+  align-items: baseline;
+  gap: var(--tb-space-2);
+  margin-bottom: var(--tb-space-3);
+  border-bottom: var(--tb-border-width) solid var(--tb-ink);
+  padding-bottom: var(--tb-space-2);
+}
+
+.tb-wordmark {
+  margin: 0;
+  font-size: clamp(40px, 7vw, 96px);
+  font-weight: 800;
+  letter-spacing: var(--tb-tracking-display);
+  text-transform: uppercase;
+  line-height: 0.9;
+}
+
+.tb-tagline {
+  font-family: var(--tb-font-mono);
+  color: var(--tb-muted);
+  text-transform: uppercase;
+}
+
+/* --- The stage --------------------------------------------------------- */
+
+.tb-stage {
+  border: var(--tb-border-width) solid var(--tb-ink);
+  box-shadow: var(--tb-shadow);
+  background: var(--tb-bg);
+  /* Asymmetric on purpose: the stage sits left, the readout hangs off it. */
+  width: min(100%, 960px);
+  margin-bottom: var(--tb-space-4);
+}
+
+.tb-canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+  /* Sprite-crisp scaling: this is pixel art, not a photograph. */
+  image-rendering: pixelated;
+}
+
+/* --- Readout ----------------------------------------------------------- */
+
+.tb-readout {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--tb-space-2);
+  font-family: var(--tb-font-mono);
+  margin-bottom: var(--tb-space-3);
+}
+
+.tb-chip {
+  border: var(--tb-border-width) solid var(--tb-ink);
+  padding: var(--tb-space-1) var(--tb-space-2);
+  text-transform: uppercase;
+}
+
+.tb-chip--verified {
+  background: var(--tb-accent);
+  color: var(--tb-bg);
+  box-shadow: var(--tb-shadow);
+}
+
+/*
+ * A failed hash is the loudest thing on the page. Ink is --tb-bg on a red
+ * fill, never red text on the ground: red on near-black measures 4.26:1 and
+ * misses the 4.5:1 floor. See docs/DESIGN.md.
+ */
+.tb-chip--failed {
+  background: var(--tb-warn);
+  color: var(--tb-bg);
+  box-shadow: var(--tb-shadow-warn);
+  font-weight: 800;
+}
+
+.tb-hash {
+  color: var(--tb-muted);
+  word-break: break-all;
+}
+
+/* --- Controls ---------------------------------------------------------- */
+
+.tb-button {
+  font-family: var(--tb-font-display);
+  font-weight: 800;
+  font-size: 18px;
+  letter-spacing: var(--tb-tracking-display);
+  text-transform: uppercase;
+  padding: var(--tb-space-1) var(--tb-space-3);
+  background: var(--tb-bg);
+  color: var(--tb-ink);
+  border: var(--tb-border-width) solid var(--tb-ink);
+  box-shadow: var(--tb-shadow);
+  cursor: pointer;
+  /* Stepped, and one constant for the whole app. Nothing here varies per Match. */
+  transition:
+    transform var(--tb-step) step-end,
+    box-shadow var(--tb-step) step-end,
+    background var(--tb-step) step-end,
+    color var(--tb-step) step-end;
+}
+
+/* Invert rather than tint. */
+.tb-button:hover {
+  background: var(--tb-accent);
+  color: var(--tb-bg);
+}
+
+/* Press displaces: travel exactly the shadow offset and collapse the shadow. */
+.tb-button:active {
+  transform: translate(var(--tb-shadow-offset), var(--tb-shadow-offset));
+  box-shadow: 0 0 0 var(--tb-accent);
+}
+
+.tb-button:focus-visible {
+  outline: 3px solid var(--tb-accent);
+  outline-offset: var(--tb-space-1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tb-button {
+    transition: none;
+  }
+}
