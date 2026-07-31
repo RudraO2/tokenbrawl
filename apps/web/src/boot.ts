@@ -32,7 +32,7 @@ import { createSpriteSheet, validateSpriteSheetLayout } from './render/sprite-sh
 
 /** Same-origin, so both are covered by the no-remote-asset sweep in `style-discipline.test.ts`. */
 const DEMO_REPLAY_URL = '/replays/demo.command-log.json';
-const SPRITE_LAYOUT_URL = '/sprites/fighter.layout.json';
+const SPRITE_LAYOUT_URL = '/sprites/martial-hero/layout.json';
 
 interface LoadedImage {
   readonly width: number;
@@ -40,6 +40,9 @@ interface LoadedImage {
   decode(): Promise<void>;
   src: string;
 }
+
+/** What `createSpriteSheet` needs of a decoded image: its dimensions, nothing more. */
+type HTMLImageElementLike = LoadedImage;
 
 interface BrowserGlobals {
   readonly document?: { querySelector(selectors: string): MountPoint | null };
@@ -68,11 +71,23 @@ async function loadArtist(globals: BrowserGlobals): Promise<FighterArtist | unde
     if (globals.Image === undefined) {
       return undefined;
     }
-    const image = new globals.Image();
-    image.src = layout.image;
-    await image.decode();
 
-    return createSpriteArtist(createSpriteSheet(image, layout));
+    // Every distinct file the layout names, decoded before the first frame is
+    // drawn. `decode()` rather than an `onload` race: a sheet that is still
+    // decoding when playback starts draws nothing for its first few frames,
+    // which reads as a fighter that failed to appear.
+    const urls = [...new Set(Object.values(layout.clips).map((clip) => clip.image))];
+    const images = new Map<string, HTMLImageElementLike>();
+    await Promise.all(
+      urls.map(async (url) => {
+        const element = new (globals.Image as new () => LoadedImage)();
+        element.src = url;
+        await element.decode();
+        images.set(url, element);
+      }),
+    );
+
+    return createSpriteArtist(createSpriteSheet(images, layout));
   } catch (error) {
     // Reported, not swallowed: a sheet that silently failed to load looks
     // identical to one nobody ever wired up.

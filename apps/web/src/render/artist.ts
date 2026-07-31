@@ -105,25 +105,27 @@ export function createBlockArtist(): FighterArtist {
   });
 }
 
-/** How much larger than its source pixels the sheet is drawn. Integer, so the art stays crisp. */
-const SPRITE_SCALE = 2;
-
 /**
  * Draws a fighter from a sprite sheet.
  *
- * Two things make this read as a fighting game rather than as a diagram, and
- * both are here rather than in the sheet:
+ * Three things make this read as a fighting game rather than as a diagram:
  *
+ * - **The feet land on the floor.** A pack pads its frames generously and
+ *   never says by how much, so the sheet carries an `anchorY` and the sprite is
+ *   placed by it. Centring the frame instead is what makes a fighter appear to
+ *   hover.
  * - **Facing is a horizontal flip**, done with `scale(-1, 1)` about the
- *   fighter's own centre. The sheet holds one direction only, which halves the
- *   art and guarantees the two directions can never drift apart.
- * - **A hit tints the frame** by overpainting in `--tb-warn` at low alpha. The
- *   simulation says damage landed at this Decision Point and the viewer needs
- *   to see it land; a flinch pose alone is easy to miss at five Decision Points
- *   per second.
+ *   fighter's own x. A pack holds one direction only, which halves the art and
+ *   guarantees the two directions can never drift apart.
+ * - **A hit tints the frame** in `--tb-warn` at low alpha. The simulation says
+ *   damage landed at this Decision Point and the viewer needs to see it land; a
+ *   flinch pose alone is easy to miss at five Decision Points per second.
  *
- * `imageSmoothingEnabled` is forced off. The source is 64x96 pixel art drawn at
- * twice that, and smoothing is the difference between a sprite and a smear.
+ * `imageSmoothingEnabled` is forced off. This is pixel art drawn at twice its
+ * source size, and smoothing is the difference between a sprite and a smear.
+ *
+ * A missing image is skipped rather than thrown on: one un-decodable file
+ * should cost that clip, not the whole replay.
  */
 export function createSpriteArtist(sheet: SpriteSheet): FighterArtist {
   return Object.freeze({
@@ -131,29 +133,32 @@ export function createSpriteArtist(sheet: SpriteSheet): FighterArtist {
 
     draw(ctx: Canvas2D, fighter: DrawnFighter, theme: Theme): void {
       const source = sheet.frameFor(fighter.animation.clip, fighter.animation.frame);
-      const width = sheet.frameWidth * SPRITE_SCALE;
-      const height = sheet.frameHeight * SPRITE_SCALE;
+      const image = sheet.imageFor(source.image);
+      if (image === undefined) {
+        return;
+      }
+
+      const width = sheet.frameWidth * sheet.scale;
+      const height = sheet.frameHeight * sheet.scale;
+      // Where the frame's top edge goes so that its anchor row sits on the floor.
+      const top = -sheet.anchorY * sheet.scale;
 
       ctx.save();
       ctx.imageSmoothingEnabled = false;
 
-      // Translate to the fighter's feet, then flip about that point. Drawing at
-      // -width/2 afterwards keeps the sprite centred whichever way it faces.
-      ctx.translate(fighter.x, fighter.groundY - height);
+      ctx.translate(fighter.x, fighter.groundY);
       if (fighter.facing === -1) {
-        ctx.translate(0, height);
         ctx.scale(-1, 1);
-        ctx.translate(0, -height);
       }
 
       ctx.drawImage(
-        sheet.image,
+        image,
         source.sx,
         source.sy,
         source.sw,
         source.sh,
         -width / 2,
-        0,
+        top,
         width,
         height,
       );
@@ -161,7 +166,7 @@ export function createSpriteArtist(sheet: SpriteSheet): FighterArtist {
       if (fighter.animation.clip === 'hit') {
         ctx.globalAlpha = 0.55;
         ctx.fillStyle = theme.warn;
-        ctx.fillRect(-width / 2, 0, width, height);
+        ctx.fillRect(-width / 2, top, width, height);
         ctx.globalAlpha = 1;
       }
 

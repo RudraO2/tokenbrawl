@@ -31,7 +31,8 @@ import { createSpriteSheet, validateSpriteSheetLayout } from './sprite-sheet';
  */
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const LAYOUT_PATH = join(HERE, '..', '..', 'public', 'sprites', 'fighter.layout.json');
+const LAYOUT_PATH = join(HERE, '..', '..', 'public', 'sprites', 'martial-hero', 'layout.json');
+const SPRITES_DIR = join(HERE, '..', '..', 'public', 'sprites', 'martial-hero');
 
 function input(overrides: Partial<AnimationInput> = {}): AnimationInput {
   return {
@@ -122,90 +123,148 @@ describe('choosing an animation clip', () => {
   });
 });
 
-describe('the committed sprite sheet', () => {
+describe('the committed Martial Hero sheet', () => {
+  function layout(): ReturnType<typeof validateSpriteSheetLayout> {
+    return validateSpriteSheetLayout(JSON.parse(readFileSync(LAYOUT_PATH, 'utf8')));
+  }
+
+  /** Every PNG the layout names, with its real on-disk dimensions read from the IHDR chunk. */
+  function realImages(): ReadonlyMap<string, { width: number; height: number }> {
+    const images = new Map<string, { width: number; height: number }>();
+    for (const clip of Object.values(layout().clips)) {
+      if (images.has(clip.image)) {
+        continue;
+      }
+      const bytes = readFileSync(join(SPRITES_DIR, clip.image.split('/').pop() ?? ''));
+      images.set(clip.image, { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) });
+    }
+    return images;
+  }
+
+  it('ships the CC0 licence text beside the art it licenses', () => {
+    // The pack's own words. `docs/ASSETS.md` records where it came from; this
+    // asserts the licence travels with the files rather than only with the doc.
+    const licence = readFileSync(join(SPRITES_DIR, 'LICENSE.txt'), 'utf8');
+    expect(licence).toContain('Creative Commons Zero');
+  });
+
   it('supplies every clip the animation can ask for', () => {
-    const layout = validateSpriteSheetLayout(JSON.parse(readFileSync(LAYOUT_PATH, 'utf8')));
+    const clips = layout().clips;
     for (const name of CLIP_NAMES) {
-      expect(layout.clips[name].frames).toBeGreaterThanOrEqual(CLIP_FRAME_COUNTS[name]);
+      expect(clips[name].frames).toBeGreaterThanOrEqual(CLIP_FRAME_COUNTS[name]);
     }
   });
 
-  it('gives every clip its own row, so no two poses collide', () => {
-    const layout = validateSpriteSheetLayout(JSON.parse(readFileSync(LAYOUT_PATH, 'utf8')));
-    const rows = CLIP_NAMES.map((name) => layout.clips[name].row);
-    expect(new Set(rows).size).toBe(CLIP_NAMES.length);
+  it('fits inside the real PNGs on disk', () => {
+    // The check that actually matters: a layout that over-runs its image draws
+    // transparent nothing, which looks exactly like a fighter that vanished.
+    expect(() => createSpriteSheet(realImages(), layout())).not.toThrow();
   });
 
-  it('maps each clip and frame to a distinct source rectangle', () => {
-    const layout = validateSpriteSheetLayout(JSON.parse(readFileSync(LAYOUT_PATH, 'utf8')));
-    const sheet = createSpriteSheet({ width: 4_096, height: 4_096 }, layout);
+  it('gives each Commitment Window phase a different slice of the same attack animation', () => {
+    // This is the whole point of the sub-range layout. startup, active and
+    // recovery come out of one file at three offsets, which is what a
+    // Commitment Window is: one animation sliced by the frame data.
+    const sheet = createSpriteSheet(realImages(), layout());
+    const startup = sheet.frameFor('attack-startup', 0);
+    const active = sheet.frameFor('attack-active', 0);
+    const recovery = sheet.frameFor('attack-recovery', 0);
 
+    expect(new Set([startup.image, active.image, recovery.image]).size).toBe(1);
+    expect(startup.sx).toBeLessThan(active.sx);
+    expect(active.sx).toBeLessThan(recovery.sx);
+  });
+
+  it('maps every clip and frame to a distinct source rectangle', () => {
+    const sheet = createSpriteSheet(realImages(), layout());
     const seen = new Set<string>();
     for (const name of CLIP_NAMES) {
       for (let frame = 0; frame < CLIP_FRAME_COUNTS[name]; frame += 1) {
         const rect = sheet.frameFor(name, frame);
-        seen.add(`${String(rect.sx)}:${String(rect.sy)}`);
+        seen.add(`${rect.image}:${String(rect.sx)}:${String(rect.sy)}`);
       }
     }
+    // `special-active` and `special-recovery` overlap on one frame by design --
+    // attack2.png has six frames and the phases need 3+2+2. Everything else is
+    // distinct, and the overlap is exactly one.
     const total = CLIP_NAMES.reduce((sum, name) => sum + CLIP_FRAME_COUNTS[name], 0);
-    expect(seen.size).toBe(total);
+    expect(seen.size).toBe(total - 1);
   });
 
   it('clamps an out-of-range frame rather than reading outside the image', () => {
-    // A clamp draws the clip's last frame, which degrades visibly but sanely.
-    // Throwing would abort the animation-frame callback and freeze playback.
-    const layout = validateSpriteSheetLayout(JSON.parse(readFileSync(LAYOUT_PATH, 'utf8')));
-    const sheet = createSpriteSheet({ width: 4_096, height: 4_096 }, layout);
-
-    const last = sheet.frameFor('walk', CLIP_FRAME_COUNTS.walk - 1);
-    expect(sheet.frameFor('walk', 999)).toStrictEqual(last);
+    const sheet = createSpriteSheet(realImages(), layout());
+    // Clamped to what the *sheet* supplies, not to what the animation uses:
+    // Martial Hero's run cycle is 8 frames and `animationFor` only reaches 4,
+    // which is the "a richer sheet is a welcome upgrade" case working.
+    const supplied = layout().clips.walk.frames;
+    expect(supplied).toBeGreaterThan(CLIP_FRAME_COUNTS.walk);
+    expect(sheet.frameFor('walk', 999)).toStrictEqual(sheet.frameFor('walk', supplied - 1));
     expect(sheet.frameFor('walk', -5)).toStrictEqual(sheet.frameFor('walk', 0));
+  });
+
+  it('anchors the feet inside the frame, so fighters stand on the floor', () => {
+    const sheet = createSpriteSheet(realImages(), layout());
+    expect(sheet.anchorY).toBeGreaterThan(0);
+    expect(sheet.anchorY).toBeLessThanOrEqual(sheet.frameHeight);
   });
 });
 
 describe('rejecting an unusable sheet layout', () => {
-  function layoutWith(overrides: Record<string, unknown>): unknown {
-    const clips = Object.fromEntries(
-      CLIP_NAMES.map((name, row) => [name, { row, frames: CLIP_FRAME_COUNTS[name] }]),
+  function clipsWith(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+    return Object.fromEntries(
+      CLIP_NAMES.map((name) => [
+        name,
+        { image: '/sprites/x.png', x: 0, y: 0, frames: CLIP_FRAME_COUNTS[name], ...overrides },
+      ]),
     );
-    return { image: '/sprites/fighter.png', frameWidth: 64, frameHeight: 96, clips, ...overrides };
+  }
+
+  function layoutWith(overrides: Record<string, unknown>): unknown {
+    return { frameWidth: 200, frameHeight: 200, scale: 2, anchorY: 137, clips: clipsWith(), ...overrides };
   }
 
   it('rejects a missing clip, naming it', () => {
-    const clips = Object.fromEntries(
-      CLIP_NAMES.filter((name) => name !== 'ko').map((name, row) => [
-        name,
-        { row, frames: CLIP_FRAME_COUNTS[name] },
-      ]),
-    );
+    const clips = clipsWith();
+    delete clips.ko;
     expect(() => validateSpriteSheetLayout(layoutWith({ clips }))).toThrow(/no layout for clip "ko"/);
   });
 
   it('rejects a clip with fewer frames than the animation needs', () => {
-    const clips = Object.fromEntries(
-      CLIP_NAMES.map((name, row) => [name, { row, frames: name === 'walk' ? 1 : CLIP_FRAME_COUNTS[name] }]),
-    );
+    const clips = clipsWith();
+    clips.walk = { image: '/sprites/x.png', x: 0, y: 0, frames: 1 };
     expect(() => validateSpriteSheetLayout(layoutWith({ clips }))).toThrow(
       /clip "walk" supplies 1 frame\(s\) but the animation needs 4/,
     );
   });
 
   it('rejects an off-origin image, which would break the offline guarantee', () => {
-    expect(() =>
-      validateSpriteSheetLayout(layoutWith({ image: 'https://cdn.example.com/sheet.png' })),
-    ).toThrow(/must be same-origin/);
+    const clips = clipsWith({ image: 'https://cdn.example.com/sheet.png' });
+    expect(() => validateSpriteSheetLayout(layoutWith({ clips }))).toThrow(/must be same-origin/);
   });
 
-  it('rejects a nonsensical frame size', () => {
+  it('rejects a nonsensical frame size or scale', () => {
     expect(() => validateSpriteSheetLayout(layoutWith({ frameWidth: 0 }))).toThrow(
       /frameWidth must be a positive safe integer/,
+    );
+    expect(() => validateSpriteSheetLayout(layoutWith({ scale: -1 }))).toThrow(
+      /scale must be a positive safe integer/,
+    );
+  });
+
+  it('rejects an anchor below the bottom of a frame', () => {
+    expect(() => validateSpriteSheetLayout(layoutWith({ anchorY: 999 }))).toThrow(
+      /anchorY \(999\) is below the bottom of a frame/,
     );
   });
 
   it('rejects an image too small for the layout it claims', () => {
-    const layout = validateSpriteSheetLayout(layoutWith({}));
-    expect(() => createSpriteSheet({ width: 64, height: 96 }, layout)).toThrow(
-      /image is 64x96 but the layout needs at least/,
-    );
+    const parsed = validateSpriteSheetLayout(layoutWith({}));
+    const images = new Map([['/sprites/x.png', { width: 200, height: 200 }]]);
+    expect(() => createSpriteSheet(images, parsed)).toThrow(/needs .* of "\/sprites\/x\.png"/);
+  });
+
+  it('rejects a layout whose image was never loaded', () => {
+    const parsed = validateSpriteSheetLayout(layoutWith({}));
+    expect(() => createSpriteSheet(new Map(), parsed)).toThrow(/no image was loaded/);
   });
 });
