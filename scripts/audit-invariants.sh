@@ -276,10 +276,16 @@ if [ -d packages ]; then
     fail "no Token Bank module at $token_bank_file"
   elif ! grep -qE '\bREFLEX_MAX_TOKENS\b *= *8\b' "$token_bank_file"; then
     fail "REFLEX_MAX_TOKENS is not pinned to 8 in $token_bank_file"
+  elif [ ! -f "$match_runner_file" ]; then
+    # A missing file must fail loud: without this branch, the grep below
+    # exits non-zero on ENOENT (stderr swallowed by 2>/dev/null) exactly the
+    # same way it does on "no match found", so a deleted/renamed
+    # match-runner.ts would silently report pass instead of fail.
+    fail "no match-runner at $match_runner_file"
   elif grep -qE '\bUNMETERED_BUDGET\b' "$match_runner_file" 2>/dev/null; then
     fail "$match_runner_file still contains UNMETERED_BUDGET -- Token Bank metering is not wired in"
   else
-    pass "Token Bank module present, REFLEX_MAX_TOKENS is 8, and match-runner.ts is metered"
+    pass "Token Bank module present, REFLEX_MAX_TOKENS is 8, and UNMETERED_BUDGET is gone from match-runner.ts"
   fi
 else
   skip "no packages/ yet"

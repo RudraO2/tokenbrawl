@@ -86,6 +86,11 @@ export async function runMatch<TState>(
 
     const decisionResults: [Decision | null, Decision | null] = [null, null];
     const pending: Array<Promise<void>> = [];
+    // What the poll pass actually told each Agent's observe() this tick --
+    // threaded into the collect pass below rather than recomputed there, so
+    // the two can never disagree even if a future change touches `banks`
+    // between the passes (Story 1.5).
+    const polled: Array<{ budgetRemaining: number; reflexMode: boolean } | null> = [null, null];
 
     for (const agentIndex of [0, 1] as const) {
       if (!actionable[agentIndex]) {
@@ -93,12 +98,19 @@ export async function runMatch<TState>(
       }
 
       const observation = env.observe(state, agentIndex);
-      // Read before this call, never after: the call that empties the bank
-      // is not itself in Reflex Mode, only the next one is (Story 1.5).
-      const budgetRemaining = banks[agentIndex].remaining;
-      const reflexMode = budgetRemaining === 0;
-      const prompt = agents[agentIndex].observe(observation, budgetRemaining, reflexMode);
-      const decidePromise = agents[agentIndex].decide(prompt);
+      const agent = agents[agentIndex];
+      // A Baseline Bot consumes nothing (Story 1.5): it is never read from,
+      // debited against, or validated by a Token Bank at all -- only a
+      // Deployment's own bank drives its budget/Reflex Mode. Read before
+      // this call, never after: the call that empties a Deployment's bank
+      // is not itself in Reflex Mode, only the next one is.
+      const { budgetRemaining, reflexMode } =
+        agent.kind === 'deployment'
+          ? { budgetRemaining: banks[agentIndex].remaining, reflexMode: banks[agentIndex].remaining === 0 }
+          : { budgetRemaining: Number.MAX_SAFE_INTEGER, reflexMode: false };
+      polled[agentIndex] = { budgetRemaining, reflexMode };
+      const prompt = agent.observe(observation, budgetRemaining, reflexMode);
+      const decidePromise = agent.decide(prompt);
       pending.push(
         decidePromise.then((decision) => {
           decisionResults[agentIndex] = decision;
@@ -142,34 +154,47 @@ export async function runMatch<TState>(
       actionsForStep[agentIndex] = action;
 
       const agent = agents[agentIndex];
-      // Same "before this call" bank state the Prompt was built from in the
-      // poll pass above -- nothing mutates banks[agentIndex] between the two
-      // passes, so recomputing it here (rather than threading a second
-      // per-agent array through) cannot disagree with what was sent.
-      const reflexModeForThisCall = banks[agentIndex].remaining === 0;
-      banks[agentIndex] = debitTokenBank(banks[agentIndex], decision.tokensSpent, agent.id);
+      const pollResult = polled[agentIndex];
 
-      decisions.push({
-        tick,
-        agentIndex,
-        action,
+      // Only a Deployment's bank is ever debited -- a Bot is never read from
+      // one above, so it is never validated or written to one here either.
+      // A Bot whose `decide()` reports garbage `tokensSpent` therefore
+      // cannot abort a Match: it "consumes nothing" structurally, not merely
+      // in what gets logged.
+      if (agent.kind === 'deployment') {
+        if (pollResult === null) {
+          throw new Error(`Agent "${agent.id}" was actionable but never polled -- this is a runMatch bug.`);
+        }
+        banks[agentIndex] = debitTokenBank(banks[agentIndex], decision.tokensSpent, agent.id);
+
+        decisions.push({
+          tick,
+          agentIndex,
+          action,
+          tokensSpent: decision.tokensSpent,
+          reasoningTokens: decision.reasoningTokens,
+          bankRemaining: banks[agentIndex].remaining,
+          reflexMode: pollResult.reflexMode,
+          reasoning: decision.reasoning,
+          rawResponse: decision.rawResponse,
+          provider: decision.provider,
+          endpoint: decision.endpoint,
+        });
+      } else {
         // Banking fields are written only for a Deployment (INV-4/Story
         // 1.5): a Baseline Bot consumes nothing, so all four stay absent
         // rather than being derived from a zero value, which would collapse
         // "cannot consume" and "consumed nothing" into one shape.
-        ...(agent.kind === 'deployment'
-          ? {
-              tokensSpent: decision.tokensSpent,
-              reasoningTokens: decision.reasoningTokens,
-              bankRemaining: banks[agentIndex].remaining,
-              reflexMode: reflexModeForThisCall,
-            }
-          : {}),
-        reasoning: decision.reasoning,
-        rawResponse: decision.rawResponse,
-        provider: decision.provider,
-        endpoint: decision.endpoint,
-      });
+        decisions.push({
+          tick,
+          agentIndex,
+          action,
+          reasoning: decision.reasoning,
+          rawResponse: decision.rawResponse,
+          provider: decision.provider,
+          endpoint: decision.endpoint,
+        });
+      }
     }
 
     state = env.step(state, actionsForStep);

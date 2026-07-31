@@ -3,8 +3,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Agent, Decision } from '@tokenbrawl/contracts';
 import { describe, expect, it } from 'vitest';
+import { buildCommandLog, computeConfigHash } from './command-log';
 import { runMatch } from './match-runner';
-import { DEFAULT_TOKEN_BANK_START, REFLEX_MAX_TOKENS, maxTokensFor } from './token-bank';
+import { REFLEX_MAX_TOKENS, maxTokensFor } from './token-bank';
 import { yieldMicrotasks } from './testing/async-delay';
 import { createMockEnvironment } from './testing/mock-environment';
 import { createScriptedAgent } from './testing/mock-agent';
@@ -82,11 +83,11 @@ describe('runMatch: never-returning Agent', () => {
     expect(settled).toBe(false);
     // Confirms runMatch actually threads its own budget/reflex values into
     // observe() rather than this test's mock coincidentally matching them.
-    // Both dead the moment Story 1.5 landed: before it, every Agent was
-    // observed with an unmetered budget (Number.MAX_SAFE_INTEGER) and Reflex
-    // Mode never engaged; now a fresh, un-debited bank starts at
-    // DEFAULT_TOKEN_BANK_START and reflexMode is false until it empties.
-    expect(observedBudgetRemaining).toBe(DEFAULT_TOKEN_BANK_START);
+    // `hungAgent` is kind: 'bot' -- a Baseline Bot never touches a Token
+    // Bank at all (Story 1.5), so it is always observed with the unmetered
+    // sentinel (Number.MAX_SAFE_INTEGER, reflexMode false), exactly as
+    // before Story 1.5 existed.
+    expect(observedBudgetRemaining).toBe(Number.MAX_SAFE_INTEGER);
     expect(observedReflexMode).toBe(false);
 
     // Clean teardown: release the stalled Agent so the suite can exit.
@@ -261,19 +262,23 @@ describe('runMatch: Token Bank (Story 1.5, I/O matrix)', () => {
     expect(prompts[1] && maxTokensFor(prompts[1])).toBe(REFLEX_MAX_TOKENS);
   });
 
-  it('overdraft: bankRemaining clamps at 0 rather than going negative', async () => {
-    const env = createMockEnvironment({ maxTicks: 1, ticksPerDecision: 1 });
+  it('overdraft: bankRemaining clamps at 0 rather than going negative, and all later calls are in Reflex Mode', async () => {
+    const env = createMockEnvironment({ maxTicks: 2, ticksPerDecision: 1 });
     const agent0 = createScriptedAgent({
       id: 'dep:p1',
       kind: 'deployment',
-      script: ['attack'],
-      usage: [{ tokensSpent: 500 }],
+      script: ['attack', 'attack'],
+      usage: [{ tokensSpent: 500 }, { tokensSpent: 0 }],
     });
-    const agent1 = createScriptedAgent({ id: 'bot:p2', kind: 'bot', script: ['block'] });
+    const agent1 = createScriptedAgent({ id: 'bot:p2', kind: 'bot', script: ['block', 'block'] });
 
     const result = await runMatch(env, [agent0, agent1], SEED, { tokenBankStart: 30 });
 
-    expect(result.decisions.find((entry) => entry.agentIndex === 0)?.bankRemaining).toBe(0);
+    const p1Entries = result.decisions.filter((entry) => entry.agentIndex === 0);
+    expect(p1Entries[0]?.bankRemaining).toBe(0);
+    // The I/O matrix's second clause: every later call stays Reflex Mode too,
+    // not just the one that overdrew.
+    expect(p1Entries[1]).toMatchObject({ reflexMode: true, bankRemaining: 0 });
   });
 
   it('both Deployments exhausted: the Match still reaches a normal TerminalResult with both in Reflex Mode, no error thrown', async () => {
@@ -333,7 +338,23 @@ describe('runMatch: Token Bank (Story 1.5, I/O matrix)', () => {
     expect(p1Entries[1]?.bankRemaining).toBe(24_900);
   });
 
-  it('bad usage report throws naming the Agent and the rejected value, without corrupting the bank', async () => {
+  it('a null tokensSpent report after Reflex Mode has already engaged leaves it engaged, with bankRemaining still 0', async () => {
+    const env = createMockEnvironment({ maxTicks: 2, ticksPerDecision: 1 });
+    const agent0 = createScriptedAgent({
+      id: 'dep:p1',
+      kind: 'deployment',
+      script: ['attack', 'attack'],
+      usage: [{ tokensSpent: 100 }, { tokensSpent: null }],
+    });
+    const agent1 = createScriptedAgent({ id: 'bot:p2', kind: 'bot', script: ['block', 'block'] });
+
+    const result = await runMatch(env, [agent0, agent1], SEED, { tokenBankStart: 100 });
+
+    const p1Entries = result.decisions.filter((entry) => entry.agentIndex === 0);
+    expect(p1Entries[1]).toMatchObject({ tokensSpent: null, bankRemaining: 0, reflexMode: true });
+  });
+
+  it('bad usage report throws naming the Agent and the rejected value', async () => {
     const env = createMockEnvironment({ maxTicks: 1, ticksPerDecision: 1 });
     const agent0 = createScriptedAgent({
       id: 'dep:bad-actor',
@@ -346,14 +367,95 @@ describe('runMatch: Token Bank (Story 1.5, I/O matrix)', () => {
     await expect(runMatch(env, [agent0, agent1], SEED)).rejects.toThrow(/dep:bad-actor/);
   });
 
-  it('bad config throws from runMatch before any Agent is polled', async () => {
+  it('a Baseline Bot reporting the same garbage tokensSpent never throws -- it consumes nothing, so it is never validated', async () => {
+    const env = createMockEnvironment({ maxTicks: 1, ticksPerDecision: 1 });
+    const agent0 = createScriptedAgent({ id: 'bot:p1', kind: 'bot', script: ['attack'], usage: [{ tokensSpent: -5 }] });
+    const agent1 = createScriptedAgent({ id: 'bot:p2', kind: 'bot', script: ['block'] });
+
+    const result = await runMatch(env, [agent0, agent1], SEED, { tokenBankStart: 100 });
+
+    expect(result.decisions.find((entry) => entry.agentIndex === 0)).not.toHaveProperty('tokensSpent');
+  });
+
+  it('bad config throws from runMatch before any Agent is polled or observed', async () => {
     const env = createMockEnvironment({ maxTicks: 1, ticksPerDecision: 1 });
     const agent0 = createScriptedAgent({ id: 'dep:p1', kind: 'deployment', script: ['attack'] });
     const agent1 = createScriptedAgent({ id: 'bot:p2', kind: 'bot', script: ['block'] });
 
     await expect(runMatch(env, [agent0, agent1], SEED, { tokenBankStart: -1 })).rejects.toThrow();
+    expect(agent0.observeCallCount()).toBe(0);
     expect(agent0.decideCallCount()).toBe(0);
+    expect(agent1.observeCallCount()).toBe(0);
     expect(agent1.decideCallCount()).toBe(0);
+  });
+
+  it('AC1 end-to-end: two Deployment Agents at tokenBankStart 25000, run through buildCommandLog, produce a log carrying tokenBankStart 25000 and per-decision bankRemaining tracking each Agent\'s running total', async () => {
+    const env = createMockEnvironment({ maxTicks: 2, ticksPerDecision: 1 });
+    const agent0 = createScriptedAgent({
+      id: 'dep:p1',
+      kind: 'deployment',
+      script: ['attack', 'attack'],
+      usage: [{ tokensSpent: 100 }, { tokensSpent: 50 }],
+    });
+    const agent1 = createScriptedAgent({
+      id: 'dep:p2',
+      kind: 'deployment',
+      script: ['block', 'block'],
+      usage: [{ tokensSpent: 30 }, { tokensSpent: 20 }],
+    });
+
+    const matchResult = await runMatch(env, [agent0, agent1], SEED, { tokenBankStart: 25_000 });
+    const log = buildCommandLog(matchResult, {
+      environment: { id: env.id, version: env.version },
+      seed: SEED,
+      configHash: computeConfigHash({ tokenBankStart: 25_000 }),
+      agents: [
+        { id: agent0.id, kind: 'deployment', deployment: { provider: 'groq', endpoint: 'https://api.groq.com', model: 'm' } },
+        { id: agent1.id, kind: 'deployment', deployment: { provider: 'groq', endpoint: 'https://api.groq.com', model: 'm' } },
+      ],
+    });
+
+    expect(log.tokenBankStart).toBe(25_000);
+    const p1LogEntries = log.decisions.filter((entry) => entry.agentIndex === 0);
+    expect(p1LogEntries.map((entry) => entry.bankRemaining)).toStrictEqual([24_900, 24_850]);
+    const p2LogEntries = log.decisions.filter((entry) => entry.agentIndex === 1);
+    expect(p2LogEntries.map((entry) => entry.bankRemaining)).toStrictEqual([24_970, 24_950]);
+  });
+
+  it('demonstrates the Reflex-Mode scaffold switch via a scripted test double (story AC: "the next call uses max_tokens=8 and a bare-Action scaffold") -- not a real Deployment Scaffold, which is Story 3.1\'s scope', async () => {
+    const env = createMockEnvironment({ maxTicks: 2, ticksPerDecision: 1 });
+    const observedSystems: string[] = [];
+    // A test double, not the shared createScriptedAgent: it varies its
+    // Prompt's `system` scaffold text based on the reflexMode runMatch hands
+    // it, proving the switch the story's AC names is actually wired through
+    // -- without this story building the real Deployment Scaffold (Story
+    // 3.1's job) or a provider adapter (E3's job).
+    const switchingAgent: Agent = {
+      id: 'dep:switcher',
+      kind: 'deployment',
+      observe: (observation, budgetRemaining, reflexMode) => {
+        const system = reflexMode ? 'bare-action-scaffold' : 'full-scaffold';
+        observedSystems.push(system);
+        return { system, user: observation.state, budgetRemaining, reflexMode };
+      },
+      decide: async () => ({
+        action: 'attack',
+        tokensSpent: 100,
+        reasoningTokens: null,
+        reasoning: null,
+        rawResponse: 'attack',
+        provider: 'mock',
+        endpoint: 'mock',
+      }),
+    };
+    const bot = createScriptedAgent({ id: 'bot:p2', kind: 'bot', script: ['block', 'block'] });
+
+    await runMatch(env, [switchingAgent, bot], SEED, { tokenBankStart: 100 });
+
+    // First call: bank not yet empty, full scaffold. Second call: the first
+    // call's 100 tokensSpent emptied the bank, so this call is polled with
+    // reflexMode true and gets the bare-Action scaffold.
+    expect(observedSystems).toStrictEqual(['full-scaffold', 'bare-action-scaffold']);
   });
 });
 
