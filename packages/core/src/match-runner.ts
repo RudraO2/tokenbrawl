@@ -1,11 +1,11 @@
-import type {
-  Action,
-  Agent,
-  Decision,
-  DecisionEntry,
-  EnvironmentAdapter,
-  LoggedAction,
-  TerminalResult,
+import {
+  FALLBACK_ACTION,
+  type Agent,
+  type Decision,
+  type DecisionEntry,
+  type EnvironmentAdapter,
+  type LoggedAction,
+  type TerminalResult,
 } from '@tokenbrawl/contracts';
 import { DEFAULT_TOKEN_BANK_START, createTokenBank, debitTokenBank } from './token-bank';
 import type { TokenBank } from './token-bank';
@@ -31,7 +31,8 @@ export interface MatchOptions {
  * itself cannot express. `null` here records that the Agent was not
  * actionable for this Decision Point (inside a Commitment Window) and was
  * never polled -- distinct from a real chosen Action, and distinct from a
- * Parse Failure (out of scope; see `runMatch`).
+ * Parse Failure, which is logged as the Fallback Action (`'stand'`) with
+ * `parseFailure: true`, never as `null`.
  */
 export interface MatchDecisionEntry extends Omit<DecisionEntry, 'action'> {
   readonly action: LoggedAction | null;
@@ -140,17 +141,15 @@ export async function runMatch<TState>(
         throw new Error(`Agent "${agents[agentIndex].id}" decide() resolved without a Decision.`);
       }
 
-      if (decision.action === null) {
-        // Parse-failure fallback (the Fallback Action `stand`) is explicitly
-        // out of scope for this story. Scripted mock Agents never return a
-        // null Action, so reaching this branch means runMatch was driven
-        // with something other than the mock Agents this story ships.
-        throw new Error(
-          `Agent "${agents[agentIndex].id}" returned a null Action; parse-failure fallback is out of scope for this story.`,
-        );
-      }
-
-      const action: Action = decision.action;
+      // Parse Failure: no valid Action could be extracted. The Fallback
+      // Action (`stand`) is applied and never retried -- `decide()` above was
+      // already called exactly once for this Agent at this Decision Point,
+      // Parse Failure or not, so "no retry" falls out of there being no loop
+      // here rather than needing a guard (INV-1). The Fallback Action is a
+      // fixed constant, never derived from the previous Action, so it can
+      // never repeat it.
+      const parseFailure = decision.action === null;
+      const action: LoggedAction = parseFailure ? FALLBACK_ACTION : decision.action;
       actionsForStep[agentIndex] = action;
 
       const agent = agents[agentIndex];
@@ -160,7 +159,8 @@ export async function runMatch<TState>(
       // one above, so it is never validated or written to one here either.
       // A Bot whose `decide()` reports garbage `tokensSpent` therefore
       // cannot abort a Match: it "consumes nothing" structurally, not merely
-      // in what gets logged.
+      // in what gets logged. A Parse Failure still debits normally -- the
+      // provider still spent the tokens that produced the unparseable text.
       if (agent.kind === 'deployment') {
         if (pollResult === null) {
           throw new Error(`Agent "${agent.id}" was actionable but never polled -- this is a runMatch bug.`);
@@ -175,6 +175,7 @@ export async function runMatch<TState>(
           reasoningTokens: decision.reasoningTokens,
           bankRemaining: banks[agentIndex].remaining,
           reflexMode: pollResult.reflexMode,
+          ...(parseFailure ? { parseFailure: true } : {}),
           reasoning: decision.reasoning,
           rawResponse: decision.rawResponse,
           provider: decision.provider,
@@ -189,6 +190,7 @@ export async function runMatch<TState>(
           tick,
           agentIndex,
           action,
+          ...(parseFailure ? { parseFailure: true } : {}),
           reasoning: decision.reasoning,
           rawResponse: decision.rawResponse,
           provider: decision.provider,

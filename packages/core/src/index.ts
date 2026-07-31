@@ -56,3 +56,10 @@ export type { ReplayResult } from './replay';
 
 export { DEFAULT_TOKEN_BANK_START, REFLEX_MAX_TOKENS, maxTokensFor } from './token-bank';
 export type { TokenBank } from './token-bank';
+
+// ---------------------------------------------------------------------------
+// Story 1.6: Parse failures as a first-class metric.
+// ---------------------------------------------------------------------------
+
+export { computeParseFailureRates } from './metrics';
+export type { ParseFailureRate } from './metrics';

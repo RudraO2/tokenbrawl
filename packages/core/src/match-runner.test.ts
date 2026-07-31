@@ -459,6 +459,70 @@ describe('runMatch: Token Bank (Story 1.5, I/O matrix)', () => {
   });
 });
 
+describe('runMatch: Parse Failure (Story 1.6, I/O matrix)', () => {
+  it('Deployment Parse Failure: logs action stand, parseFailure true, verbatim rawResponse, and still debits the bank', async () => {
+    const env = createMockEnvironment({ maxTicks: 1, ticksPerDecision: 1 });
+    const agent0 = createScriptedAgent({
+      id: 'dep:p1',
+      kind: 'deployment',
+      script: [null],
+      usage: [{ tokensSpent: 40 }],
+    });
+    const agent1 = createScriptedAgent({ id: 'bot:p2', kind: 'bot', script: ['block'] });
+
+    const result = await runMatch(env, [agent0, agent1], SEED, { tokenBankStart: 25_000 });
+
+    const entry = result.decisions.find((d) => d.agentIndex === 0);
+    const expectedRawResponse = `null:${agent0.capturedPrompts()[0]?.user}`;
+    expect(entry).toMatchObject({
+      action: 'stand',
+      parseFailure: true,
+      rawResponse: expectedRawResponse,
+      tokensSpent: 40,
+      bankRemaining: 24_960,
+    });
+    expect(agent0.decideCallCount()).toBe(1);
+  });
+
+  it('Bot Parse Failure: logs action stand, parseFailure true, no banking fields', async () => {
+    const env = createMockEnvironment({ maxTicks: 1, ticksPerDecision: 1 });
+    const agent0 = createScriptedAgent({ id: 'bot:p1', kind: 'bot', script: [null] });
+    const agent1 = createScriptedAgent({ id: 'bot:p2', kind: 'bot', script: ['block'] });
+
+    const result = await runMatch(env, [agent0, agent1], SEED);
+
+    const entry = result.decisions.find((d) => d.agentIndex === 0);
+    expect(entry).toMatchObject({ action: 'stand', parseFailure: true });
+    expect(entry).not.toHaveProperty('tokensSpent');
+    expect(entry).not.toHaveProperty('bankRemaining');
+    expect(agent0.decideCallCount()).toBe(1);
+  });
+
+  it('a successful Decision never carries a parseFailure key at all', async () => {
+    const env = createMockEnvironment({ maxTicks: 1, ticksPerDecision: 1 });
+    const agent0 = createScriptedAgent({ id: 'bot:p1', kind: 'bot', script: ['attack'] });
+    const agent1 = createScriptedAgent({ id: 'bot:p2', kind: 'bot', script: ['block'] });
+
+    const result = await runMatch(env, [agent0, agent1], SEED);
+
+    for (const entry of result.decisions) {
+      expect(entry).not.toHaveProperty('parseFailure');
+    }
+  });
+
+  it('the Fallback Action is stand regardless of the Agent\'s previous logged Action, never a repeat', async () => {
+    const env = createMockEnvironment({ maxTicks: 2, ticksPerDecision: 1 });
+    const agent0 = createScriptedAgent({ id: 'bot:p1', kind: 'bot', script: ['attack', null] });
+    const agent1 = createScriptedAgent({ id: 'bot:p2', kind: 'bot', script: ['block', 'block'] });
+
+    const result = await runMatch(env, [agent0, agent1], SEED);
+
+    const p1Entries = result.decisions.filter((d) => d.agentIndex === 0);
+    expect(p1Entries[0]?.action).toBe('attack');
+    expect(p1Entries[1]).toMatchObject({ action: 'stand', parseFailure: true });
+  });
+});
+
 describe('match-runner.ts source text', () => {
   it('contains no wall-clock or timer identifier (INV-1 machine check)', () => {
     const filePath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'match-runner.ts');

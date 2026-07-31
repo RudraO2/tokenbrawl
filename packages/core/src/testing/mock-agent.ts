@@ -10,8 +10,8 @@ export interface ScriptedAgentUsage {
 export interface ScriptedAgentConfig {
   readonly id: string;
   readonly kind?: 'deployment' | 'bot';
-  /** Actions returned by `decide()` in call order. Mock Agents always return a valid `Action` -- parse-failure handling is out of scope. */
-  readonly script: readonly Action[];
+  /** Actions returned by `decide()` in call order. A `null` entry scripts a Parse Failure -- `decide()` resolves `action: null` for that call. */
+  readonly script: readonly (Action | null)[];
   /** Awaited inside `decide()` before resolving. Defaults to a no-op microtask yield -- inject `() => yieldMicrotasks(N)` to simulate latency. */
   readonly delay?: () => Promise<void>;
   /**
