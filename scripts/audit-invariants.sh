@@ -433,6 +433,49 @@ else
   skip "no package.json yet"
 fi
 
+# The other half of INV-8, and the reason it left the UNMECHANISED list in
+# Story 3.2: "every configured endpoint appears on the free-tier allowlist; a
+# paid-tier endpoint fails configuration validation."
+#
+# The allowlist is data (`free-tier.config.json`) because the story's AC5 asks
+# for configuration rather than constants -- but data alone enforces nothing.
+# What makes it a gate is that every adapter runs its endpoint through
+# `assertFreeTierEndpoint` at construction, and deleting that one call is an
+# invisible edit that no behavioural test in another package would notice. So
+# the call is required here, of every file that builds a provider client. A
+# future adapter (3.3's Cerebras and Google) is caught by the same sweep with
+# no edit to this script.
+free_tier_config="packages/providers/src/free-tier.config.json"
+if [ ! -f "$free_tier_config" ]; then
+  skip "no provider free-tier configuration yet"
+else
+  allowlist_broken=""
+
+  grep -q '"endpoints"' "$free_tier_config" \
+    || allowlist_broken="$allowlist_broken config-declares-no-endpoint-allowlist"
+  # A plaintext endpoint would put the API key on the wire in clear, and is
+  # never how a provider serves its free tier.
+  grep -qE '"http://' "$free_tier_config" \
+    && allowlist_broken="$allowlist_broken config-contains-a-plaintext-endpoint"
+
+  client_factories=$(grep -lE '^export function create[A-Za-z0-9]*Client' \
+    packages/providers/src/*.ts 2>/dev/null | grep -v '\.test\.ts')
+  if [ -z "$client_factories" ]; then
+    allowlist_broken="$allowlist_broken no-provider-client-factory-found"
+  else
+    for adapter in $client_factories; do
+      grep -q 'assertFreeTierEndpoint' "$adapter" \
+        || allowlist_broken="$allowlist_broken ${adapter}-does-not-validate-its-endpoint"
+    done
+  fi
+
+  if [ -n "$allowlist_broken" ]; then
+    fail "free-tier endpoint validation weakened:$allowlist_broken"
+  else
+    pass "every provider client validates its endpoint against the free-tier allowlist"
+  fi
+fi
+
 # --- Contracts must not drift ----------------------------------------------
 echo
 echo "CONTRACTS  frozen interfaces intact"
@@ -453,7 +496,6 @@ cat <<'EOF'
 UNMECHANISED — checked by test suite or human review, not by this script
   INV-5  metering probe classification correctness (requires live provider calls)
   INV-6  two endpoints of one model producing two leaderboard rows (needs results data)
-  INV-8  free-tier allowlist validation of configured endpoints (needs provider config)
   Parse failures  exactly-one-call-per-decision-point (belongs in the test suite)
 EOF
 
