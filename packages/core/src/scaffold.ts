@@ -73,6 +73,24 @@ export function assemblePrompt(
   budgetRemaining: number,
   reflexMode: boolean,
 ): Prompt {
+  // An Observation offering nothing to choose from is an Environment Adapter
+  // bug: an Agent with no legal Action should never have been polled at all.
+  // Failing here is loud and immediate; the alternative is showing a model an
+  // empty menu and then logging whatever it says as if it had been offered a
+  // choice, which corrupts a Match quietly and permanently.
+  if (observation.legalActions.length === 0) {
+    throw new Error('assemblePrompt: an Observation with no legal Actions cannot be turned into a Prompt.');
+  }
+
+  // `budgetRemaining` is printed to the model verbatim, so a NaN or a fraction
+  // reaches the prompt as text and cannot be caught downstream. The Token Bank
+  // guards its own arithmetic; this guards the one path that bypasses it.
+  if (!Number.isSafeInteger(budgetRemaining) || budgetRemaining < 0) {
+    throw new Error(
+      `assemblePrompt: budgetRemaining must be a non-negative integer, got ${budgetRemaining}`,
+    );
+  }
+
   const user = [
     `TICK: ${observation.tick}`,
     `TOKEN BUDGET REMAINING: ${budgetRemaining}`,

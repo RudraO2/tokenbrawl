@@ -91,6 +91,35 @@ describe('assemblePrompt (AC3: assembly is core-owned)', () => {
     expect(prompt.user).toContain(opaque);
   });
 
+  it('emits exactly the core-owned block and nothing else', () => {
+    // Pinned byte-for-byte rather than by `toContain`: AC3 says the adapter
+    // contributes *only* the opaque state string, and a containment assertion
+    // would still pass if core later appended something adapter-supplied.
+    expect(assemblePrompt(OBSERVATION, 4_321, false).user).toBe(
+      [
+        'TICK: 24',
+        'TOKEN BUDGET REMAINING: 4321',
+        'LEGAL ACTIONS: advance, retreat, attack, block',
+        'STATE:',
+        '{"opponentHealth":90,"selfHealth":100,"separation":7}',
+      ].join('\n'),
+    );
+  });
+
+  it('rejects an Observation with no legal Actions instead of showing an empty menu', () => {
+    expect(() => assemblePrompt({ ...OBSERVATION, legalActions: [] }, 5_000, false)).toThrow(
+      /no legal Actions/,
+    );
+  });
+
+  it('rejects a budget that is not a non-negative integer', () => {
+    expect(() => assemblePrompt(OBSERVATION, -1, false)).toThrow(/budgetRemaining/);
+    expect(() => assemblePrompt(OBSERVATION, Number.NaN, false)).toThrow(/budgetRemaining/);
+    expect(() => assemblePrompt(OBSERVATION, 1.5, false)).toThrow(/budgetRemaining/);
+    expect(() => assemblePrompt(OBSERVATION, Number.MAX_SAFE_INTEGER, false)).not.toThrow();
+    expect(() => assemblePrompt(OBSERVATION, 0, true)).not.toThrow();
+  });
+
   it('carries the legal Actions, the Tick, and the remaining budget', () => {
     const prompt = assemblePrompt(OBSERVATION, 4_321, false);
 
