@@ -372,14 +372,31 @@ describe('attacks, blocking and simultaneity', () => {
   });
 
   it('reduces damage when the defender blocked at the same Decision Point', () => {
+    // Stated as the clamped rule rather than a bare subtraction: Story 2.4
+    // configured `blockDamageReduction` to absorb a basic attack entirely, so
+    // the difference floors at zero instead of going negative. `Math.max` here
+    // mirrors the `Math.max(0, ...)` the resolution itself applies.
     const start = env.reset(SEED);
     const unblocked = env.step(start, ['attack', 'stand']);
     const blocked = env.step(start, ['attack', 'block']);
+    const unblockedDamage = DEFAULT_FIGHTER_CONFIG.initialHealth - unblocked.health[1];
+
     expect(DEFAULT_FIGHTER_CONFIG.initialHealth - blocked.health[1]).toBe(
-      DEFAULT_FIGHTER_CONFIG.initialHealth -
-        unblocked.health[1] -
-        DEFAULT_FIGHTER_CONFIG.blockDamageReduction,
+      Math.max(0, unblockedDamage - DEFAULT_FIGHTER_CONFIG.blockDamageReduction),
     );
+  });
+
+  it('subtracts exactly the reduction when the reduction is smaller than the hit', () => {
+    // The case the assertion above can no longer see now that a guard absorbs
+    // a basic attack: with a partial reduction, blocking must subtract that
+    // amount precisely -- not round it, not zero the hit, not ignore it.
+    const partial = createFighterEnvironment({ ...CLOSE_QUARTERS, blockDamageReduction: 2 });
+    const start = partial.reset(SEED);
+    const unblocked = partial.step(start, ['attack', 'stand']);
+    const blocked = partial.step(start, ['attack', 'block']);
+
+    expect(blocked.health[1] - unblocked.health[1]).toBe(2);
+    expect(blocked.health[1]).toBeLessThan(DEFAULT_FIGHTER_CONFIG.initialHealth);
   });
 
   it('never lets damage push health below zero', () => {
@@ -626,7 +643,12 @@ describe('attack Commitment Windows (AC1)', () => {
     });
     const start = spaced.reset(SEED);
     const escaped = spaced.step(start, ['attack', 'retreat']);
-    const stood = spaced.step(start, ['attack', 'block']);
+    // `stand`, not `block`: the control has to hold position *without*
+    // guarding, or it stops isolating movement. Since Story 2.4 raised
+    // `blockDamageReduction` to absorb a basic attack outright, a blocking
+    // control would show the same untouched health as the escape and the case
+    // would pass for the wrong reason.
+    const stood = spaced.step(start, ['attack', 'stand']);
 
     expect(
       DEFAULT_FIGHTER_CONFIG.attackWindow.startup * DEFAULT_FIGHTER_CONFIG.moveUnitsPerTick,

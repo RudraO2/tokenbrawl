@@ -91,7 +91,26 @@ export const DEFAULT_FIGHTER_CONFIG: FighterConfig = {
   specialMeterCost: 50,
   attackWindow: { startup: 4, active: 4, recovery: 32 },
   specialWindow: { startup: 10, active: 5, recovery: 45 },
-  blockDamageReduction: 5,
+  /**
+   * A guard absorbs a basic attack completely: `attackDamage` (7) plus the
+   * largest `damageJitter` draw (1) is exactly 8.
+   *
+   * Story 2.4 raised this from 5, and it is the single number that made the
+   * skill-separation gate reachable. At 5 a guard denied 5 damage but cost the
+   * guarding fighter its own attack -- worth about 7 -- so blocking was
+   * strictly dominated by trading, and *no* policy could beat a bot that
+   * simply attacks whenever it is in range. An exhaustive search over all 64
+   * in-range policies confirmed it: zero of them beat the aggressive bot at a
+   * reduction of 5, under any Commitment Window shape tried. Defensive skill
+   * did not merely underperform, it did not exist.
+   *
+   * Full absorption is not an absolute defence, which is what keeps it from
+   * becoming the only Action worth choosing: `specialDamage` (16) still puts 8
+   * through a guard, so the meter-gated heavy option is the answer to a
+   * fighter that holds one -- and a fighter that only ever blocks deals
+   * nothing and draws at best.
+   */
+  blockDamageReduction: 8,
   meterOnHitLanded: 12,
   meterOnHitTaken: 6,
   maxMeter: 100,

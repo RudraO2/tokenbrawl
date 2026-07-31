@@ -1,0 +1,78 @@
+{
+  "story": "2.4",
+  "passed": true,
+  "environment": {
+    "id": "fighter-1v1",
+    "version": "1.0.0"
+  },
+  "configHash": "891e524089af5b88da76fcfb9149be945cb0d33738d2eda472498475180b48a2",
+  "seedBase": 20260731,
+  "seedCount": 100,
+  "totalMatches": 600,
+  "distinctMatchIds": 600,
+  "bootstrap": {
+    "method": "percentile",
+    "resamples": 2000,
+    "seed": 987654321,
+    "confidenceBasisPoints": 9500
+  },
+  "pairings": [
+    {
+      "stronger": "spacing-aware",
+      "weaker": "random",
+      "matches": 200,
+      "koMatches": 0,
+      "thresholdBasisPoints": 6500,
+      "winRateBasisPoints": 9950,
+      "ciLowerBasisPoints": 9850,
+      "ciUpperBasisPoints": 10000,
+      "meetsThreshold": true
+    },
+    {
+      "stronger": "spacing-aware",
+      "weaker": "aggressive",
+      "matches": 200,
+      "koMatches": 200,
+      "thresholdBasisPoints": 5500,
+      "winRateBasisPoints": 8700,
+      "ciLowerBasisPoints": 8200,
+      "ciUpperBasisPoints": 9150,
+      "meetsThreshold": true
+    },
+    {
+      "stronger": "aggressive",
+      "weaker": "random",
+      "matches": 200,
+      "koMatches": 78,
+      "thresholdBasisPoints": 5000,
+      "winRateBasisPoints": 8800,
+      "ciLowerBasisPoints": 8350,
+      "ciUpperBasisPoints": 9250,
+      "meetsThreshold": true
+    }
+  ],
+  "ladder": [
+    {
+      "agent": "spacing-aware",
+      "matches": 400,
+      "winRateBasisPoints": 9325,
+      "ciLowerBasisPoints": 9050,
+      "ciUpperBasisPoints": 9550
+    },
+    {
+      "agent": "aggressive",
+      "matches": 400,
+      "winRateBasisPoints": 5050,
+      "ciLowerBasisPoints": 4575,
+      "ciUpperBasisPoints": 5537
+    },
+    {
+      "agent": "random",
+      "matches": 400,
+      "winRateBasisPoints": 625,
+      "ciLowerBasisPoints": 412,
+      "ciUpperBasisPoints": 862
+    }
+  ],
+  "failures": []
+}

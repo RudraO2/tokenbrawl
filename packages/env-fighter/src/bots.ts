@@ -13,7 +13,7 @@
 
 import type { Action, Agent, Decision, Observation, Prompt } from '@tokenbrawl/contracts';
 import { DEFAULT_FIGHTER_CONFIG, type FighterConfig } from './config';
-import { COMMITTED_ATTACK, PHASE_RECOVERY, rangeForCode } from './frames';
+import { COMMITTED_ATTACK, PHASE_IDLE, rangeForCode } from './frames';
 import { mixSeed, nextRngState } from './prng';
 
 /** The subset of `environment.ts`'s `observe().state` JSON a bot reads. */
@@ -109,11 +109,30 @@ export function createAggressiveBot(
 }
 
 /**
- * Holds `attackRange`: advances when the opponent is out of it, retreats
- * when well inside it, and attacks only when the opponent is inside it.
- * Overrides the hold to close and attack whenever the opponent's
- * Commitment Window is observed in recovery, punishing the whiff rather
- * than continuing to kite.
+ * Closes to `attackRange`, then plays off the opponent's Commitment Window:
+ * guards while the opponent is free to act, and attacks the moment the
+ * opponent has committed to one.
+ *
+ * This is the only one of the three bots that reads `opponentPhase` and acts
+ * on it, and Story 2.4's gate is what turned that from a decoration into an
+ * edge. Two facts about the environment make the rule the right one:
+ *
+ *   - A hit lands on anyone inside the range band who did not submit `block`,
+ *     whatever phase they are in. So "punishing recovery" buys nothing on its
+ *     own -- an opponent's recovery is not what makes it hittable, being in
+ *     range is. What recovery *does* guarantee is that no hit is coming back
+ *     this Decision Point, which is what makes attacking into it free.
+ *   - Attacking opens a Commitment Window longer than the Decision Point
+ *     cadence, so a fighter that attacks is unactionable when the opponent
+ *     next chooses. Trading blows is therefore always even, and the only way
+ *     to come out ahead is to spend the Decision Points where a hit *is*
+ *     coming on a guard that absorbs it (`blockDamageReduction`).
+ *
+ * Story 2.3's version retreated whenever it was inside `attackRange` and
+ * attacked only at the exact boundary, which left it unable to punish
+ * anything: against the aggressive bot it mirrored move for move into a
+ * double KO, and it lost to the random bot outright. See the Story 2.4 spec
+ * for the measurements.
  */
 export function createSpacingBot(
   id: string,
@@ -131,13 +150,17 @@ export function createSpacingBot(
       const { state } = readPrompt(prompt);
       let action: Action;
 
-      if (state.opponentPhase === PHASE_RECOVERY) {
-        action = state.separation <= attackRange ? 'attack' : 'advance';
-      } else if (state.separation > attackRange) {
+      if (state.separation > attackRange) {
+        // Out of range: nothing can be landed or received, so close.
         action = 'advance';
-      } else if (state.separation < attackRange) {
-        action = 'retreat';
+      } else if (state.opponentPhase === PHASE_IDLE) {
+        // The opponent is free to act, so a hit may be coming this Decision
+        // Point. A guard costs this bot its own attack and denies the
+        // opponent's -- an even trade in tempo, and a winning one in damage.
+        action = 'block';
       } else {
+        // The opponent is inside a Commitment Window: it cannot guard, and
+        // (in recovery) it cannot answer either. A free hit.
         action = 'attack';
       }
 

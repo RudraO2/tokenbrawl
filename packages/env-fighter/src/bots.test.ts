@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest';
 import { buildCommandLog, computeConfigHash, validateCommandLog } from '../../core/src/command-log';
 import { runMatch } from '../../core/src/match-runner';
 import { createAggressiveBot, createRandomBot, createSpacingBot } from './bots';
-import { COMMITTED_ATTACK, PHASE_RECOVERY, rangeForCode } from './frames';
+import { COMMITTED_ATTACK, PHASE_IDLE, PHASE_RECOVERY, PHASE_STARTUP, rangeForCode } from './frames';
 import { DEFAULT_FIGHTER_CONFIG } from './config';
 import { createFighterEnvironment } from './environment';
 
@@ -105,22 +105,57 @@ describe('Baseline Bots (Story 2.3)', () => {
       expect(decision.action).not.toBe('attack');
     });
 
-    it('attacks when the opponent is inside attackRange and not vulnerable', async () => {
+    it('guards rather than trading when the opponent is in range and free to act', async () => {
+      // Story 2.3 attacked here, and Story 2.4's gate measured what that costs:
+      // an attack opens a Commitment Window longer than the Decision Point
+      // cadence, so trading with an opponent who is free to answer is always
+      // even at best. A guard absorbs the incoming hit outright and gives up
+      // only tempo, which is what turns a phase-aware read into an edge.
       const config = DEFAULT_FIGHTER_CONFIG;
       const attackRange = rangeForCode(config, COMMITTED_ATTACK);
       const env = createFighterEnvironment({ startPosition: [500, 500 + attackRange] });
       const observation = env.observe(env.reset(SEED), 0);
+      const parsed = JSON.parse(observation.state) as { opponentPhase: number; separation: number };
+      expect(parsed.opponentPhase).toBe(PHASE_IDLE);
+      expect(parsed.separation).toBe(attackRange);
+
       const bot = createSpacingBot('bot:spacing');
       const decision = await bot.decide(bot.observe(observation, Number.MAX_SAFE_INTEGER, false));
-      expect(decision.action).toBe('attack');
+      expect(decision.action).toBe('block');
     });
 
-    it('retreats to hold range rather than overextending well inside attackRange', async () => {
+    it('guards from well inside attackRange too, rather than giving up the ground', async () => {
+      // The boundary is not what decides the read -- the opponent's phase is.
+      // Retreating here (Story 2.3's rule) surrendered space every Decision
+      // Point and eventually backed the bot into the arena wall with nothing
+      // to show for it.
       const env = createFighterEnvironment({ startPosition: [460, 510] });
       const observation = env.observe(env.reset(SEED), 0);
       const bot = createSpacingBot('bot:spacing');
       const decision = await bot.decide(bot.observe(observation, Number.MAX_SAFE_INTEGER, false));
-      expect(decision.action).toBe('retreat');
+      expect(decision.action).toBe('block');
+    });
+
+    it('attacks a committed opponent that has not reached recovery yet', async () => {
+      // The rule is "the opponent has committed", not "the opponent is
+      // recovering": a fighter inside any Commitment Window cannot guard, so
+      // the hit lands either way. This pins the startup half of that branch,
+      // which the recovery cases below cannot distinguish on their own.
+      const env = createFighterEnvironment({ startPosition: [460, 510] });
+      const state = env.step(env.reset(SEED), [null, 'attack']);
+      const midWindow = {
+        ...state,
+        commitmentRemaining: [state.commitmentRemaining[0], DEFAULT_FIGHTER_CONFIG.attackWindow.startup +
+          DEFAULT_FIGHTER_CONFIG.attackWindow.active +
+          DEFAULT_FIGHTER_CONFIG.attackWindow.recovery] as [number, number],
+      };
+      const observation = env.observe(midWindow, 0);
+      const parsed = JSON.parse(observation.state) as { opponentPhase: number };
+      expect(parsed.opponentPhase).toBe(PHASE_STARTUP);
+
+      const bot = createSpacingBot('bot:spacing');
+      const decision = await bot.decide(bot.observe(observation, Number.MAX_SAFE_INTEGER, false));
+      expect(decision.action).toBe('attack');
     });
 
     it('punishes an observed recovery even from well inside attackRange (AC2)', async () => {
