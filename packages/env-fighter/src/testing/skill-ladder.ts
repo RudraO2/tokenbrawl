@@ -150,13 +150,16 @@ export async function runSkillLadder(
       // `matchId`s (AD-12) -- a pairing measured from one side only would
       // report any side advantage in the engine as skill.
       for (const strongerAgentIndex of [0, 1] as const) {
-        const weakerAgentIndex = strongerAgentIndex === 0 ? 1 : 0;
-        const agents: [Agent, Agent] = [
-          createBot(RANDOM_BOT_ID, seed, 0, config),
-          createBot(RANDOM_BOT_ID, seed, 1, config),
-        ];
-        agents[strongerAgentIndex] = createBot(pairing.stronger, seed, strongerAgentIndex, config);
-        agents[weakerAgentIndex] = createBot(pairing.weaker, seed, weakerAgentIndex, config);
+        const agents: [Agent, Agent] =
+          strongerAgentIndex === 0
+            ? [
+                createBot(pairing.stronger, seed, 0, config),
+                createBot(pairing.weaker, seed, 1, config),
+              ]
+            : [
+                createBot(pairing.weaker, seed, 0, config),
+                createBot(pairing.stronger, seed, 1, config),
+              ];
 
         const result = await runMatch(createFighterEnvironment(overrides), agents, seed);
 

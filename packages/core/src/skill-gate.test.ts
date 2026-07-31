@@ -75,9 +75,31 @@ describe('evaluateSkillGate', () => {
 
     expect(verdict.passed).toBe(false);
     expect(verdict.failures.join('\n')).toMatch(/CI lower bound/);
-    expect(verdict.failures.some((failure) => /not strictly ordered|intervals overlap/.test(failure))).toBe(
-      true,
-    );
+    expect(verdict.failures.some((failure) => /not strictly ordered/.test(failure))).toBe(true);
+    expect(verdict.failures.some((failure) => /intervals overlap/.test(failure))).toBe(true);
+  });
+
+  it('fails a ladder whose Agents are exactly tied, not merely overlapping', () => {
+    // "Strictly ordered" (AC1) has to reject a tie, and a tie is the one case
+    // the interval check cannot stand in for -- found by mutation: relaxing
+    // the ordering comparison from `<=` to `<` passed every other case in this
+    // file, because no other sample produces two identical win rates.
+    //
+    // Every pairing here is an exact 50/50, so all three Agents sit at 5000 bp
+    // and each adjacent pair in the ladder is tied rather than close.
+    const verdict = evaluate([
+      pairing('a', 'b', 100, 0),
+      pairing('a', 'c', 100, 0),
+      pairing('b', 'c', 100, 0),
+    ]);
+
+    expect(verdict.ladder.map((row) => row.interval.pointEstimateBasisPoints)).toStrictEqual([
+      5000, 5000, 5000,
+    ]);
+    // One per adjacent pair: both ties are named, not just the first.
+    expect(verdict.failures.filter((failure) => /not strictly ordered/.test(failure))).toHaveLength(2);
+    expect(verdict.pairings.every((entry) => entry.meetsThreshold)).toBe(true);
+    expect(verdict.passed).toBe(false);
   });
 
   it('fails a pairing whose point estimate clears the threshold but whose CI does not', () => {
