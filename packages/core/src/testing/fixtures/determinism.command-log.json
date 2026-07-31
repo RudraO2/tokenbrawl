@@ -1,0 +1,428 @@
+{
+  "schemaVersion": "1.0.0",
+  "matchId": "1f3cba91e623555e06a4e2647d5d4f3ae207414e6e3c580200fadde31783ba92",
+  "environment": {
+    "id": "mock-environment",
+    "version": "1.0.0"
+  },
+  "seed": 42,
+  "configHash": "ae5312539059fe28f927cc6a0e512d198dedc0ba03e24bcdb6a2b34a30d54203",
+  "agents": [
+    {
+      "id": "bot:p1",
+      "kind": "bot"
+    },
+    {
+      "id": "bot:p2",
+      "kind": "bot"
+    }
+  ],
+  "decisions": [
+    {
+      "tick": 0,
+      "agentIndex": 0,
+      "action": "advance",
+      "tokensSpent": 0,
+      "reasoningTokens": 0,
+      "reasoning": null,
+      "rawResponse": "advance:{\"opponentHealth\":30,\"selfHealth\":30,\"tick\":0}",
+      "provider": "mock",
+      "endpoint": "mock"
+    },
+    {
+      "tick": 0,
+      "agentIndex": 1,
+      "action": "block",
+      "tokensSpent": 0,
+      "reasoningTokens": 0,
+      "reasoning": null,
+      "rawResponse": "block:{\"opponentHealth\":30,\"selfHealth\":30,\"tick\":0}",
+      "provider": "mock",
+      "endpoint": "mock"
+    },
+    {
+      "tick": 1,
+      "agentIndex": 0,
+      "action": "attack",
+      "tokensSpent": 0,
+      "reasoningTokens": 0,
+      "reasoning": null,
+      "rawResponse": "attack:{\"opponentHealth\":30,\"selfHealth\":30,\"tick\":1}",
+      "provider": "mock",
+      "endpoint": "mock"
+    },
+    {
+      "tick": 1,
+      "agentIndex": 1,
+      "action": "advance",
+      "tokensSpent": 0,
+      "reasoningTokens": 0,
+      "reasoning": null,
+      "rawResponse": "advance:{\"opponentHealth\":30,\"selfHealth\":30,\"tick\":1}",
+      "provider": "mock",
+      "endpoint": "mock"
+    },
+    {
+      "tick": 2,
+      "agentIndex": 0,
+      "action": "block",
+      "tokensSpent": 0,
+      "reasoningTokens": 0,
+      "reasoning": null,
+      "rawResponse": "block:{\"opponentHealth\":25,\"selfHealth\":30,\"tick\":2}",
+      "provider": "mock",
+      "endpoint": "mock"
+    },
+    {
+      "tick": 2,
+      "agentIndex": 1,
+      "action": "attack",
+      "tokensSpent": 0,
+      "reasoningTokens": 0,
+      "reasoning": null,
+      "rawResponse": "attack:{\"opponentHealth\":30,\"selfHealth\":25,\"tick\":2}",
+      "provider": "mock",
+      "endpoint": "mock"
+    },
+    {
+      "tick": 3,
+      "agentIndex": 0,
+      "action": "special",
+      "tokensSpent": 0,
+      "reasoningTokens": 0,
+      "reasoning": null,
+      "rawResponse": "special:{\"opponentHealth\":25,\"selfHealth\":24,\"tick\":3}",
+      "provider": "mock",
+      "endpoint": "mock"
+    },
+    {
+      "tick": 3,
+      "agentIndex": 1,
+      "action": "retreat",
+      "tokensSpent": 0,
+      "reasoningTokens": 0,
+      "reasoning": null,
+      "rawResponse": "retreat:{\"opponentHealth\":24,\"selfHealth\":25,\"tick\":3}",
+      "provider": "mock",
+      "endpoint": "mock"
+    },
+    {
+      "tick": 4,
+      "agentIndex": 1,
+      "action": "special",
+      "tokensSpent": 0,
+      "reasoningTokens": 0,
+      "reasoning": null,
+      "rawResponse": "special:{\"opponentHealth\":24,\"selfHealth\":16,\"tick\":4}",
+      "provider": "mock",
+      "endpoint": "mock"
+    },
+    {
+      "tick": 6,
+      "agentIndex": 0,
+      "action": "retreat",
+      "tokensSpent": 0,
+      "reasoningTokens": 0,
+      "reasoning": null,
+      "rawResponse": "retreat:{\"opponentHealth\":16,\"selfHealth\":14,\"tick\":6}",
+      "provider": "mock",
+      "endpoint": "mock"
+    },
+    {
+      "tick": 7,
+      "agentIndex": 0,
+      "action": "attack",
+      "tokensSpent": 0,
+      "reasoningTokens": 0,
+      "reasoning": null,
+      "rawResponse": "attack:{\"opponentHealth\":16,\"selfHealth\":14,\"tick\":7}",
+      "provider": "mock",
+      "endpoint": "mock"
+    },
+    {
+      "tick": 7,
+      "agentIndex": 1,
+      "action": "advance",
+      "tokensSpent": 0,
+      "reasoningTokens": 0,
+      "reasoning": null,
+      "rawResponse": "advance:{\"opponentHealth\":14,\"selfHealth\":16,\"tick\":7}",
+      "provider": "mock",
+      "endpoint": "mock"
+    },
+    {
+      "tick": 8,
+      "agentIndex": 0,
+      "action": "advance",
+      "tokensSpent": 0,
+      "reasoningTokens": 0,
+      "reasoning": null,
+      "rawResponse": "advance:{\"opponentHealth\":11,\"selfHealth\":14,\"tick\":8}",
+      "provider": "mock",
+      "endpoint": "mock"
+    },
+    {
+      "tick": 8,
+      "agentIndex": 1,
+      "action": "block",
+      "tokensSpent": 0,
+      "reasoningTokens": 0,
+      "reasoning": null,
+      "rawResponse": "block:{\"opponentHealth\":14,\"selfHealth\":11,\"tick\":8}",
+      "provider": "mock",
+      "endpoint": "mock"
+    },
+    {
+      "tick": 9,
+      "agentIndex": 0,
+      "action": "block",
+      "tokensSpent": 0,
+      "reasoningTokens": 0,
+      "reasoning": null,
+      "rawResponse": "block:{\"opponentHealth\":11,\"selfHealth\":14,\"tick\":9}",
+      "provider": "mock",
+      "endpoint": "mock"
+    },
+    {
+      "tick": 9,
+      "agentIndex": 1,
+      "action": "attack",
+      "tokensSpent": 0,
+      "reasoningTokens": 0,
+      "reasoning": null,
+      "rawResponse": "attack:{\"opponentHealth\":14,\"selfHealth\":11,\"tick\":9}",
+      "provider": "mock",
+      "endpoint": "mock"
+    },
+    {
+      "tick": 10,
+      "agentIndex": 0,
+      "action": "retreat",
+      "tokensSpent": 0,
+      "reasoningTokens": 0,
+      "reasoning": null,
+      "rawResponse": "retreat:{\"opponentHealth\":11,\"selfHealth\":8,\"tick\":10}",
+      "provider": "mock",
+      "endpoint": "mock"
+    },
+    {
+      "tick": 10,
+      "agentIndex": 1,
+      "action": "retreat",
+      "tokensSpent": 0,
+      "reasoningTokens": 0,
+      "reasoning": null,
+      "rawResponse": "retreat:{\"opponentHealth\":8,\"selfHealth\":11,\"tick\":10}",
+      "provider": "mock",
+      "endpoint": "mock"
+    },
+    {
+      "tick": 11,
+      "agentIndex": 0,
+      "action": "advance",
+      "tokensSpent": 0,
+      "reasoningTokens": 0,
+      "reasoning": null,
+      "rawResponse": "advance:{\"opponentHealth\":11,\"selfHealth\":8,\"tick\":11}",
+      "provider": "mock",
+      "endpoint": "mock"
+    },
+    {
+      "tick": 11,
+      "agentIndex": 1,
+      "action": "advance",
+      "tokensSpent": 0,
+      "reasoningTokens": 0,
+      "reasoning": null,
+      "rawResponse": "advance:{\"opponentHealth\":8,\"selfHealth\":11,\"tick\":11}",
+      "provider": "mock",
+      "endpoint": "mock"
+    },
+    {
+      "tick": 12,
+      "agentIndex": 0,
+      "action": "block",
+      "tokensSpent": 0,
+      "reasoningTokens": 0,
+      "reasoning": null,
+      "rawResponse": "block:{\"opponentHealth\":11,\"selfHealth\":8,\"tick\":12}",
+      "provider": "mock",
+      "endpoint": "mock"
+    },
+    {
+      "tick": 12,
+      "agentIndex": 1,
+      "action": "block",
+      "tokensSpent": 0,
+      "reasoningTokens": 0,
+      "reasoning": null,
+      "rawResponse": "block:{\"opponentHealth\":8,\"selfHealth\":11,\"tick\":12}",
+      "provider": "mock",
+      "endpoint": "mock"
+    },
+    {
+      "tick": 13,
+      "agentIndex": 0,
+      "action": "retreat",
+      "tokensSpent": 0,
+      "reasoningTokens": 0,
+      "reasoning": null,
+      "rawResponse": "retreat:{\"opponentHealth\":11,\"selfHealth\":8,\"tick\":13}",
+      "provider": "mock",
+      "endpoint": "mock"
+    },
+    {
+      "tick": 13,
+      "agentIndex": 1,
+      "action": "retreat",
+      "tokensSpent": 0,
+      "reasoningTokens": 0,
+      "reasoning": null,
+      "rawResponse": "retreat:{\"opponentHealth\":8,\"selfHealth\":11,\"tick\":13}",
+      "provider": "mock",
+      "endpoint": "mock"
+    },
+    {
+      "tick": 14,
+      "agentIndex": 0,
+      "action": "advance",
+      "tokensSpent": 0,
+      "reasoningTokens": 0,
+      "reasoning": null,
+      "rawResponse": "advance:{\"opponentHealth\":11,\"selfHealth\":8,\"tick\":14}",
+      "provider": "mock",
+      "endpoint": "mock"
+    },
+    {
+      "tick": 14,
+      "agentIndex": 1,
+      "action": "advance",
+      "tokensSpent": 0,
+      "reasoningTokens": 0,
+      "reasoning": null,
+      "rawResponse": "advance:{\"opponentHealth\":8,\"selfHealth\":11,\"tick\":14}",
+      "provider": "mock",
+      "endpoint": "mock"
+    },
+    {
+      "tick": 15,
+      "agentIndex": 0,
+      "action": "block",
+      "tokensSpent": 0,
+      "reasoningTokens": 0,
+      "reasoning": null,
+      "rawResponse": "block:{\"opponentHealth\":11,\"selfHealth\":8,\"tick\":15}",
+      "provider": "mock",
+      "endpoint": "mock"
+    },
+    {
+      "tick": 15,
+      "agentIndex": 1,
+      "action": "block",
+      "tokensSpent": 0,
+      "reasoningTokens": 0,
+      "reasoning": null,
+      "rawResponse": "block:{\"opponentHealth\":8,\"selfHealth\":11,\"tick\":15}",
+      "provider": "mock",
+      "endpoint": "mock"
+    },
+    {
+      "tick": 16,
+      "agentIndex": 0,
+      "action": "retreat",
+      "tokensSpent": 0,
+      "reasoningTokens": 0,
+      "reasoning": null,
+      "rawResponse": "retreat:{\"opponentHealth\":11,\"selfHealth\":8,\"tick\":16}",
+      "provider": "mock",
+      "endpoint": "mock"
+    },
+    {
+      "tick": 16,
+      "agentIndex": 1,
+      "action": "retreat",
+      "tokensSpent": 0,
+      "reasoningTokens": 0,
+      "reasoning": null,
+      "rawResponse": "retreat:{\"opponentHealth\":8,\"selfHealth\":11,\"tick\":16}",
+      "provider": "mock",
+      "endpoint": "mock"
+    },
+    {
+      "tick": 17,
+      "agentIndex": 0,
+      "action": "advance",
+      "tokensSpent": 0,
+      "reasoningTokens": 0,
+      "reasoning": null,
+      "rawResponse": "advance:{\"opponentHealth\":11,\"selfHealth\":8,\"tick\":17}",
+      "provider": "mock",
+      "endpoint": "mock"
+    },
+    {
+      "tick": 17,
+      "agentIndex": 1,
+      "action": "advance",
+      "tokensSpent": 0,
+      "reasoningTokens": 0,
+      "reasoning": null,
+      "rawResponse": "advance:{\"opponentHealth\":8,\"selfHealth\":11,\"tick\":17}",
+      "provider": "mock",
+      "endpoint": "mock"
+    },
+    {
+      "tick": 18,
+      "agentIndex": 0,
+      "action": "block",
+      "tokensSpent": 0,
+      "reasoningTokens": 0,
+      "reasoning": null,
+      "rawResponse": "block:{\"opponentHealth\":11,\"selfHealth\":8,\"tick\":18}",
+      "provider": "mock",
+      "endpoint": "mock"
+    },
+    {
+      "tick": 18,
+      "agentIndex": 1,
+      "action": "block",
+      "tokensSpent": 0,
+      "reasoningTokens": 0,
+      "reasoning": null,
+      "rawResponse": "block:{\"opponentHealth\":8,\"selfHealth\":11,\"tick\":18}",
+      "provider": "mock",
+      "endpoint": "mock"
+    },
+    {
+      "tick": 19,
+      "agentIndex": 0,
+      "action": "retreat",
+      "tokensSpent": 0,
+      "reasoningTokens": 0,
+      "reasoning": null,
+      "rawResponse": "retreat:{\"opponentHealth\":11,\"selfHealth\":8,\"tick\":19}",
+      "provider": "mock",
+      "endpoint": "mock"
+    },
+    {
+      "tick": 19,
+      "agentIndex": 1,
+      "action": "retreat",
+      "tokensSpent": 0,
+      "reasoningTokens": 0,
+      "reasoning": null,
+      "rawResponse": "retreat:{\"opponentHealth\":8,\"selfHealth\":11,\"tick\":19}",
+      "provider": "mock",
+      "endpoint": "mock"
+    }
+  ],
+  "result": {
+    "outcome": "p2",
+    "endTick": 20,
+    "endReason": "timeout",
+    "healthRemaining": [
+      8,
+      11
+    ]
+  },
+  "finalStateHash": "e7e3c2868bf628201d1756e5e3b037829df85e53e5cfe2a802ee28e0da4bc16f"
+}

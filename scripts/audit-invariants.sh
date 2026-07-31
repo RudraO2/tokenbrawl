@@ -36,9 +36,54 @@ grep_core() {
   local dirs
   mapfile -t dirs < <(existing_core)
   [ ${#dirs[@]} -eq 0 ] && return 1
-  grep -rnE --include='*.ts' --include='*.tsx' \
+  # Every extension Node will actually execute, not just TypeScript: the
+  # cross-process replay harness introduced plain-JS module-resolution hooks
+  # under packages/core, and a wall-clock call or unseeded random in *those*
+  # would be just as invariant-breaking while being invisible to a
+  # TypeScript-only sweep. `.js`/`.jsx` matter as much as `.mjs`: every package
+  # here is `"type": "module"`, so the same hook logic saved as `.js` loads
+  # identically — listing only the extensions that happen to exist today would
+  # leave the hole one rename wide.
+  grep -rnE --include='*.ts' --include='*.tsx' --include='*.mts' --include='*.cts' \
+    --include='*.js' --include='*.jsx' --include='*.mjs' --include='*.cjs' \
     --exclude-dir=node_modules --exclude-dir=dist --exclude-dir=build --exclude-dir=coverage --exclude-dir=.turbo \
     "$pattern" "${dirs[@]}" 2>/dev/null
+}
+
+# Whether the runner Vitest would actually use still discovers the replay gate.
+#
+# Grepping vitest.config.ts for `include`/`exclude` was wrong in both
+# directions: a single-line `test: { exclude: ['src/replay.test.ts'] },` evaded
+# a line-anchored pattern (the gate silently deleted, audit green), while a
+# benign `coverage: { exclude: [...] }` failed the entire audit. `vitest list`
+# answers the real question — does the runner see these cases — with no pattern
+# guessing at all. It only enumerates; it runs no test, and costs ~3s.
+#
+# When Vitest is not installed (a fresh clone with no `npm ci`) there is nothing
+# to ask, so fall back to a text scan that keeps the false negative closed and
+# skips `coverage` blocks to keep the false positive closed.
+vitest_discovers_replay_gate() {
+  local config="$1"
+  local listed
+
+  if [ -x node_modules/.bin/vitest ] || [ -f node_modules/vitest/package.json ]; then
+    listed=$(npx vitest list --root packages/core 2>/dev/null)
+    printf '%s' "$listed" | grep -q 'replay\.test\.ts' || return 1
+    printf '%s' "$listed" | grep -q '100 consecutive in-process replays' || return 1
+    printf '%s' "$listed" | grep -q '100 separate processes' || return 1
+    return 0
+  fi
+
+  awk '
+    /coverage[ \t]*:/ { in_cov = 1 }
+    in_cov {
+      depth += gsub(/\{/, "{") - gsub(/\}/, "}")
+      if (depth <= 0) { in_cov = 0; depth = 0 }
+      next
+    }
+    /(^|[^A-Za-z0-9_])(include|exclude)[ \t]*:/ { found = 1 }
+    END { exit found ? 1 : 0 }
+  ' "$config"
 }
 
 echo
@@ -82,6 +127,113 @@ else
     echo "$hits" | sed 's/^/          /'
   else
     pass "no floating-point in simulation code"
+  fi
+
+  # The 100-replay gate itself. The assertions live in the test suite (only a
+  # test runner can actually replay a log), but a gate that can be deleted,
+  # skipped, or quietly turned down to one iteration without CI noticing is
+  # not a gate — so its existence and its iteration counts are checked here.
+  replay_test="packages/core/src/replay.test.ts"
+  replay_child="packages/core/src/testing/replay-child.ts"
+  replay_fixture="packages/core/src/testing/fixtures/determinism.command-log.json"
+  # The cross-process half cannot run without the resolution hooks: docs/contracts
+  # is not linked into node_modules, so a spawned child dies on the bare
+  # @tokenbrawl/contracts specifier before it imports anything.
+  replay_hooks="packages/core/src/testing/contracts-hooks.mjs"
+  replay_register="packages/core/src/testing/register-contracts.mjs"
+  replay_missing=""
+  for f in "$replay_test" "$replay_child" "$replay_fixture" "$replay_hooks" "$replay_register"; do
+    [ -f "$f" ] || replay_missing="$replay_missing $f"
+  done
+
+  if [ -n "$replay_missing" ]; then
+    fail "replay determinism gate is missing files:$replay_missing"
+  else
+    replay_broken=""
+    # Not anchored with `$`: a trailing comment on the declaration is a benign
+    # edit, and an audit that fails on benign edits gets worked around.
+    grep -qE '^const IN_PROCESS_REPLAY_ITERATIONS = 100;' "$replay_test" \
+      || replay_broken="$replay_broken in-process-iteration-count-is-not-100"
+    grep -qE '^const CROSS_PROCESS_REPLAY_ITERATIONS = 100;' "$replay_test" \
+      || replay_broken="$replay_broken cross-process-iteration-count-is-not-100"
+    # Declaring the constants proves nothing if the loops ignore them: editing
+    # `iteration < IN_PROCESS_REPLAY_ITERATIONS` to `iteration < 1` leaves both
+    # declarations (and both test titles, which interpolate them) untouched and
+    # drops the gate to a single replay. Require the loops to be bounded BY the
+    # constants, which is the only thing that ties the two together.
+    grep -qE 'iteration < IN_PROCESS_REPLAY_ITERATIONS;' "$replay_test" \
+      || replay_broken="$replay_broken in-process-loop-is-not-bounded-by-the-constant"
+    grep -qE 'iteration < CROSS_PROCESS_REPLAY_ITERATIONS;' "$replay_test" \
+      || replay_broken="$replay_broken cross-process-loop-is-not-bounded-by-the-constant"
+    # The cross-process half is what catches global-state leakage that an
+    # in-process loop cannot see; a spawn-free "cross-process" test is a lie.
+    # `spawnSync` alone is too weak — it survives deleting the 100-process
+    # describe block entirely, because the single-child negative test still
+    # uses it. Require the spawn to happen inside the counted loop.
+    if ! grep -A 6 'iteration < CROSS_PROCESS_REPLAY_ITERATIONS;' "$replay_test" \
+         | grep -q 'replayInChildProcess'; then
+      replay_broken="$replay_broken cross-process-loop-does-not-spawn-a-child"
+    fi
+    if ! grep -q 'spawnSync(' "$replay_test"; then
+      replay_broken="$replay_broken no-child-process-spawn"
+    fi
+    # A loop that runs 100 times and asserts nothing is not a gate either. The
+    # checks above pin the loop's *shape*; these pin that its output is judged.
+    grep -qE 'expect\(observed\.size\)\.toBe\(1\)' "$replay_test" \
+      || replay_broken="$replay_broken in-process-loop-asserts-nothing"
+    grep -qE 'expect\(\[\.\.\.observed\]\)\.toStrictEqual' "$replay_test" \
+      || replay_broken="$replay_broken observed-hashes-are-never-compared"
+    # Every way Vitest can neutralise a case, not just the suffix forms.
+    # `.only` is the worst of them: it disables every *other* case in the file.
+    # Three shapes, because matching only `.skip(` misses all of the others: a
+    # modifier that is not the last segment (`it.skip.each([1])(...)`), the
+    # options-object form (`it('x', { skip: true }, fn)`), and the runtime form
+    # (`it('x', (ctx) => ctx.skip())`), which Vitest honours identically.
+    grep -qE '\b(it|test|describe)(\.[a-z]+)*\.(skip|todo|skipIf|runIf|only|fails)\b' "$replay_test" \
+      && replay_broken="$replay_broken contains-a-disabled-or-only-case"
+    # `.*` between the call and the options object, not `[^)]*`: every describe
+    # title in this file contains parentheses ("(I/O matrix, INV-2)"), so a
+    # bracket-excluding class stops at the title and lets
+    # `describe('… (INV-2)', { skip: true }, fn)` disable the whole block.
+    grep -qE '\b(it|test|describe)\b.*\{[^}]*\b(skip|todo|only|fails)[[:space:]]*:[[:space:]]*true' "$replay_test" \
+      && replay_broken="$replay_broken contains-a-case-disabled-via-its-options-object"
+    # Any identifier, not the literal `ctx`: the test-context parameter is named
+    # by whoever writes the case, so `(t) => t.skip()` is the same disable.
+    grep -qE '\b[A-Za-z_$][A-Za-z0-9_$]*\.(skip|todo)[[:space:]]*\(' "$replay_test" \
+      && replay_broken="$replay_broken contains-a-runtime-skip"
+    # A gate no runner executes is not a gate, and the test file is not where
+    # that gets decided. Three separate one-line, otherwise invisible deletions
+    # of everything checked above: the workspace's own script, the *root*
+    # script that fans out to it (which is what CI actually invokes), and
+    # Vitest's config, which owns discovery.
+    core_pkg="packages/core/package.json"
+    core_vitest="packages/core/vitest.config.ts"
+    root_pkg="package.json"
+    ci_workflow=".github/workflows/ci.yml"
+    # Closing quote included: unanchored, `"vitest run --exclude '**/replay.test.ts'"`
+    # and `"vitest run src/command-log.test.ts"` both satisfy the check while
+    # running everything except the gate.
+    grep -qE '"test"[[:space:]]*:[[:space:]]*"vitest run"' "$core_pkg" \
+      || replay_broken="$replay_broken core-package-test-script-does-not-run-vitest"
+    # The workspace script is unreachable if the root script stops fanning out.
+    # CI runs `npm test` at the root, never `npm test -w packages/core`, so
+    # checking only the leaf leaves the actual entry point unguarded.
+    grep -qE '"test"[[:space:]]*:[[:space:]]*"npm test --workspaces' "$root_pkg" \
+      || replay_broken="$replay_broken root-test-script-does-not-fan-out-to-workspaces"
+    if [ -f "$ci_workflow" ] && ! grep -qE '^[[:space:]]*run:[[:space:]]*npm test[[:space:]]*$' "$ci_workflow"; then
+      replay_broken="$replay_broken ci-does-not-run-npm-test"
+    fi
+    if [ ! -f "$core_vitest" ]; then
+      replay_broken="$replay_broken vitest-config-is-missing"
+    elif ! vitest_discovers_replay_gate "$core_vitest"; then
+      replay_broken="$replay_broken vitest-config-filters-test-discovery"
+    fi
+
+    if [ -n "$replay_broken" ]; then
+      fail "replay determinism gate weakened:$replay_broken"
+    else
+      pass "100-replay determinism gate present (in-process + 100 spawned processes) with a committed golden fixture"
+    fi
   fi
 fi
 
@@ -170,7 +322,6 @@ fi
 cat <<'EOF'
 
 UNMECHANISED — checked by test suite or human review, not by this script
-  INV-2  the 100-replay zero-flake determinism test (belongs in the test suite)
   INV-5  metering probe classification correctness (requires live provider calls)
   INV-6  two endpoints of one model producing two leaderboard rows (needs results data)
   INV-8  free-tier allowlist validation of configured endpoints (needs provider config)

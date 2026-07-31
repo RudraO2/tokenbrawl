@@ -42,3 +42,10 @@ export {
   validateCommandLog,
 } from './command-log';
 export type { BuildCommandLogParams, ComputeMatchIdParams } from './command-log';
+
+// ---------------------------------------------------------------------------
+// Story 1.4: the replay determinism gate (INV-2).
+// ---------------------------------------------------------------------------
+
+export { replayCommandLog } from './replay';
+export type { ReplayResult } from './replay';
