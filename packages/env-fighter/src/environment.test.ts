@@ -398,6 +398,27 @@ describe('attacks, blocking and simultaneity', () => {
     expect(both.health[0]).toBe(onlyP2.health[0]);
   });
 
+  it('gives each side both jitter values across seeds, so neither bit is stuck', () => {
+    // The mirrored-seed suite disables jitter deliberately (disjoint per-side
+    // bits are an intended asymmetry that would mask side symmetry), which left
+    // the fairness of the bit assignment itself uncovered: a bit wired to a
+    // constant, or to a corner of the xorshift32 word that barely varies, would
+    // hand one side a permanent damage edge across a whole tournament.
+    const seen: readonly Set<number>[] = [new Set<number>(), new Set<number>()];
+    for (let seed = 1; seed <= 40; seed += 1) {
+      const after = env.step(env.reset(seed), ['attack', 'attack']);
+      seen[0].add(DEFAULT_FIGHTER_CONFIG.initialHealth - after.health[1]);
+      seen[1].add(DEFAULT_FIGHTER_CONFIG.initialHealth - after.health[0]);
+    }
+    // Each side must show both the jittered and the unjittered damage value.
+    for (const damageValues of seen) {
+      expect([...damageValues].sort()).toStrictEqual([
+        DEFAULT_FIGHTER_CONFIG.attackDamage,
+        MAX_ATTACK_DAMAGE,
+      ]);
+    }
+  });
+
   it('draws each side’s jitter from a different bit, so the two are not locked together', () => {
     const seeds = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
     const differed = seeds.some((seed) => {
@@ -690,7 +711,101 @@ describe('whiff punishing (AC2)', () => {
   });
 });
 
-describe('movement caps', () => {
+describe('movement caps where the cap actually binds', () => {
+  const MIN_SEPARATION = DEFAULT_FIGHTER_CONFIG.minSeparation;
+
+  /** One Decision Point's displacement for each side, as a `[p1, p2]` pair. */
+  type DisplacementPair = readonly [number, number];
+
+  /** Steps both fighters forward, reporting the settled separation and each round's displacement pair. */
+  function closeUntilStable(gap: number): {
+    separation: number;
+    rounds: readonly DisplacementPair[];
+  } {
+    const env = createFighterEnvironment({
+      startPosition: [
+        DEFAULT_FIGHTER_CONFIG.startPosition[0],
+        DEFAULT_FIGHTER_CONFIG.startPosition[0] + gap,
+      ],
+    });
+    let state = env.reset(SEED);
+    const rounds: DisplacementPair[] = [];
+
+    for (let round = 0; round < 40; round += 1) {
+      const before = state.position;
+      state = env.step(state, ['advance', 'advance']);
+      // Displacement *towards the opponent* for each side. Within a round the
+      // two must match -- that is the whole claim of the halved cap. Across
+      // rounds they legitimately shrink as the room runs out, so the comparison
+      // is per-round rather than global.
+      rounds.push([state.position[0] - before[0], before[1] - state.position[1]]);
+    }
+    return { separation: Math.abs(state.position[0] - state.position[1]), rounds };
+  }
+
+  it('displaces both closers identically once the room is too small to split evenly', () => {
+    // The gap that was missing, and it was a real hole: from the default
+    // 320-unit start the cap is ~140 while a Tick moves only 2 units, so
+    // `Math.min(moveUnitsPerTick, cap)` never binds and any asymmetry in the cap
+    // is invisible. Verified by mutation -- handing p1 the unhalved room passed
+    // all 161 tests, including the case named "gives neither side the odd unit".
+    // Starting a few units above `minSeparation` is what forces the cap to be
+    // the binding term, and a side advantage in the physics is the single most
+    // damaging bug this environment could ship (Story 7.1 compares sides).
+    const { rounds } = closeUntilStable(MIN_SEPARATION + 3);
+    for (const [first, second] of rounds) {
+      expect(first).toBe(second);
+    }
+    // And the cap really was the binding term in at least one round: a round
+    // that moved a nonzero distance smaller than a full Tick's worth of movement
+    // could only have been limited by the halved room. Without this the case
+    // would pass just as well from a start where the cap never applies -- which
+    // is precisely how the asymmetry went unnoticed.
+    const bound = rounds.filter(
+      ([first]) => first > 0 && first < DEFAULT_FIGHTER_CONFIG.moveUnitsPerTick,
+    );
+    expect(bound.length).toBeGreaterThan(0);
+  });
+
+  it('converges to minSeparation from an even gap and one unit short from an odd one', () => {
+    // Not a stall to be fixed but an arithmetic consequence of fairness: two
+    // mutual closers move the same distance, so separation changes by an even
+    // amount and its parity is conserved. An odd gap can therefore only reach
+    // `minSeparation + 1`. Pinned so Story 2.4's recalibration cannot quietly
+    // land a range band inside that unreachable unit -- and `assertIntegerConfig`
+    // now rejects such a band outright.
+    expect(closeUntilStable(MIN_SEPARATION + 4).separation).toBe(MIN_SEPARATION);
+    expect(closeUntilStable(MIN_SEPARATION + 3).separation).toBe(MIN_SEPARATION + 1);
+  });
+
+  it('closes correctly in an arena scaled past the 32-bit range', () => {
+    // Regression guard for a cap that was computed with `>> 1`, and so coerced
+    // through ToInt32: a closing room crossing 2^32 halved to exactly zero,
+    // freezing the distance between the fighters for the rest of the Match, and
+    // to a *negative* cap slightly further out, which feeds a backwards step into
+    // the position update. `assertIntegerConfig` accepts any safe integer here,
+    // so nothing rejected such an arena -- it just quietly stopped working.
+    const huge = 5_000_000_000;
+    const env = createFighterEnvironment({
+      arenaMin: 0,
+      arenaMax: huge,
+      startPosition: [0, huge],
+      moveUnitsPerTick: 100_000_000,
+    });
+    let state = env.reset(SEED);
+    let previous = Math.abs(state.position[0] - state.position[1]);
+
+    for (let round = 0; round < 5; round += 1) {
+      state = env.step(state, ['advance', 'advance']);
+      const separation = Math.abs(state.position[0] - state.position[1]);
+      expect(separation).toBeLessThanOrEqual(previous);
+      expect(separation).toBeGreaterThanOrEqual(MIN_SEPARATION);
+      expect(state.position.every((value) => Number.isSafeInteger(value))).toBe(true);
+      previous = separation;
+    }
+    expect(previous).toBe(MIN_SEPARATION);
+  });
+
   it('lets a lone closer reach exactly minSeparation', () => {
     // Story 2.1 halved the closing room whether one fighter was advancing or
     // two, so a solo advance approached `minSeparation` asymptotically and
@@ -717,6 +832,34 @@ describe('meter accrual (AC4)', () => {
     );
     expect(after.meter[0]).toBe(DEFAULT_FIGHTER_CONFIG.meterOnHitLanded);
     expect(after.meter[1]).toBe(DEFAULT_FIGHTER_CONFIG.meterOnHitTaken);
+  });
+
+  it('accrues even when the block absorbs the hit entirely', () => {
+    // The extreme of the rule above: with a reduction as large as the damage, a
+    // connected hit deals literally zero. Meter still accrues, because the hit
+    // *landed* -- gating accrual on damage instead would silently turn a perfect
+    // block into a meter denial too, and Story 2.4 is free to configure a
+    // reduction that large.
+    const absorbing = createFighterEnvironment({
+      ...CLOSE_QUARTERS,
+      blockDamageReduction:
+        DEFAULT_FIGHTER_CONFIG.attackDamage + DEFAULT_FIGHTER_CONFIG.damageJitter,
+    });
+    const after = absorbing.step(absorbing.reset(SEED), ['attack', 'block']);
+
+    expect(after.health[1]).toBe(DEFAULT_FIGHTER_CONFIG.initialHealth);
+    expect(after.meter[0]).toBe(DEFAULT_FIGHTER_CONFIG.meterOnHitLanded);
+    expect(after.meter[1]).toBe(DEFAULT_FIGHTER_CONFIG.meterOnHitTaken);
+  });
+
+  it('caps the defender’s meter as well as the attacker’s', () => {
+    // Both sides route through one `clamp`, but only the attacker's side was
+    // pinned -- and the defender is the side that accrues without choosing to.
+    const after = env.step(stateOf({ meter: [0, DEFAULT_FIGHTER_CONFIG.maxMeter] }), [
+      'attack',
+      'stand',
+    ]);
+    expect(after.meter[1]).toBe(DEFAULT_FIGHTER_CONFIG.maxMeter);
   });
 
   it('never accrues for a whiff', () => {
@@ -789,6 +932,30 @@ describe('KO freezes the rest of the Decision Point', () => {
     expect(Math.abs(after.position[0] - start.position[0])).toBeLessThan(
       DEFAULT_FIGHTER_CONFIG.moveUnitsPerTick * DEFAULT_FIGHTER_CONFIG.ticksPerDecision,
     );
+  });
+
+  it('commits nothing at all when the state was already terminal on entry', () => {
+    // The commit pass used to run before anything checked for a KO, so stepping
+    // a finished Match spent Super Meter and opened a Commitment Window during a
+    // step that simulated zero Ticks. `runMatch` calls `terminal()` before each
+    // iteration and so never reaches this path -- which is exactly why the
+    // inconsistency could survive: only a replay or analysis tool stepping one
+    // Decision Point past the end of a Match would ever have seen it.
+    const finished = stateOf({
+      health: [0, DEFAULT_FIGHTER_CONFIG.initialHealth],
+      meter: [DEFAULT_FIGHTER_CONFIG.specialMeterCost, DEFAULT_FIGHTER_CONFIG.specialMeterCost],
+    });
+    const after = env.step(finished, ['special', 'attack']);
+
+    expect(after.tick).toBe(finished.tick + DEFAULT_FIGHTER_CONFIG.ticksPerDecision);
+    expect(after.meter).toStrictEqual(finished.meter);
+    expect(after.commitmentRemaining).toStrictEqual([0, 0]);
+    expect(after.committedAction).toStrictEqual([COMMITTED_NONE, COMMITTED_NONE]);
+    expect(after.position).toStrictEqual(finished.position);
+    expect(after.health).toStrictEqual(finished.health);
+    // Not even a PRNG draw is consumed, so a frozen step cannot shift the jitter
+    // of anything a caller does afterwards.
+    expect(after.rngState).toBe(finished.rngState);
   });
 });
 
@@ -894,6 +1061,33 @@ describe('observe', () => {
     expect(env.observe(mirrored, 0).state).toBe(env.observe(mirrored, 1).state);
   });
 
+  it('stays side-relative while both fighters are mid-Commitment-Window', () => {
+    // The case above only covers an idle state, so the two fields this story
+    // added sat outside the mirror-symmetry claim entirely -- and they are the
+    // fields most able to leak an absolute side, since each Agent reads them off
+    // the *other* index.
+    const mirrored = stateOf({
+      health: [70, 70],
+      meter: [20, 20],
+      position: [400, 560],
+      committedAction: [COMMITTED_ATTACK, COMMITTED_ATTACK],
+      commitmentRemaining: [ATTACK_TICKS_AFTER_ONE_STEP, ATTACK_TICKS_AFTER_ONE_STEP],
+      windowHitLanded: [1, 1],
+    });
+    expect(env.observe(mirrored, 0).state).toBe(env.observe(mirrored, 1).state);
+
+    // And an asymmetric window must still read differently, or the assertion
+    // above would also hold for an `observe()` that omitted the fields entirely.
+    const lopsided = stateOf({
+      health: [70, 70],
+      meter: [20, 20],
+      position: [400, 560],
+      committedAction: [COMMITTED_ATTACK, COMMITTED_NONE],
+      commitmentRemaining: [ATTACK_TICKS_AFTER_ONE_STEP, 0],
+    });
+    expect(env.observe(lopsided, 0).state).not.toBe(env.observe(lopsided, 1).state);
+  });
+
   it('reports the opponent’s Commitment Window, so a punish is playable (AC2)', () => {
     // Whiff punishing is only a decision an Agent can make if it can see the
     // opponent is stuck. Reported as an integer phase code, never a string:
@@ -982,6 +1176,37 @@ describe('config validation', () => {
     );
     expect(() => createFighterEnvironment({ minSeparation: -40 })).toThrow(
       /minSeparation must not be negative/,
+    );
+  });
+
+  it('rejects a Commitment Window that would commit its fighter for no Decision Point', () => {
+    // A window no longer than the cadence unwinds inside the very step that
+    // opened it, so the Action is free and the punish mechanic silently vanishes
+    // -- while the Match still runs, still hashes, and still produces a
+    // leaderboard row. `config.ts` claimed both totals exceed `ticksPerDecision`;
+    // nothing enforced it until now.
+    expect(() =>
+      createFighterEnvironment({ attackWindow: { startup: 0, active: 1, recovery: 29 } }),
+    ).toThrow(/attackWindow totals 30 Ticks, which does not exceed ticksPerDecision/);
+    expect(() =>
+      createFighterEnvironment({ specialWindow: { startup: 2, active: 2, recovery: 6 } }),
+    ).toThrow(/specialWindow totals 10 Ticks/);
+    // One Tick longer than the cadence is enough, and is accepted.
+    expect(() =>
+      createFighterEnvironment({ attackWindow: { startup: 1, active: 1, recovery: 29 } }),
+    ).not.toThrow();
+  });
+
+  it('rejects a range band that minSeparation puts permanently out of reach', () => {
+    // Separation is floored at `minSeparation` by the closing cap, so a band at
+    // or below it can never connect: the Action opens, commits its fighter, and
+    // does nothing forever. Same failure mode as `specialMeterCost > maxMeter`,
+    // which was already guarded.
+    expect(() => createFighterEnvironment({ attackRange: 10, minSeparation: 40 })).toThrow(
+      /attackRange \(10\) must exceed minSeparation \(40\)/,
+    );
+    expect(() => createFighterEnvironment({ specialRange: 40, minSeparation: 40 })).toThrow(
+      /specialRange \(40\) must exceed minSeparation \(40\)/,
     );
   });
 

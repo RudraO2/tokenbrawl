@@ -203,6 +203,38 @@ export function assertIntegerConfig(config: FighterConfig): void {
     }
   }
 
+  // A Commitment Window no longer than the cadence unwinds completely inside
+  // the step that opened it, so its fighter is actionable again at the very next
+  // Decision Point and the Action costs nothing at all. That deletes the whole
+  // mechanic this environment is built around -- and it deletes it silently,
+  // because such a Match still runs, still hashes, and still produces a
+  // leaderboard row. The header comment above already claims both totals exceed
+  // `ticksPerDecision`; this makes the claim enforceable rather than aspirational.
+  for (const key of WINDOW_KEYS) {
+    const frames = config[key as 'attackWindow' | 'specialWindow'];
+    const total = frames.startup + frames.active + frames.recovery;
+    if (total <= config.ticksPerDecision) {
+      throw new Error(
+        `FighterConfig.${key} totals ${total} Ticks, which does not exceed ticksPerDecision (${config.ticksPerDecision}) -- the Action would commit its fighter for no Decision Point at all`,
+      );
+    }
+  }
+
+  // A range band at or below `minSeparation` can never connect: separation is
+  // floored at `minSeparation` by the closing cap, and two mutual closers
+  // conserve separation parity, so the last reachable unit above the floor may
+  // be `minSeparation + 1`. An Action configured inside that gap is an Action
+  // that silently does nothing -- the same failure mode the
+  // `specialMeterCost > maxMeter` check below exists to prevent.
+  const RANGE_KEYS = ['attackRange', 'specialRange'] as const;
+  for (const key of RANGE_KEYS) {
+    if (config[key] <= config.minSeparation) {
+      throw new Error(
+        `FighterConfig.${key} (${config[key]}) must exceed minSeparation (${config.minSeparation}), or the Action could never connect`,
+      );
+    }
+  }
+
   if (config.specialMeterCost > config.maxMeter) {
     // `special` would be unusable forever, and no test of meter accrual could
     // ever reach it -- a config that quietly deletes an Action.

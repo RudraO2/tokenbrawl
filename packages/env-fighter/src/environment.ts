@@ -153,6 +153,21 @@ export function createFighterEnvironment(
       state: FighterState,
       actions: readonly [LoggedAction | null, LoggedAction | null],
     ): FighterState {
+      // Already terminal on entry: the whole Decision Point is frozen. Nothing
+      // is committed, no Tick is simulated, and no PRNG draw is consumed --
+      // only the cadence advances, because a caller's own tick counter
+      // (`runMatch` keeps one) must never drift from the state's.
+      //
+      // Without this guard the commit pass below still ran on a dead fighter:
+      // it would spend Super Meter and open a Commitment Window during a step
+      // that simulated zero Ticks. `runMatch` checks `terminal()` before each
+      // iteration so it never reaches here, which is exactly why the
+      // inconsistency could sit unnoticed until a replay or analysis tool
+      // stepped one Decision Point past the end of a Match.
+      if (state.health[0] <= 0 || state.health[1] <= 0) {
+        return { ...state, tick: state.tick + config.ticksPerDecision };
+      }
+
       const rngState = nextRngState(state.rngState);
       const jitter: readonly [number, number] = [
         ((rngState >>> JITTER_BIT_P1) & 1) * config.damageJitter,
@@ -228,7 +243,23 @@ export function createFighterEnvironment(
         // room, so it can actually reach `minSeparation`; Story 2.1 halved
         // unconditionally, which made a solo advance asymptotic and is why its
         // Harness KO case needed a hand-picked start position.
-        const closingCap = closers === 2 ? closingRoom >> 1 : closingRoom;
+        //
+        // `Math.floor` over a division rather than `>> 1`: a shift coerces
+        // through ToInt32, so an arena scaled past 2^31 units -- which
+        // `assertIntegerConfig` permits, since it only demands safe integers --
+        // would silently yield a cap of zero or a *negative* one. Zero freezes
+        // the distance between the fighters for the rest of the Match; negative
+        // feeds a backwards step into the position update. Division is exact
+        // here for every safe integer and assumes no word size at all.
+        //
+        // Symmetry has an arithmetic consequence worth naming: two mutual
+        // closers each move the same distance, so separation changes by an even
+        // amount every Tick and its parity is conserved. A pair that starts an
+        // odd distance apart therefore converges on `minSeparation + 1`, never
+        // `minSeparation` itself. That is the price of never handing either side
+        // the odd unit, and it is harmless as long as no range band sits inside
+        // that last unit -- which `assertIntegerConfig` now enforces.
+        const closingCap = closers === 2 ? Math.floor(closingRoom / 2) : closingRoom;
         const moved: [number, number] = [position[0], position[1]];
 
         for (const agentIndex of AGENT_INDICES) {
