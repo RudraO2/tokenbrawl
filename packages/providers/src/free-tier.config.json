@@ -1,0 +1,28 @@
+{
+  "_comment": [
+    "Free-tier quotas and the endpoint allowlist, as data rather than as constants in code.",
+    "Story 3.2 AC5: these are configuration. INV-8: an endpoint absent from `endpoints` fails",
+    "configuration validation, which is what keeps a paid endpoint from ever being configured.",
+    "These numbers move. Re-verify at the start of each epic and update `verifiedOn`.",
+    "`fallbackBackoffMs` is used only when a 429 carries no timing header at all."
+  ],
+  "verifiedOn": "2026-08-01",
+  "providers": {
+    "groq": {
+      "endpoints": ["https://api.groq.com/openai/v1/chat/completions"],
+      "fallbackBackoffMs": 60000,
+      "defaults": {
+        "requestsPerMinute": 30,
+        "requestsPerDay": 1000,
+        "tokensPerMinute": 6000
+      },
+      "models": {
+        "llama-3.1-8b-instant": {
+          "requestsPerMinute": 30,
+          "requestsPerDay": 14400,
+          "tokensPerMinute": 6000
+        }
+      }
+    }
+  }
+}
