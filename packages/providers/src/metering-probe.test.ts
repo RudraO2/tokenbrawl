@@ -221,6 +221,23 @@ describe('classification (INV-5)', () => {
     expect(classifyProbeUsage({ tokensSpent: 260, reasoningTokens: 0 })).toBe('reports-reasoning');
     expect(classifyProbeUsage({ tokensSpent: 0, reasoningTokens: 0 })).toBe('reports-reasoning');
   });
+
+  it('treats a malformed count as unreported rather than as an honest report', () => {
+    // The classifier is exported and Story 7.2 will call it with usage read
+    // off a Command Log, not only with usage this package just mapped.
+    // Classifying a negative or fractional count as a report is the single
+    // most consequential way to get INV-5 backwards.
+    expect(classifyProbeUsage({ tokensSpent: -5, reasoningTokens: 190 })).toBe('no-usage-reported');
+    expect(classifyProbeUsage({ tokensSpent: 260, reasoningTokens: -1 })).toBe(
+      'reports-completion-only',
+    );
+    expect(
+      classifyProbeUsage({ tokensSpent: 12.5, reasoningTokens: null } as unknown as {
+        tokensSpent: number | null;
+        reasoningTokens: number | null;
+      }),
+    ).toBe('no-usage-reported');
+  });
 });
 
 describe('usage mapping', () => {

@@ -179,6 +179,24 @@ describe('partitioning results by track (AC3)', () => {
     expect(partition.exclusions[0].reason).not.toContain('never probed');
   });
 
+  it('will not let an explicit track: main override a failed probe (AC3)', () => {
+    // The one direction that would defeat the whole invariant: a config that
+    // asserts a Deployment belongs on the leaderboard, against what the probe
+    // found. Only `reflex` is honoured as an explicit override, and only
+    // because it is the safe direction.
+    const partition = partitionByTrack([
+      deployment('insists', 'no-usage-reported', 'main'),
+      deployment('also-insists', 'reports-completion-only', 'main'),
+    ]);
+
+    expect(partition.mainLeaderboard).toStrictEqual([]);
+    expect(partition.reflexTrack).toHaveLength(2);
+    expect(partition.exclusions.map((exclusion) => exclusion.id)).toStrictEqual([
+      'insists',
+      'also-insists',
+    ]);
+  });
+
   it('excludes a Deployment entry that carries no deployment identity at all', () => {
     const partition = partitionByTrack([{ id: 'orphan', kind: 'deployment' }]);
 

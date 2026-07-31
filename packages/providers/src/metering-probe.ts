@@ -247,10 +247,19 @@ export function mapProbeUsage(provider: ProviderId, bodyText: string): ProviderU
  * usage block can support.
  */
 export function classifyProbeUsage(usage: ProviderUsage): MeteringProbeResult {
-  if (usage.tokensSpent === null) {
+  // Re-applies `reportedCount`'s doctrine rather than trusting the two fields
+  // to already be clean. `mapProbeUsage` nulls a malformed count before it gets
+  // here, but this function is exported and the leaderboard code that will call
+  // it (Story 7.2) may hand over usage read straight off a Command Log. A
+  // negative or fractional count is not a usable report, and classifying it as
+  // one would be the single most consequential way to get INV-5 backwards.
+  const tokensSpent = reportedCount(usage.tokensSpent);
+  const deliberation = reportedCount(usage.reasoningTokens);
+
+  if (tokensSpent === null) {
     return 'no-usage-reported';
   }
-  return usage.reasoningTokens === null ? 'reports-completion-only' : 'reports-reasoning';
+  return deliberation === null ? 'reports-completion-only' : 'reports-reasoning';
 }
 
 export interface MeteringProbeTarget {
