@@ -482,6 +482,32 @@ describe('runMatch: Parse Failure (Story 1.6, I/O matrix)', () => {
       bankRemaining: 24_960,
     });
     expect(agent0.decideCallCount()).toBe(1);
+
+    // The sibling Agent's entry is untouched by the failing Agent's fallback.
+    const sibling = result.decisions.find((d) => d.agentIndex === 1);
+    expect(sibling).toMatchObject({ action: 'block' });
+    expect(sibling).not.toHaveProperty('parseFailure');
+  });
+
+  it('Deployment Parse Failure with tokensSpent: null (Metering Probe result) leaves the bank untouched, never coerced to 0', async () => {
+    const env = createMockEnvironment({ maxTicks: 1, ticksPerDecision: 1 });
+    const agent0 = createScriptedAgent({
+      id: 'dep:p1',
+      kind: 'deployment',
+      script: [null],
+      usage: [{ tokensSpent: null }],
+    });
+    const agent1 = createScriptedAgent({ id: 'bot:p2', kind: 'bot', script: ['block'] });
+
+    const result = await runMatch(env, [agent0, agent1], SEED, { tokenBankStart: 25_000 });
+
+    const entry = result.decisions.find((d) => d.agentIndex === 0);
+    expect(entry).toMatchObject({
+      action: 'stand',
+      parseFailure: true,
+      tokensSpent: null,
+      bankRemaining: 25_000,
+    });
   });
 
   it('Bot Parse Failure: logs action stand, parseFailure true, no banking fields', async () => {
@@ -496,6 +522,31 @@ describe('runMatch: Parse Failure (Story 1.6, I/O matrix)', () => {
     expect(entry).not.toHaveProperty('tokensSpent');
     expect(entry).not.toHaveProperty('bankRemaining');
     expect(agent0.decideCallCount()).toBe(1);
+
+    const sibling = result.decisions.find((d) => d.agentIndex === 1);
+    expect(sibling).toMatchObject({ action: 'block' });
+    expect(sibling).not.toHaveProperty('parseFailure');
+  });
+
+  it('both Agents Parse-Fail at the same Decision Point independently', async () => {
+    const env = createMockEnvironment({ maxTicks: 1, ticksPerDecision: 1 });
+    const agent0 = createScriptedAgent({
+      id: 'dep:p1',
+      kind: 'deployment',
+      script: [null],
+      usage: [{ tokensSpent: 10 }],
+    });
+    const agent1 = createScriptedAgent({ id: 'bot:p2', kind: 'bot', script: [null] });
+
+    const result = await runMatch(env, [agent0, agent1], SEED, { tokenBankStart: 25_000 });
+
+    const entry0 = result.decisions.find((d) => d.agentIndex === 0);
+    const entry1 = result.decisions.find((d) => d.agentIndex === 1);
+    expect(entry0).toMatchObject({ action: 'stand', parseFailure: true, tokensSpent: 10, bankRemaining: 24_990 });
+    expect(entry1).toMatchObject({ action: 'stand', parseFailure: true });
+    expect(entry1).not.toHaveProperty('tokensSpent');
+    expect(agent0.decideCallCount()).toBe(1);
+    expect(agent1.decideCallCount()).toBe(1);
   });
 
   it('a successful Decision never carries a parseFailure key at all', async () => {

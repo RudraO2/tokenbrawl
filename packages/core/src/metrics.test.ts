@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { CommandLog } from '@tokenbrawl/contracts';
+import { FALLBACK_ACTION, type CommandLog } from '@tokenbrawl/contracts';
 import { computeParseFailureRates } from './metrics';
 
 const baseLog = (decisions: CommandLog['decisions']): CommandLog => ({
@@ -21,7 +21,7 @@ describe('computeParseFailureRates (Story 1.6, I/O matrix)', () => {
   it('mixed: returns parseFailureCount / decisionCount per Agent', () => {
     const log = baseLog([
       { tick: 0, agentIndex: 0, action: 'attack' },
-      { tick: 1, agentIndex: 0, action: 'stand', parseFailure: true, rawResponse: 'garbled' },
+      { tick: 1, agentIndex: 0, action: FALLBACK_ACTION, parseFailure: true, rawResponse: 'garbled' },
       { tick: 2, agentIndex: 0, action: 'block' },
       { tick: 0, agentIndex: 1, action: 'advance' },
       { tick: 1, agentIndex: 1, action: 'retreat' },
@@ -58,8 +58,8 @@ describe('computeParseFailureRates (Story 1.6, I/O matrix)', () => {
 
   it('all failures: rate is 1', () => {
     const log = baseLog([
-      { tick: 0, agentIndex: 0, action: 'stand', parseFailure: true, rawResponse: 'x' },
-      { tick: 1, agentIndex: 0, action: 'stand', parseFailure: true, rawResponse: 'y' },
+      { tick: 0, agentIndex: 0, action: FALLBACK_ACTION, parseFailure: true, rawResponse: 'x' },
+      { tick: 1, agentIndex: 0, action: FALLBACK_ACTION, parseFailure: true, rawResponse: 'y' },
     ]);
 
     const [rate0] = computeParseFailureRates(log);
@@ -77,5 +77,11 @@ describe('computeParseFailureRates (Story 1.6, I/O matrix)', () => {
 
     expect(rate0.parseFailureRate).toBe(0);
     expect(rate1.parseFailureRate).toBe(0);
+  });
+
+  it('throws naming the value on a decision entry with an agentIndex outside 0|1 (defense-in-depth for disk-loaded logs bypassing schema validation)', () => {
+    const log = baseLog([{ tick: 0, agentIndex: 2 as unknown as 0 | 1, action: 'attack' }]);
+
+    expect(() => computeParseFailureRates(log)).toThrow(/invalid agentIndex 2/);
   });
 });

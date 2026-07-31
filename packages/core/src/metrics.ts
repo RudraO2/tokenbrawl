@@ -25,6 +25,12 @@ export function computeParseFailureRates(log: CommandLog): readonly [ParseFailur
 
   for (const entry of log.decisions) {
     const bucket = counts[entry.agentIndex];
+    if (bucket === undefined) {
+      // TypeScript's CommandLog type guarantees agentIndex is 0 | 1, but this
+      // function is exported for future disk-loaded-JSON consumers (E4/E5/E7)
+      // where that guarantee is only as good as the loader's own validation.
+      throw new Error(`computeParseFailureRates: invalid agentIndex ${String(entry.agentIndex)}`);
+    }
     bucket.decisions += 1;
     if (entry.parseFailure === true) {
       bucket.failures += 1;

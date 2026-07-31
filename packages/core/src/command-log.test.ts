@@ -211,6 +211,33 @@ describe('Parse Failure entry (I/O matrix)', () => {
 
     expect(() => validateCommandLog(log)).toThrow(/rawResponse/);
   });
+
+  it('Story 1.6: a real runMatch Parse Failure survives buildCommandLog and validates end-to-end', async () => {
+    const env = createMockEnvironment({ maxTicks: 1, ticksPerDecision: 1 });
+    const agent0 = createScriptedAgent({
+      id: 'dep:p1',
+      kind: 'deployment',
+      script: [null],
+      usage: [{ tokensSpent: 15 }],
+    });
+    const agent1 = createScriptedAgent({ id: 'bot:p2', kind: 'bot', script: ['block'] });
+
+    const matchResult = await runMatch(env, [agent0, agent1], SEED, { tokenBankStart: 25_000 });
+    const log = buildCommandLog(matchResult, {
+      environment: { id: env.id, version: env.version },
+      seed: SEED,
+      configHash: FIXTURE_CONFIG_HASH,
+      agents: [
+        { id: agent0.id, kind: 'deployment', deployment: { provider: 'groq', endpoint: 'https://api.groq.com', model: 'm' } },
+        { id: agent1.id, kind: 'bot' },
+      ],
+    });
+
+    const entry = log.decisions.find((d) => d.agentIndex === 0);
+    expect(entry).toMatchObject({ action: 'stand', parseFailure: true, tokensSpent: 15 });
+    expect(entry?.rawResponse).toBeTruthy();
+    expect(validateCommandLog(log)).toStrictEqual(log);
+  });
 });
 
 describe('additionalProperties: false', () => {
