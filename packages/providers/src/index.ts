@@ -62,3 +62,34 @@ export type { GoogleClient, GoogleClientConfig } from './google';
 
 export { validateTournamentConfig } from './tournament-config';
 export type { TournamentConfigValidation, TournamentDeploymentConfig } from './tournament-config';
+
+// ---------------------------------------------------------------------------
+// Story 3.4: the Metering Probe (INV-5) and the Reflex-Track consequences of
+// its classification.
+// ---------------------------------------------------------------------------
+
+export {
+  PROBE_SYSTEM_PROMPT,
+  PROBE_USER_PROMPT,
+  classifyProbeUsage,
+  mapProbeUsage,
+  probeDeployments,
+  probeRequestBody,
+  probeWireFamilyFor,
+  runMeteringProbe,
+} from './metering-probe';
+export type {
+  MeteringProbeOutcome,
+  MeteringProbeTarget,
+  ProbeWireFamily,
+} from './metering-probe';
+
+export {
+  applyMeteringProbe,
+  deploymentIdentityFrom,
+  formatMeteringExclusions,
+  partitionByTrack,
+  trackFor,
+  withMeteringProbe,
+} from './track';
+export type { LeaderboardTrack, MeteringExclusion, TrackPartition } from './track';
