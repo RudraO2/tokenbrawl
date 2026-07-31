@@ -39,5 +39,8 @@ export {
 export type { CommittedActionCode, PhaseCode } from './frames';
 
 export { mixSeed, nextRngState } from './prng';
+
+/** The three graded Baseline Bots (Story 2.3). Zero token cost, `kind: 'bot'`. */
+export { createAggressiveBot, createRandomBot, createSpacingBot } from './bots';
 export { canonicalStringify } from './canonical';
 export { sha256Hex } from './sha256';

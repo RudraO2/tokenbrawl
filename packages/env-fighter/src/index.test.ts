@@ -10,7 +10,10 @@ import {
   PHASE_STARTUP,
   assertIntegerConfig,
   canonicalStringify,
+  createAggressiveBot,
   createFighterEnvironment,
+  createRandomBot,
+  createSpacingBot,
   damageForCode,
   legalActionsFor,
   mixSeed,
@@ -99,5 +102,11 @@ describe('@tokenbrawl/env-fighter public surface', () => {
 
     const phase: PhaseCode = PHASE_RECOVERY;
     expect(phase).toBe(PHASE_RECOVERY);
+  });
+
+  it('exports the three graded Baseline Bot factories (Story 2.3)', () => {
+    expect(createRandomBot('bot:random', 1).kind).toBe('bot');
+    expect(createAggressiveBot('bot:aggressive').kind).toBe('bot');
+    expect(createSpacingBot('bot:spacing').kind).toBe('bot');
   });
 });

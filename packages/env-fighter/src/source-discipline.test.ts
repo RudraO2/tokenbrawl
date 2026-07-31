@@ -107,6 +107,7 @@ describe('shipped source discipline', () => {
     const names = shippedFiles().map((file) => file.name);
     expect(names).toEqual(
       expect.arrayContaining([
+        'bots.ts',
         'canonical.ts',
         'config.ts',
         'environment.ts',
