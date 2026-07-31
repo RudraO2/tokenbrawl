@@ -15,6 +15,27 @@
       loading artefact there is.
     -->
     <meta name="color-scheme" content="dark" />
+    <!--
+      Story 4.2. The hero replay is the one asset the first animated frame
+      genuinely cannot be drawn without, and without this line it is discovered
+      only after the module graph has downloaded and executed -- one extra
+      serial round trip, which on a high-latency link costs more than every
+      byte saved elsewhere on the page. `crossorigin` is required for an
+      `as="fetch"` preload to match a plain same-origin `fetch()`; without it
+      the browser downloads the file twice.
+
+      Deliberately the only preload here. Sprites, backdrop and the reasoning
+      sidecar are upgrades to an already-running fight (see startup.ts) and
+      preloading them would have them competing for the same narrow pipe as the
+      thing that actually blocks.
+    -->
+    <link
+      rel="preload"
+      as="fetch"
+      href="/replays/demo.command-log.json"
+      type="application/json"
+      crossorigin
+    />
     <style>
       html {
         background: #0a0a0a;

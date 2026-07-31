@@ -86,7 +86,9 @@ describe('shipped player source discipline', () => {
       expect.arrayContaining([
         'main.ts',
         'boot.ts',
+        'startup.ts',
         'replay/film.ts',
+        'replay/sidecar.ts',
         'render/renderer.ts',
         'player/clock.ts',
       ]),
@@ -136,11 +138,20 @@ describe('shipped player source discipline', () => {
     // house convention until the `main`/`exports` gap is closed. AD-4 permits
     // this one consumer-to-adapter dependency: replay *is* re-simulation, so
     // the player must import the Environment Adapter.
+    //
+    // Scanned over code lines rather than raw source. The raw-source version
+    // read `distinct both from "this Agent recorded no reasoning" and from
+    // "the reasoning could not be fetched"` in a doc comment as two bare
+    // imports -- English uses the word `from` in front of a quoted string as
+    // readily as TypeScript does. Every other check in this file already drops
+    // comment lines first, for the same reason.
     const bare: string[] = [];
     for (const { path, source } of shippedFiles()) {
-      for (const match of source.matchAll(/from\s+['"]([^'"]+)['"]/g)) {
-        if (!match[1].startsWith('.')) {
-          bare.push(`${path}: ${match[1]}`);
+      for (const { text } of codeLines(source)) {
+        for (const match of text.matchAll(/from\s+['"]([^'"]+)['"]/g)) {
+          if (!match[1].startsWith('.')) {
+            bare.push(`${path}: ${match[1]}`);
+          }
         }
       }
     }

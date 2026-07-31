@@ -1,0 +1,270 @@
+{
+  "schemaVersion": "1.0.0",
+  "matchId": "8450eeec9af23b20d9c24bde835f87b53a6883970746f1523338ea5408030b8f",
+  "entries": [
+    {
+      "tick": 0,
+      "agentIndex": 0,
+      "reasoning": null,
+      "rawResponse": "aggressive:advance",
+      "reflexMode": false,
+      "parseFailure": false
+    },
+    {
+      "tick": 0,
+      "agentIndex": 1,
+      "reasoning": null,
+      "rawResponse": "spacing:advance",
+      "reflexMode": false,
+      "parseFailure": false
+    },
+    {
+      "tick": 30,
+      "agentIndex": 0,
+      "reasoning": null,
+      "rawResponse": "aggressive:advance",
+      "reflexMode": false,
+      "parseFailure": false
+    },
+    {
+      "tick": 30,
+      "agentIndex": 1,
+      "reasoning": null,
+      "rawResponse": "spacing:advance",
+      "reflexMode": false,
+      "parseFailure": false
+    },
+    {
+      "tick": 60,
+      "agentIndex": 0,
+      "reasoning": null,
+      "rawResponse": "aggressive:attack",
+      "reflexMode": false,
+      "parseFailure": false
+    },
+    {
+      "tick": 60,
+      "agentIndex": 1,
+      "reasoning": null,
+      "rawResponse": "spacing:block",
+      "reflexMode": false,
+      "parseFailure": false
+    },
+    {
+      "tick": 90,
+      "agentIndex": 1,
+      "reasoning": null,
+      "rawResponse": "spacing:attack",
+      "reflexMode": false,
+      "parseFailure": false
+    },
+    {
+      "tick": 120,
+      "agentIndex": 0,
+      "reasoning": null,
+      "rawResponse": "aggressive:attack",
+      "reflexMode": false,
+      "parseFailure": false
+    },
+    {
+      "tick": 150,
+      "agentIndex": 1,
+      "reasoning": null,
+      "rawResponse": "spacing:attack",
+      "reflexMode": false,
+      "parseFailure": false
+    },
+    {
+      "tick": 180,
+      "agentIndex": 0,
+      "reasoning": null,
+      "rawResponse": "aggressive:attack",
+      "reflexMode": false,
+      "parseFailure": false
+    },
+    {
+      "tick": 210,
+      "agentIndex": 1,
+      "reasoning": null,
+      "rawResponse": "spacing:attack",
+      "reflexMode": false,
+      "parseFailure": false
+    },
+    {
+      "tick": 240,
+      "agentIndex": 0,
+      "reasoning": null,
+      "rawResponse": "aggressive:attack",
+      "reflexMode": false,
+      "parseFailure": false
+    },
+    {
+      "tick": 270,
+      "agentIndex": 1,
+      "reasoning": null,
+      "rawResponse": "spacing:attack",
+      "reflexMode": false,
+      "parseFailure": false
+    },
+    {
+      "tick": 300,
+      "agentIndex": 0,
+      "reasoning": null,
+      "rawResponse": "aggressive:attack",
+      "reflexMode": false,
+      "parseFailure": false
+    },
+    {
+      "tick": 330,
+      "agentIndex": 1,
+      "reasoning": null,
+      "rawResponse": "spacing:attack",
+      "reflexMode": false,
+      "parseFailure": false
+    },
+    {
+      "tick": 360,
+      "agentIndex": 0,
+      "reasoning": null,
+      "rawResponse": "aggressive:attack",
+      "reflexMode": false,
+      "parseFailure": false
+    },
+    {
+      "tick": 390,
+      "agentIndex": 1,
+      "reasoning": null,
+      "rawResponse": "spacing:attack",
+      "reflexMode": false,
+      "parseFailure": false
+    },
+    {
+      "tick": 420,
+      "agentIndex": 0,
+      "reasoning": null,
+      "rawResponse": "aggressive:attack",
+      "reflexMode": false,
+      "parseFailure": false
+    },
+    {
+      "tick": 450,
+      "agentIndex": 1,
+      "reasoning": null,
+      "rawResponse": "spacing:attack",
+      "reflexMode": false,
+      "parseFailure": false
+    },
+    {
+      "tick": 480,
+      "agentIndex": 0,
+      "reasoning": null,
+      "rawResponse": "aggressive:attack",
+      "reflexMode": false,
+      "parseFailure": false
+    },
+    {
+      "tick": 510,
+      "agentIndex": 1,
+      "reasoning": null,
+      "rawResponse": "spacing:attack",
+      "reflexMode": false,
+      "parseFailure": false
+    },
+    {
+      "tick": 540,
+      "agentIndex": 0,
+      "reasoning": null,
+      "rawResponse": "aggressive:attack",
+      "reflexMode": false,
+      "parseFailure": false
+    },
+    {
+      "tick": 570,
+      "agentIndex": 1,
+      "reasoning": null,
+      "rawResponse": "spacing:attack",
+      "reflexMode": false,
+      "parseFailure": false
+    },
+    {
+      "tick": 600,
+      "agentIndex": 0,
+      "reasoning": null,
+      "rawResponse": "aggressive:attack",
+      "reflexMode": false,
+      "parseFailure": false
+    },
+    {
+      "tick": 630,
+      "agentIndex": 1,
+      "reasoning": null,
+      "rawResponse": "spacing:attack",
+      "reflexMode": false,
+      "parseFailure": false
+    },
+    {
+      "tick": 660,
+      "agentIndex": 0,
+      "reasoning": null,
+      "rawResponse": "aggressive:attack",
+      "reflexMode": false,
+      "parseFailure": false
+    },
+    {
+      "tick": 690,
+      "agentIndex": 1,
+      "reasoning": null,
+      "rawResponse": "spacing:attack",
+      "reflexMode": false,
+      "parseFailure": false
+    },
+    {
+      "tick": 720,
+      "agentIndex": 0,
+      "reasoning": null,
+      "rawResponse": "aggressive:attack",
+      "reflexMode": false,
+      "parseFailure": false
+    },
+    {
+      "tick": 750,
+      "agentIndex": 1,
+      "reasoning": null,
+      "rawResponse": "spacing:attack",
+      "reflexMode": false,
+      "parseFailure": false
+    },
+    {
+      "tick": 780,
+      "agentIndex": 0,
+      "reasoning": null,
+      "rawResponse": "aggressive:attack",
+      "reflexMode": false,
+      "parseFailure": false
+    },
+    {
+      "tick": 810,
+      "agentIndex": 1,
+      "reasoning": null,
+      "rawResponse": "spacing:attack",
+      "reflexMode": false,
+      "parseFailure": false
+    },
+    {
+      "tick": 840,
+      "agentIndex": 0,
+      "reasoning": null,
+      "rawResponse": "aggressive:attack",
+      "reflexMode": false,
+      "parseFailure": false
+    },
+    {
+      "tick": 870,
+      "agentIndex": 1,
+      "reasoning": null,
+      "rawResponse": "spacing:attack",
+      "reflexMode": false,
+      "parseFailure": false
+    }
+  ]
+}

@@ -4,6 +4,8 @@ import { runMatch } from '../../../../packages/core/src/match-runner';
 import { DEFAULT_FIGHTER_CONFIG } from '../../../../packages/env-fighter/src/config';
 import { createFighterEnvironment } from '../../../../packages/env-fighter/src/environment';
 import { createAggressiveBot, createSpacingBot } from '../../../../packages/env-fighter/src/bots';
+import type { ReasoningSidecar } from '../replay/sidecar';
+import { splitReasoning } from './sidecar-split';
 
 /**
  * Builds a real Command Log by playing a real Match between two Baseline Bots.
@@ -32,6 +34,24 @@ import { createAggressiveBot, createSpacingBot } from '../../../../packages/env-
  */
 /** The seed the committed demo replay was built from. One place, so the script and the drift test cannot disagree. */
 export const DEMO_SEED = 4_101;
+
+/**
+ * The demo replay as the page actually loads it: log plus reasoning sidecar.
+ *
+ * Story 4.2 splits the two (AD-10). The Baseline Bots in this Match carry no
+ * reasoning -- `reasoning` is `null` on every entry and `rawResponse` is the
+ * bot's own emitted line -- so the split does not conjure content that was
+ * never there. What it does is exercise the sidecar path end to end on the
+ * shipped page: the log the fight blocks on gets smaller, and the document
+ * carrying per-Decision-Point text is fetched afterwards and never waited for.
+ * A fixture-only sidecar would have left the real page on the inline path, and
+ * the first Deployment log would have been the first time anyone found out.
+ */
+export async function buildDemoBundle(
+  seed: number = DEMO_SEED,
+): Promise<{ readonly log: CommandLog; readonly sidecar: ReasoningSidecar }> {
+  return splitReasoning(await buildDemoLog(seed));
+}
 
 export async function buildDemoLog(seed: number = DEMO_SEED): Promise<CommandLog> {
   const env = createFighterEnvironment();

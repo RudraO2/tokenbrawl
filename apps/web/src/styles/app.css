@@ -74,13 +74,27 @@ body {
 
 /* --- The stage --------------------------------------------------------- */
 
+/*
+ * Stage left, reasoning right, and deliberately not a 50/50 split. The fight
+ * is the subject and the panel is the annotation; equal columns would read as
+ * a dashboard. Story 4.3 makes the panel the visual centre -- this is the
+ * frame it will grow into.
+ */
+.tb-arena {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: var(--tb-space-4);
+  margin-bottom: var(--tb-space-4);
+}
+
 .tb-stage {
+  position: relative;
   border: var(--tb-border-width) solid var(--tb-ink);
   box-shadow: var(--tb-shadow);
   background: var(--tb-bg);
-  /* Asymmetric on purpose: the stage sits left, the readout hangs off it. */
   width: min(100%, 960px);
-  margin-bottom: var(--tb-space-4);
+  flex: 1 1 640px;
 }
 
 .tb-canvas {
@@ -89,6 +103,95 @@ body {
   height: auto;
   /* Sprite-crisp scaling: this is pixel art, not a photograph. */
   image-rendering: pixelated;
+}
+
+/* --- Hover targets over the arena -------------------------------------- */
+
+/*
+ * One target per fighter, each covering its half of the stage. Buttons rather
+ * than divs so keyboard focus and touch both reach them for free; the visible
+ * affordance is a border that appears on hover or focus, because a permanent
+ * box drawn over the fight would compete with the fight.
+ *
+ * `background: transparent` is a bare keyword, not an alpha channel: the house
+ * style bans translucent *surfaces*, and this element has no surface at all.
+ */
+.tb-fighter-target {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 50%;
+  padding: 0;
+  background: transparent;
+  border: var(--tb-border-width) solid transparent;
+  cursor: pointer;
+  transition: border-color var(--tb-step) step-end;
+}
+
+.tb-fighter-target--p1 {
+  left: 0;
+}
+
+.tb-fighter-target--p2 {
+  right: 0;
+}
+
+.tb-fighter-target:hover {
+  border-color: var(--tb-accent);
+}
+
+.tb-fighter-target:focus-visible {
+  outline: 3px solid var(--tb-accent);
+  outline-offset: calc(-1 * var(--tb-space-1));
+}
+
+/* Present to a screen reader, absent to a pointer. Not `display: none`, which removes it from both. */
+.tb-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* --- Reasoning panel ---------------------------------------------------- */
+
+.tb-reasoning {
+  flex: 1 1 320px;
+  border: var(--tb-border-width) solid var(--tb-ink);
+  box-shadow: var(--tb-shadow);
+  background: var(--tb-bg);
+  padding: var(--tb-space-2);
+  min-height: 200px;
+}
+
+/* A model id is data, so it is set in the mono face. See docs/DESIGN.md. */
+.tb-reasoning-heading {
+  margin: 0 0 var(--tb-space-2);
+  font-family: var(--tb-font-mono);
+  text-transform: uppercase;
+  border-bottom: var(--tb-border-width) solid var(--tb-ink);
+  padding-bottom: var(--tb-space-1);
+}
+
+.tb-reasoning-body {
+  margin: 0;
+  line-height: 1.4;
+}
+
+/*
+ * Loading, idle and absent are all metadata about the panel rather than
+ * content in it, so they take the muted colour. There is deliberately no
+ * animation on the loading state: a pulse or a spinner whose behaviour varied
+ * with the fetch would be the UI hinting at duration, which INV-3 forbids.
+ */
+.tb-reasoning--loading,
+.tb-reasoning--absent,
+.tb-reasoning--idle {
+  color: var(--tb-muted);
+  text-transform: uppercase;
+  font-family: var(--tb-font-mono);
 }
 
 /* --- Readout ----------------------------------------------------------- */
@@ -170,7 +273,8 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .tb-button {
+  .tb-button,
+  .tb-fighter-target {
     transition: none;
   }
 }
