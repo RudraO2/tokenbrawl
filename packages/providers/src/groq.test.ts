@@ -92,7 +92,20 @@ function makeHeaders(entries: Readonly<Record<string, string>>): HttpHeaders {
   return { get: (name: string) => lowered.get(name.toLowerCase()) ?? null };
 }
 
-/** Responses in call order; the last entry repeats once the script runs out, so a full Match needs one line. */
+function repeat(count: number, response: ScriptedResponse): readonly ScriptedResponse[] {
+  return Array.from({ length: count }, () => response);
+}
+
+/**
+ * Responses in call order, and the script is *exhaustible*: a request past the
+ * end throws by name, the same way `createMockProviderClient` does in core.
+ *
+ * That is deliberate and was earned. An earlier version repeated the last entry
+ * forever, and the mutation that makes `complete()` retry a 429 then recursed
+ * until the Vitest worker died of a stack overflow -- detected, but as a crash
+ * rather than as the one-request-per-call assertion that is actually the point.
+ * An exhaustible script turns the same mutation into a named failure.
+ */
 function createTransport(script: readonly ScriptedResponse[]): Transport {
   const calls: { url: string; request: HttpRequest }[] = [];
   const sleeps: number[] = [];
@@ -106,7 +119,12 @@ function createTransport(script: readonly ScriptedResponse[]): Transport {
     events: () => events,
 
     fetch: (url: string, request: HttpRequest) => {
-      const scripted = script[Math.min(calls.length, script.length - 1)];
+      if (calls.length >= script.length) {
+        throw new Error(
+          `Scripted transport exhausted after ${script.length} response(s) -- something asked for more requests than the test scripted.`,
+        );
+      }
+      const scripted = script[calls.length];
       calls.push({ url, request });
       events.push('fetch');
       return Promise.resolve({
@@ -254,6 +272,20 @@ describe('groqRequestBody (INV-4, INV-7)', () => {
     expect(body.max_tokens).toBe(8);
   });
 
+  it('rejects a max_tokens that could never be a valid cap', () => {
+    // Only `maxTokensFor` should fill this in, and it yields 8 or nothing. A
+    // degenerate value would otherwise reach the provider and come back as a
+    // remote 400, one wasted request later.
+    for (const bad of [0, -1, 1.5, Number.NaN, Number.MAX_SAFE_INTEGER + 2]) {
+      expect(() => groqRequestBody(MODEL, { ...PROMPT_REQUEST, maxTokens: bad })).toThrow(
+        /maxTokens must be a positive safe integer/,
+      );
+    }
+    expect(() =>
+      groqRequestBody(MODEL, { ...PROMPT_REQUEST, maxTokens: REFLEX_MAX_TOKENS }),
+    ).not.toThrow();
+  });
+
   it('carries no reasoning-effort parameter under any spelling (INV-4)', () => {
     // Assembled from fragments so this assertion does not itself trip the
     // repo-wide grep in scripts/audit-invariants.sh.
@@ -355,7 +387,7 @@ describe('the adapter holds no cross-call state (AC3, AD-9)', () => {
   });
 
   it('sends a byte-identical body for a repeated identical request', async () => {
-    const transport = createTransport([{ body: RECORDED_200 }]);
+    const transport = createTransport(repeat(2, { body: RECORDED_200 }));
     const client = clientWith(transport);
 
     await client.complete(PROMPT_REQUEST);
@@ -439,6 +471,24 @@ describe('a rate-limit response (AC2)', () => {
     expect(transport.sleeps()).toStrictEqual([60_000]);
   });
 
+  it('bounds the backoff, while still reporting the provider interval in full', async () => {
+    // An exhausted daily quota legitimately resets hours away. Sleeping that
+    // inside complete() would hang the Match with no diagnostic, so the wait is
+    // capped at the config's `maxBackoffMs` while the signal stays truthful --
+    // pausing a Deployment for the rest of the day is the runner's call (AD-9).
+    const transport = rateLimited({ 'retry-after': '86400' });
+    await clientWith(transport).complete(PROMPT_REQUEST);
+
+    expect(transport.signals()[0].retryAfterMs).toBe(86_400_000);
+    expect(transport.sleeps()).toStrictEqual([120_000]);
+  });
+
+  it('sleeps the whole interval when it is under the cap', async () => {
+    const transport = rateLimited({ 'retry-after': '30' });
+    await clientWith(transport).complete(PROMPT_REQUEST);
+    expect(transport.sleeps()).toStrictEqual([30_000]);
+  });
+
   it('does not retry the decision: one call in, one request out', async () => {
     const transport = rateLimited();
     await clientWith(transport).complete(PROMPT_REQUEST);
@@ -517,7 +567,7 @@ describe('a Groq Deployment inside a real Match (AC1)', () => {
   }
 
   it('produces a schema-valid Command Log with provider and endpoint on every entry', async () => {
-    const { env, deployment, match } = await playMatch([{ body: RECORDED_200 }]);
+    const { env, deployment, match } = await playMatch(repeat(64, { body: RECORDED_200 }));
 
     const entries = match.decisions.filter(
       (entry) => entry.agentIndex === 0 && entry.action !== null,
@@ -553,7 +603,7 @@ describe('a Groq Deployment inside a real Match (AC1)', () => {
   });
 
   it('debits the bank by the reported count, with the arithmetic done by the Harness (AC4)', async () => {
-    const { match } = await playMatch([{ body: RECORDED_200 }]);
+    const { match } = await playMatch(repeat(64, { body: RECORDED_200 }));
     const banked = match.decisions
       .filter((entry) => entry.agentIndex === 0 && entry.action !== null)
       .map((entry) => entry.bankRemaining);
@@ -567,7 +617,7 @@ describe('a Groq Deployment inside a real Match (AC1)', () => {
     const { transport, match } = await playMatch([
       { body: RECORDED_200 },
       { status: 429, headers: { 'retry-after': '2' }, body: RECORDED_429 },
-      { body: RECORDED_200 },
+      ...repeat(62, { body: RECORDED_200 }),
     ]);
 
     const entries = match.decisions.filter(

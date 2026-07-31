@@ -4,13 +4,18 @@
     "Story 3.2 AC5: these are configuration. INV-8: an endpoint absent from `endpoints` fails",
     "configuration validation, which is what keeps a paid endpoint from ever being configured.",
     "These numbers move. Re-verify at the start of each epic and update `verifiedOn`.",
-    "`fallbackBackoffMs` is used only when a 429 carries no timing header at all."
+    "`fallbackBackoffMs` is used only when a 429 carries no timing header at all.",
+    "`maxBackoffMs` bounds how long one call may block the Harness. A daily quota",
+    "legitimately resets hours away, and sleeping that inside complete() would hang",
+    "a Match with no diagnostic. The signal still reports the provider's true",
+    "interval, so the runner can make the long decision that is its job (AD-9)."
   ],
   "verifiedOn": "2026-08-01",
   "providers": {
     "groq": {
       "endpoints": ["https://api.groq.com/openai/v1/chat/completions"],
       "fallbackBackoffMs": 60000,
+      "maxBackoffMs": 120000,
       "defaults": {
         "requestsPerMinute": 30,
         "requestsPerDay": 1000,

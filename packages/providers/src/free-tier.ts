@@ -27,6 +27,14 @@ export interface FreeTierProvider {
   readonly endpoints: readonly string[];
   /** Backoff used only when a rate-limit response carries no timing header at all. */
   readonly fallbackBackoffMs: number;
+  /**
+   * Ceiling on how long one call may block the Harness while backing off. A
+   * daily quota resets hours away and an adapter that slept that long inside
+   * `complete()` would hang a Match with no diagnostic. The signal still
+   * reports the provider's true interval, so the decision to pause a
+   * Deployment for the rest of the day stays with the runner (AD-9).
+   */
+  readonly maxBackoffMs: number;
   /** Applied to any model without its own entry below. */
   readonly defaults: FreeTierLimits;
   readonly models: Readonly<Record<string, FreeTierLimits>>;
@@ -93,12 +101,21 @@ function validateProvider(value: unknown, name: string): FreeTierProvider {
     validatedModels[model] = validateLimits(models[model], `providers.${name}.models.${model}`);
   }
 
+  const fallbackBackoffMs = positiveInteger(
+    record.fallbackBackoffMs,
+    `providers.${name}.fallbackBackoffMs`,
+  );
+  const maxBackoffMs = positiveInteger(record.maxBackoffMs, `providers.${name}.maxBackoffMs`);
+  if (maxBackoffMs < fallbackBackoffMs) {
+    fail(
+      `providers.${name}.maxBackoffMs (${maxBackoffMs}) must not be below fallbackBackoffMs (${fallbackBackoffMs}), or the configured fallback could never be waited out`,
+    );
+  }
+
   return Object.freeze({
     endpoints: Object.freeze([...(endpoints as string[])]),
-    fallbackBackoffMs: positiveInteger(
-      record.fallbackBackoffMs,
-      `providers.${name}.fallbackBackoffMs`,
-    ),
+    fallbackBackoffMs,
+    maxBackoffMs,
     defaults: validateLimits(record.defaults, `providers.${name}.defaults`),
     models: Object.freeze(validatedModels),
   });

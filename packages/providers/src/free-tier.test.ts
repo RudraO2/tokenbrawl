@@ -32,6 +32,7 @@ function document(providerOverrides: Record<string, unknown> = {}): unknown {
       groq: {
         endpoints: [GROQ_ENDPOINT],
         fallbackBackoffMs: 60_000,
+        maxBackoffMs: 120_000,
         defaults: { ...VALID_LIMITS },
         models: {},
         ...providerOverrides,
@@ -153,6 +154,10 @@ describe('free-tier config validation', () => {
       [document({ fallbackBackoffMs: 0 }), /fallbackBackoffMs must be a positive safe integer/],
       [document({ fallbackBackoffMs: -1 }), /fallbackBackoffMs must be a positive safe integer/],
       [document({ fallbackBackoffMs: '60000' }), /fallbackBackoffMs must be a positive safe integer/],
+      [document({ maxBackoffMs: 0 }), /maxBackoffMs must be a positive safe integer/],
+      // A ceiling below the fallback would make the configured fallback
+      // unreachable -- the two numbers must be consistent, not merely valid.
+      [document({ maxBackoffMs: 30_000 }), /must not be below fallbackBackoffMs/],
       [
         document({ defaults: { ...VALID_LIMITS, requestsPerMinute: 0 } }),
         /defaults\.requestsPerMinute must be a positive safe integer/,

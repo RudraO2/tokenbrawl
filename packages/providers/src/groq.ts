@@ -111,6 +111,15 @@ function reportedCount(value: unknown): number | null {
  * budget is metered, never set).
  */
 export function groqRequestBody(model: string, request: ProviderRequest): string {
+  if (request.maxTokens !== undefined && !(Number.isSafeInteger(request.maxTokens) && request.maxTokens > 0)) {
+    // Only `maxTokensFor` should ever fill this in, and it produces 8 or
+    // nothing. A zero, a fraction or a negative would otherwise go on the wire
+    // and come back as a remote 400, one wasted request later.
+    throw new Error(
+      `groqRequestBody: maxTokens must be a positive safe integer when set, got ${String(request.maxTokens)}`,
+    );
+  }
+
   const body: Record<string, unknown> = {
     model,
     messages: [
@@ -193,6 +202,7 @@ export function createGroqClient(config: GroqClientConfig): GroqClient {
 
   const limits = freeTierLimitsFor(GROQ_PROVIDER_ID, model, freeTier);
   const fallbackBackoffMs = providerConfig.fallbackBackoffMs;
+  const maxBackoffMs = providerConfig.maxBackoffMs;
   const httpFetch = config.fetch ?? defaultHttpFetch();
   const sleep = config.sleep ?? defaultSleep();
 
@@ -237,7 +247,11 @@ export function createGroqClient(config: GroqClientConfig): GroqClient {
       });
 
       onRateLimit?.(signal);
-      await sleep(signal.retryAfterMs);
+      // Bounded. The signal keeps the provider's true interval -- a daily quota
+      // resets hours away -- but sleeping that here would hang the Match with
+      // no diagnostic. Pausing a Deployment for the rest of the day is the
+      // runner's decision to make from the signal it was just handed (AD-9).
+      await sleep(Math.min(signal.retryAfterMs, maxBackoffMs));
 
       return {
         text: bodyText,
