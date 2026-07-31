@@ -1,0 +1,25 @@
+{
+  "_comment": [
+    "Mountain Dusk by ansimuz -- CC0. See LICENSE.txt beside this file.",
+    "",
+    "Layers back to front. Each is 320x240 and is drawn at 3x to span the",
+    "960-wide arena, anchored to the BOTTOM so the horizon and treeline sit",
+    "behind the fighters and the sky crops off the top -- the arena is 400 tall,",
+    "the scaled layer is 720, and the interesting 400 are the lower ones.",
+    "",
+    "`dim` is how far the whole backdrop is faded toward the ground colour. The",
+    "house style is near-black with one accent (docs/DESIGN.md); a full-strength",
+    "dusk painting would fight the fighters for attention and drop the contrast",
+    "of the bone-white sprites below the point where the action reads."
+  ],
+  "scale": 3,
+  "dim": 0.55,
+  "layers": [
+    "/sprites/mountain-dusk/sky.png",
+    "/sprites/mountain-dusk/far-clouds.png",
+    "/sprites/mountain-dusk/far-mountains.png",
+    "/sprites/mountain-dusk/near-clouds.png",
+    "/sprites/mountain-dusk/mountains.png",
+    "/sprites/mountain-dusk/trees.png"
+  ]
+}

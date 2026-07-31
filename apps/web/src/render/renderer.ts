@@ -3,6 +3,7 @@ import { phaseOf } from '../../../../packages/env-fighter/src/frames';
 import type { FighterState } from '../../../../packages/env-fighter/src/state';
 import { BASIS_POINTS_FULL, type RenderFrame } from '../replay/film';
 import { animationFor, isFree } from './animation';
+import type { Backdrop } from './backdrop';
 import type { Canvas2D } from './canvas2d';
 import { createBlockArtist, type DrawnFighter, type FighterArtist } from './artist';
 import { THEME, type Theme } from './theme';
@@ -29,7 +30,15 @@ export interface DrawFrameOptions {
   readonly config: FighterConfig;
   readonly viewport: Viewport;
   readonly theme?: Theme;
-  readonly artist?: FighterArtist;
+  /**
+   * One artist per agent index. Each fighter gets its own sprite pack so a
+   * viewer can tell them apart by silhouette rather than by reading a health
+   * bar. A single entry is applied to both; none falls back to the block
+   * artist, which is what keeps the player working with no art at all.
+   */
+  readonly artists?: readonly FighterArtist[];
+  /** Scenery behind the fighters. Absent leaves the flat ground colour. */
+  readonly backdrop?: Backdrop;
 }
 
 /**
@@ -117,13 +126,17 @@ function drawBar(
  */
 export function drawFrame(ctx: Canvas2D, frame: RenderFrame, options: DrawFrameOptions): void {
   const theme = options.theme ?? THEME;
-  const artist = options.artist ?? createBlockArtist();
+  const fallbackArtist = createBlockArtist();
+  const artistFor = (agentIndex: 0 | 1): FighterArtist =>
+    options.artists?.[agentIndex] ?? options.artists?.[0] ?? fallbackArtist;
   const { config, viewport } = options;
   const groundY = viewport.height - FLOOR_INSET;
 
   ctx.clearRect(0, 0, viewport.width, viewport.height);
   ctx.fillStyle = theme.bg;
   ctx.fillRect(0, 0, viewport.width, viewport.height);
+
+  options.backdrop?.draw(ctx, viewport.width, viewport.height, theme);
 
   // The floor is a solid rule, not a gradient horizon. `fillRect` rather than
   // `strokeRect`: stroking a 4px-tall box draws its two long edges and leaves a
@@ -174,7 +187,7 @@ export function drawFrame(ctx: Canvas2D, frame: RenderFrame, options: DrawFrameO
         frameIndex: frame.index,
       }),
     };
-    artist.draw(ctx, fighter, theme);
+    artistFor(agentIndex).draw(ctx, fighter, theme);
   }
 
   for (const agentIndex of [0, 1] as const) {

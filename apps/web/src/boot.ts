@@ -1,6 +1,7 @@
 import type { CommandLog } from '@tokenbrawl/contracts';
 import { renderApp, type HostView, type MountPoint } from './main';
 import { createSpriteArtist, type FighterArtist } from './render/artist';
+import { createBackdrop, validateBackdropLayout, type Backdrop } from './render/backdrop';
 import { createSpriteSheet, validateSpriteSheetLayout } from './render/sprite-sheet';
 
 /**
@@ -32,7 +33,12 @@ import { createSpriteSheet, validateSpriteSheetLayout } from './render/sprite-sh
 
 /** Same-origin, so both are covered by the no-remote-asset sweep in `style-discipline.test.ts`. */
 const DEMO_REPLAY_URL = '/replays/demo.command-log.json';
-const SPRITE_LAYOUT_URL = '/sprites/martial-hero/layout.json';
+/** One pack per agent index, so the two fighters are told apart by silhouette. */
+const SPRITE_LAYOUT_URLS = [
+  '/sprites/martial-hero/layout.json',
+  '/sprites/martial-hero-2/layout.json',
+] as const;
+const BACKDROP_LAYOUT_URL = '/sprites/mountain-dusk/layout.json';
 
 interface LoadedImage {
   readonly width: number;
@@ -60,9 +66,44 @@ interface BrowserGlobals {
  * by the block artist, rather than an error page. The one thing that must never
  * happen is silence, so the reason is reported.
  */
-async function loadArtist(globals: BrowserGlobals): Promise<FighterArtist | undefined> {
+async function decodeAll(
+  globals: BrowserGlobals,
+  urls: readonly string[],
+): Promise<Map<string, HTMLImageElementLike>> {
+  const images = new Map<string, HTMLImageElementLike>();
+  await Promise.all(
+    urls.map(async (url) => {
+      const element = new (globals.Image as new () => LoadedImage)();
+      element.src = url;
+      await element.decode();
+      images.set(url, element);
+    }),
+  );
+  return images;
+}
+
+/** Scenery is the most skippable thing on the page: losing it must never cost the replay. */
+async function loadBackdrop(globals: BrowserGlobals): Promise<Backdrop | undefined> {
   try {
-    const response = await globals.fetch?.(SPRITE_LAYOUT_URL);
+    const response = await globals.fetch?.(BACKDROP_LAYOUT_URL);
+    if (response === undefined || !response.ok || globals.Image === undefined) {
+      return undefined;
+    }
+    const layout = validateBackdropLayout(await response.json());
+    return createBackdrop(await decodeAll(globals, layout.layers), layout);
+  } catch (error) {
+    console.warn(
+      `Backdrop unavailable, the arena will render flat: ${String(
+        error instanceof Error ? error.message : error,
+      )}`,
+    );
+    return undefined;
+  }
+}
+
+async function loadArtist(globals: BrowserGlobals, layoutUrl: string): Promise<FighterArtist | undefined> {
+  try {
+    const response = await globals.fetch?.(layoutUrl);
     if (response === undefined || !response.ok) {
       return undefined;
     }
@@ -77,17 +118,7 @@ async function loadArtist(globals: BrowserGlobals): Promise<FighterArtist | unde
     // decoding when playback starts draws nothing for its first few frames,
     // which reads as a fighter that failed to appear.
     const urls = [...new Set(Object.values(layout.clips).map((clip) => clip.image))];
-    const images = new Map<string, HTMLImageElementLike>();
-    await Promise.all(
-      urls.map(async (url) => {
-        const element = new (globals.Image as new () => LoadedImage)();
-        element.src = url;
-        await element.decode();
-        images.set(url, element);
-      }),
-    );
-
-    return createSpriteArtist(createSpriteSheet(images, layout));
+    return createSpriteArtist(createSpriteSheet(await decodeAll(globals, urls), layout));
   } catch (error) {
     // Reported, not swallowed: a sheet that silently failed to load looks
     // identical to one nobody ever wired up.
@@ -121,7 +152,10 @@ async function boot(): Promise<void> {
     // other field and guards every field it then uses (AD-3). Running Ajv here
     // would drag the validator into the bundle for no additional safety.
     const log = (await response.json()) as CommandLog;
-    renderApp(root, log, view, await loadArtist(globals));
+    const artists = (
+      await Promise.all(SPRITE_LAYOUT_URLS.map((url) => loadArtist(globals, url)))
+    ).filter((artist): artist is FighterArtist => artist !== undefined);
+    renderApp(root, log, view, artists, await loadBackdrop(globals));
   } catch (error) {
     // A player that fails silently looks identical to one that is still
     // loading. Say what went wrong, on the page, in the house style.

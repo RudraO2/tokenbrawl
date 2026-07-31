@@ -31,8 +31,11 @@ import { createSpriteSheet, validateSpriteSheetLayout } from './sprite-sheet';
  */
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const LAYOUT_PATH = join(HERE, '..', '..', 'public', 'sprites', 'martial-hero', 'layout.json');
-const SPRITES_DIR = join(HERE, '..', '..', 'public', 'sprites', 'martial-hero');
+const SPRITES_ROOT = join(HERE, '..', '..', 'public', 'sprites');
+/** Both shipped packs. p1 and p2 use different characters, and both must satisfy the same contract. */
+const PACKS = ['martial-hero', 'martial-hero-2'] as const;
+const LAYOUT_PATH = join(SPRITES_ROOT, PACKS[0], 'layout.json');
+const SPRITES_DIR = join(SPRITES_ROOT, PACKS[0]);
 
 function input(overrides: Partial<AnimationInput> = {}): AnimationInput {
   return {
@@ -266,5 +269,58 @@ describe('rejecting an unusable sheet layout', () => {
   it('rejects a layout whose image was never loaded', () => {
     const parsed = validateSpriteSheetLayout(layoutWith({}));
     expect(() => createSpriteSheet(new Map(), parsed)).toThrow(/no image was loaded/);
+  });
+});
+
+describe.each(PACKS)('sprite pack %s', (pack) => {
+  const dir = join(SPRITES_ROOT, pack);
+
+  function layout(): ReturnType<typeof validateSpriteSheetLayout> {
+    return validateSpriteSheetLayout(JSON.parse(readFileSync(join(dir, 'layout.json'), 'utf8')));
+  }
+
+  function realImages(): ReadonlyMap<string, { width: number; height: number }> {
+    const images = new Map<string, { width: number; height: number }>();
+    for (const clip of Object.values(layout().clips)) {
+      if (images.has(clip.image)) {
+        continue;
+      }
+      const bytes = readFileSync(join(dir, clip.image.split('/').pop() ?? ''));
+      images.set(clip.image, { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) });
+    }
+    return images;
+  }
+
+  it('ships its own CC0 licence text', () => {
+    expect(readFileSync(join(dir, 'LICENSE.txt'), 'utf8')).toContain('Creative Commons Zero');
+  });
+
+  it('satisfies every clip the animation can ask for', () => {
+    const clips = layout().clips;
+    for (const name of CLIP_NAMES) {
+      expect(clips[name].frames).toBeGreaterThanOrEqual(CLIP_FRAME_COUNTS[name]);
+    }
+  });
+
+  it('fits inside its real PNGs on disk', () => {
+    // The two packs have genuinely different frame counts -- pack 2's idle is 4
+    // where pack 1's is 8, its attacks are 4 where pack 1's are 6. A layout that
+    // over-runs its image draws transparent nothing, which looks exactly like a
+    // fighter that vanished.
+    expect(() => createSpriteSheet(realImages(), layout())).not.toThrow();
+  });
+
+  it('starts each Commitment Window phase on a different frame', () => {
+    // Pack 2 has only four attack frames, so its phases overlap. What must hold
+    // for both packs is that startup, active and recovery each *begin*
+    // somewhere different -- otherwise a viewer cannot tell a punishable
+    // recovery from an active hitbox, which is the whole point of the sprite
+    // work.
+    const sheet = createSpriteSheet(realImages(), layout());
+    const starts = (['attack-startup', 'attack-active', 'attack-recovery'] as const).map(
+      (clip) => sheet.frameFor(clip, 0).sx,
+    );
+    expect(new Set(starts).size).toBe(3);
+    expect(starts).toStrictEqual([...starts].sort((a, b) => a - b));
   });
 });

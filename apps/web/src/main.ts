@@ -5,6 +5,7 @@ import { createPlaybackClock, type PlaybackClock } from './player/clock';
 import { buildReplayFilm, type ReplayFilm } from './replay/film';
 import type { Canvas2D } from './render/canvas2d';
 import type { FighterArtist } from './render/artist';
+import type { Backdrop } from './render/backdrop';
 import { drawFrame } from './render/renderer';
 import './styles/app.css';
 
@@ -97,7 +98,8 @@ export function mountPlayer(
   canvas: CanvasSurface,
   log: unknown,
   view: HostView,
-  artist?: FighterArtist,
+  artists?: readonly FighterArtist[],
+  backdrop?: Backdrop,
 ): MountedPlayer {
   const env = createFighterEnvironment();
   const film = buildReplayFilm(log, env);
@@ -112,7 +114,7 @@ export function mountPlayer(
   const viewport = { width: CANVAS_WIDTH, height: CANVAS_HEIGHT };
 
   const paint = (index: number): void => {
-    drawFrame(ctx, film.frames[index], { config: DEFAULT_FIGHTER_CONFIG, viewport, artist });
+    drawFrame(ctx, film.frames[index], { config: DEFAULT_FIGHTER_CONFIG, viewport, artists, backdrop });
   };
 
   const clock = createPlaybackClock({
@@ -157,7 +159,8 @@ export function renderApp(
   root: MountPoint,
   log: CommandLog,
   view: HostView,
-  artist?: FighterArtist,
+  artists?: readonly FighterArtist[],
+  backdrop?: Backdrop,
 ): MountedPlayer {
   root.innerHTML = `
     <header class="tb-masthead">
@@ -176,7 +179,7 @@ export function renderApp(
     throw new Error('renderApp: the shell did not mount.');
   }
 
-  const mounted = mountPlayer(canvas as unknown as CanvasSurface, log, view, artist);
+  const mounted = mountPlayer(canvas as unknown as CanvasSurface, log, view, artists, backdrop);
   const chip = hashChip(mounted.film);
 
   readout.innerHTML = `

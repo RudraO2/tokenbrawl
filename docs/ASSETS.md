@@ -12,7 +12,8 @@ cannot be verified, the story ships without the asset and says so.
 
 | Asset | Source | Licence | Checked |
 |---|---|---|---|
-| Martial Hero pack (`apps/web/public/sprites/martial-hero/`) | https://luizmelo.itch.io/martial-hero | **Creative Commons Zero (CC-0)** | 2026-08-01 |
+| Martial Hero (`apps/web/public/sprites/martial-hero/`) — p1 | https://luizmelo.itch.io/martial-hero | **Creative Commons Zero (CC-0)** | 2026-08-01 |
+| Martial Hero 2 (`apps/web/public/sprites/martial-hero-2/`) — p2 | https://luizmelo.itch.io/martial-hero-2 | **Creative Commons Zero (CC-0)** | 2026-08-01 |
 
 This is the pack the brief and PRD named from the start. The licence was read
 from the archive itself, not inferred from the store page — `LICENSE.txt` ships
@@ -21,13 +22,53 @@ alongside the art and says, verbatim:
 > This pack - Martial Hero Asset Pack is Creative Commons Zero (CC-0). Can be
 > used in commercial and non-commercial projects.
 
-Nine sheets, 200×200 frames: Idle 8, Run 8, Attack1 6, Attack2 6, Death 6,
-Take Hit 4, Fall 2, Jump 2. `layout.json` beside them maps the eleven clips in
-`apps/web/src/render/animation.ts` onto those files.
+Two packs, one per fighter, so a viewer tells them apart by silhouette rather
+than by reading a health bar. Both licences were read from their own archives
+and both `LICENSE.txt` files ship beside the art; a test asserts they stay
+there.
+
+Their frame counts differ, which is the point of the layout format:
+
+| | Idle | Run | Attack1 | Attack2 | Death | Take Hit |
+|---|---|---|---|---|---|---|
+| Martial Hero (p1) | 8 | 8 | 6 | 6 | 6 | 4 |
+| Martial Hero 2 (p2) | 4 | 8 | 4 | 4 | 7 | 3 |
+
+`layout.json` beside each maps the eleven clips in
+`apps/web/src/render/animation.ts` onto those files. With only four attack
+frames, pack 2's Commitment Window phases overlap (startup 0-1, active 1-2,
+recovery 2-3) — each phase still *begins* on a different frame, which is the
+property a test enforces for both packs and the one a viewer needs.
+
+`anchorY` differs between the packs (120 vs 129) because the artist drew the
+characters at different heights inside the same 200×200 frame. Both were found
+by looking at the rendered page, not by reading the files.
 
 The FightingICE / Rumble Fish 2 sprites remain **rejected**: Dimps grants use
 "for research purposes" and no redistribution licence exists, which does not
 survive a public repository.
+
+### Arena backdrop
+
+| Asset | Source | Licence | Checked |
+|---|---|---|---|
+| Mountain Dusk (`apps/web/public/sprites/mountain-dusk/`) | https://ansimuz.itch.io/mountain-dusk-parallax-background | **CC0 1.0 Universal** | 2026-08-01 |
+
+Verified twice: the pack's bundled `public-license.pdf` (kept beside the
+layers) contains "Creative Commons Zero (CC0", and the itch.io page states
+"Creative Commons Zero v1.0 Universal".
+
+Six layers drawn back to front, static rather than parallaxed — the arena is a
+single fixed axis with no camera, so a scroll would be motion corresponding to
+nothing in the simulation. Anchored to the bottom so the treeline sits behind
+the fighters and the sky crops off.
+
+`dim: 0.55` fades the stack toward `--tb-bg`. Full strength fought the fighters
+for attention and dropped the bone-white sprites' contrast below the point
+where the action reads; scenery that competes with the subject is a defect.
+
+**Rejected:** `edermunizz/free-pixel-art-forest` — CC-BY-**ND**, no derivatives,
+which does not survive being recomposited into a stage.
 
 ### Swapping in a different pack
 

@@ -1,0 +1,40 @@
+{
+  "_comment": [
+    "Martial Hero 2 by LuizMelo -- Creative Commons Zero (CC-0). Licence text is",
+    "in LICENSE.txt beside this file; provenance is in docs/ASSETS.md.",
+    "",
+    "This is p2's character. Two packs rather than one so a viewer can tell the",
+    "fighters apart at a glance -- the health bars say which is which, but a",
+    "silhouette says it faster.",
+    "",
+    "Its frame counts are NOT the same as pack 1's: idle is 4 rather than 8,",
+    "attack1 and attack2 are 4 rather than 6, death is 7, take-hit is 3. That is",
+    "exactly why a clip names its own image and offset instead of the loader",
+    "assuming a uniform grid -- a real pack is whatever its author drew.",
+    "",
+    "With only 4 attack frames the three Commitment Window phases overlap:",
+    "startup 0-1, active 1-2, recovery 2-3. Each phase still starts on a",
+    "different frame, so startup, active and recovery remain distinguishable,",
+    "which is the property that matters. special-active and special-recovery",
+    "share frames 2-3 outright -- attack2 has four frames and the phases need",
+    "3+2+2, so something has to give, and doubling the tail is more honest than",
+    "inventing a pose the artist never drew."
+  ],
+  "frameWidth": 200,
+  "frameHeight": 200,
+  "scale": 3,
+  "anchorY": 129,
+  "clips": {
+    "idle": { "image": "/sprites/martial-hero-2/idle.png", "x": 0, "y": 0, "frames": 4 },
+    "walk": { "image": "/sprites/martial-hero-2/run.png", "x": 0, "y": 0, "frames": 8 },
+    "block": { "image": "/sprites/martial-hero-2/fall.png", "x": 0, "y": 0, "frames": 2 },
+    "attack-startup": { "image": "/sprites/martial-hero-2/attack1.png", "x": 0, "y": 0, "frames": 2 },
+    "attack-active": { "image": "/sprites/martial-hero-2/attack1.png", "x": 200, "y": 0, "frames": 2 },
+    "attack-recovery": { "image": "/sprites/martial-hero-2/attack1.png", "x": 400, "y": 0, "frames": 2 },
+    "special-startup": { "image": "/sprites/martial-hero-2/attack2.png", "x": 0, "y": 0, "frames": 3 },
+    "special-active": { "image": "/sprites/martial-hero-2/attack2.png", "x": 400, "y": 0, "frames": 2 },
+    "special-recovery": { "image": "/sprites/martial-hero-2/attack2.png", "x": 400, "y": 0, "frames": 2 },
+    "hit": { "image": "/sprites/martial-hero-2/take-hit.png", "x": 0, "y": 0, "frames": 3 },
+    "ko": { "image": "/sprites/martial-hero-2/death.png", "x": 1200, "y": 0, "frames": 1 }
+  }
+}
