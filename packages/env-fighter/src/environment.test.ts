@@ -624,6 +624,27 @@ describe('config validation', () => {
     );
   });
 
+  it('rejects a negative value where only a magnitude is meaningful', () => {
+    expect(() => createFighterEnvironment({ moveUnitsPerTick: -2 })).toThrow(
+      /moveUnitsPerTick must not be negative/,
+    );
+    expect(() => createFighterEnvironment({ damageJitter: -1 })).toThrow(
+      /damageJitter must not be negative/,
+    );
+    expect(() => createFighterEnvironment({ attackRange: -80 })).toThrow(
+      /attackRange must not be negative/,
+    );
+    expect(() => createFighterEnvironment({ minSeparation: -40 })).toThrow(
+      /minSeparation must not be negative/,
+    );
+  });
+
+  it('rejects a special that the Super Meter could never pay for', () => {
+    expect(() => createFighterEnvironment({ specialMeterCost: 101, maxMeter: 100 })).toThrow(
+      /making special unusable/,
+    );
+  });
+
   it('accepts an integer override and applies it', () => {
     const env = createFighterEnvironment({ initialHealth: 42 });
     expect(env.reset(SEED).health).toStrictEqual([42, 42]);

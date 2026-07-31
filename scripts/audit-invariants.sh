@@ -260,28 +260,54 @@ fi
 # Story 2.1 this was documented in a source comment and nothing else.
 #
 # Scope is `packages/env-*/src` only: a package's own `vitest.config.ts` is
-# build tooling that never reaches a browser, and test files are exempt for
-# the same reason (`source-discipline.test.ts` imports `node:fs` precisely so
-# it can run this check a second time from inside the suite).
+# build tooling that never reaches a browser. Test files and `src/testing/`
+# are exempt for the same reason -- the cross-process determinism child under
+# `src/testing/` must read `process.argv` to be spawnable at all, and
+# `source-discipline.test.ts` imports `node:fs` precisely so it can run this
+# check a second time from inside the suite. That exemption is only safe
+# because `source-discipline.test.ts` separately asserts no shipped file
+# imports from `./testing/`.
+#
+# Both halves matter. Banning only the *import* leaves the larger hole: Node's
+# ambient globals (`process`, `Buffer`, `__dirname`) need no import statement
+# at all and break a browser bundle just as hard.
 echo
-echo "AD-4  environment adapters import no Node built-in"
+echo "AD-4  environment adapters use no Node built-in or Node global"
 ENV_SRC_DIRS=()
 for d in packages/env-*/src; do [ -d "$d" ] && ENV_SRC_DIRS+=("$d"); done
 if [ ${#ENV_SRC_DIRS[@]} -eq 0 ]; then
   skip "no environment adapter packages yet"
 else
+  ad4_grep() {
+    grep -rnE --include='*.ts' --include='*.tsx' --include='*.mts' --include='*.cts' \
+      --include='*.js' --include='*.jsx' --include='*.mjs' --include='*.cjs' \
+      --exclude='*.test.ts' --exclude='*.spec.ts' --exclude='*.test.tsx' --exclude='*.spec.tsx' \
+      --exclude-dir=testing --exclude-dir=node_modules --exclude-dir=dist --exclude-dir=build \
+      --exclude-dir=coverage --exclude-dir=.turbo \
+      "$1" "${ENV_SRC_DIRS[@]}" 2>/dev/null
+  }
+
   builtins='assert|buffer|child_process|crypto|events|fs|fs/promises|http|http2|https|inspector|module|net|os|path|perf_hooks|process|readline|stream|string_decoder|timers|tls|tty|url|util|v8|vm|worker_threads|zlib'
-  hits=$(grep -rnE --include='*.ts' --include='*.tsx' --include='*.mts' --include='*.cts' \
-          --include='*.js' --include='*.jsx' --include='*.mjs' --include='*.cjs' \
-          --exclude='*.test.ts' --exclude='*.spec.ts' --exclude='*.test.tsx' --exclude='*.spec.tsx' \
-          --exclude-dir=node_modules --exclude-dir=dist --exclude-dir=build --exclude-dir=coverage --exclude-dir=.turbo \
-          "(from|import|require\()[[:space:]]*\(?[[:space:]]*['\"](node:($builtins)|$builtins)['\"]" \
-          "${ENV_SRC_DIRS[@]}" 2>/dev/null)
+  ad4_broken=0
+
+  hits=$(ad4_grep "(from|import|require\()[[:space:]]*\(?[[:space:]]*['\"](node:($builtins)|$builtins)['\"]")
   if [ -n "$hits" ]; then
     fail "Node built-in imported by a shipped environment-adapter file (AD-4: must run unmodified in a browser):"
     echo "$hits" | sed 's/^/          /'
-  else
-    pass "no Node built-in imported by a shipped environment-adapter file"
+    ad4_broken=1
+  fi
+
+  # Comment lines are dropped first: prose legitimately names these.
+  hits=$(ad4_grep '(^|[^A-Za-z0-9_$.])(process|Buffer|__dirname|__filename|require)[[:space:]]*[.(]' \
+         | grep -vE '^\S+:[0-9]+:[[:space:]]*(//|\*|/\*)')
+  if [ -n "$hits" ]; then
+    fail "Node global used by a shipped environment-adapter file (needs no import, breaks a browser bundle just as hard):"
+    echo "$hits" | sed 's/^/          /'
+    ad4_broken=1
+  fi
+
+  if [ "$ad4_broken" -eq 0 ]; then
+    pass "no Node built-in or Node global in a shipped environment-adapter file"
   fi
 fi
 

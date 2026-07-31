@@ -91,6 +91,42 @@ export function assertIntegerConfig(config: FighterConfig): void {
     }
   }
 
+  // A negative value in any of these is not a playable variant, it is a
+  // simulation that runs backwards: negative `moveUnitsPerTick` turns
+  // `advance` into a retreat, negative `minSeparation` lets fighters walk
+  // through each other, and a negative range or damage silently disables a
+  // whole Action. Every one of them would still hash deterministically, so
+  // nothing downstream would ever report the config as the cause.
+  const NON_NEGATIVE_KEYS = [
+    'initialHealth',
+    'minSeparation',
+    'moveUnitsPerTick',
+    'attackRange',
+    'attackDamage',
+    'specialRange',
+    'specialDamage',
+    'specialMeterCost',
+    'specialCommitmentTicks',
+    'blockDamageReduction',
+    'meterOnHitLanded',
+    'meterOnHitTaken',
+    'maxMeter',
+    'damageJitter',
+  ] as const;
+  for (const key of NON_NEGATIVE_KEYS) {
+    if (config[key] < 0) {
+      throw new Error(`FighterConfig.${key} must not be negative, received: ${config[key]}`);
+    }
+  }
+
+  if (config.specialMeterCost > config.maxMeter) {
+    // `special` would be unusable forever, and no test of meter accrual could
+    // ever reach it -- a config that quietly deletes an Action.
+    throw new Error(
+      `FighterConfig.specialMeterCost (${config.specialMeterCost}) exceeds maxMeter (${config.maxMeter}), making special unusable`,
+    );
+  }
+
   if (config.ticksPerDecision <= 0) {
     // A zero or negative cadence means `tick` never advances, so `terminal()`
     // could never reach its timeout branch and a Match with no KO would spin

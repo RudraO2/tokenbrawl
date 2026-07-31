@@ -167,6 +167,32 @@ describe('shipped source discipline', () => {
     expect(offendingLines(pattern)).toStrictEqual([]);
   });
 
+  it('uses no Node ambient global, which needs no import at all (AD-4)', () => {
+    // The hole the import ban alone leaves wide open: `process.env`,
+    // `Buffer.from`, `__dirname` and `require(...)` are all reachable with no
+    // import statement to grep for, and every one of them breaks a browser
+    // bundle exactly as hard as `import 'node:fs'` would.
+    expect(
+      offendingLines(/(^|[^A-Za-z0-9_$.])(process|Buffer|__dirname|__filename|require)\s*[.(]/),
+    ).toStrictEqual([]);
+  });
+
+  it('never reaches into src/testing/, which is exempt from the AD-4 sweep', () => {
+    // `src/testing/` holds the cross-process determinism child, which must
+    // read `process.argv`. Both this file and the audit script exclude that
+    // directory -- an exemption that is only safe while no shipped module
+    // imports out of it.
+    const offences: string[] = [];
+    for (const { name, source } of shippedFiles()) {
+      for (const match of source.matchAll(/from\s+['"]([^'"]+)['"]/g)) {
+        if (match[1].includes('testing')) {
+          offences.push(`${name}: ${match[1]}`);
+        }
+      }
+    }
+    expect(offences).toStrictEqual([]);
+  });
+
   it('imports nothing outside this package except the frozen contracts (AD-1, AD-4)', () => {
     const bareImports: string[] = [];
     for (const { name, source } of shippedFiles()) {
