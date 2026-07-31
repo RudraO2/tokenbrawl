@@ -95,21 +95,77 @@ describe('env-fighter driven by the real Harness', () => {
     expect(result.result.endReason).toBe('ko');
     expect(result.result.outcome).toBe('p1');
     expect(result.result.healthRemaining[1]).toBe(0);
+    // AC6's early exit: a KO ends the Match before the cap, so the Harness
+    // stops issuing Decision Points rather than running out the clock.
+    expect(result.result.endTick).toBeLessThan(DEFAULT_FIGHTER_CONFIG.maxTicks);
   });
 
-  it('is polled once per actionable Agent per Decision Point, and never while committed', async () => {
+  it('issues a Decision Point exactly every 30 Ticks, for actionable Agents only (AC6)', async () => {
+    // The cadence claim from the Timing model table, read off the log the
+    // Harness actually produced rather than from the adapter's own constants:
+    // every tick present is a multiple of `ticksPerDecision`, they ascend with
+    // no gaps, and each Decision Point carries one entry per Agent -- `null`
+    // for a committed one, a real Action for an actionable one.
+    const env = createFighterEnvironment();
+    const brawler = repeatPattern(['attack'], 60);
+    const result = await runMatch(env, fighterAgents(brawler, TURTLE), SEED);
+
+    const ticks = [...new Set(result.decisions.map((entry) => entry.tick))];
+    expect(ticks).toStrictEqual(
+      ticks.map((_unused, index) => index * DEFAULT_FIGHTER_CONFIG.ticksPerDecision),
+    );
+    expect(result.decisions).toHaveLength(ticks.length * 2);
+    expect(result.result.endTick).toBe(ticks.length * DEFAULT_FIGHTER_CONFIG.ticksPerDecision);
+    expect(result.result.endTick).toBeLessThanOrEqual(DEFAULT_FIGHTER_CONFIG.maxTicks);
+  });
+
+  it('punishes a whiffed attack through the Harness, on the Agent that never got polled (AC2)', async () => {
+    // The story's central mechanic, end to end. p1 attacks from out of range
+    // while p2 closes; p1's 40-Tick window outlives the Decision Point, so at
+    // the next boundary the Harness does not poll it -- and an Agent that is
+    // not polled cannot block, which is exactly what the punish exploits.
+    //
+    // Method: the whiffer's punished Decision Points are the ones logged as
+    // `action: null` for index 0, and the damage it took is read from the
+    // terminal result. Comparing against the same Match where the opponent
+    // spends those Decision Points blocking instead of attacking isolates the
+    // punish from everything else the two scripts do.
+    const env = createFighterEnvironment({ startPosition: [420, 540] });
+    const whiffer = repeatPattern(['attack'], 60);
+    const punisher = repeatPattern(['advance', 'attack'], 60);
+
+    const punished = await runMatch(env, fighterAgents(whiffer, punisher), SEED);
+    const unpunished = await runMatch(
+      createFighterEnvironment({ startPosition: [420, 540] }),
+      fighterAgents(whiffer, repeatPattern(['advance', 'block'], 60)),
+      SEED,
+    );
+
+    const notPolled = punished.decisions.filter(
+      (entry) => entry.agentIndex === 0 && entry.action === null,
+    );
+    expect(notPolled.length).toBeGreaterThan(0);
+    expect(punished.result.healthRemaining[0]).toBeLessThan(
+      unpunished.result.healthRemaining[0],
+    );
+  });
+
+  it('is polled once per actionable Agent per Decision Point, and never while committed (AC1)', async () => {
     // The load-bearing claim in docs/ARCHITECTURE.md: not polling an Agent
     // mid-Commitment-Window is what keeps call volume inside free-tier
     // quotas. It only holds if the Harness actually honours *this* adapter's
     // isActionable, which nothing had checked.
     //
-    // `specialMeterCost: 0` because meter starts at 0 and `special` is its
-    // only consumer: at the default cost an Agent that only ever picks
-    // `special` can never afford one, so it never commits and this case
-    // would test nothing at all.
-    const env = createFighterEnvironment({ specialMeterCost: 0 });
-    const special = repeatPattern(['special'], 60);
-    const [aggressor, defender] = fighterAgents(special, TURTLE);
+    // Story 2.1's `attack` resolved within a single Decision Point and opened
+    // no commitment at all, so this case had to prove the claim through
+    // `special` at `specialMeterCost: 0` -- the only Story 2.1 Action with any
+    // lockout. Story 2.2 gives `attack` itself a 40-Tick Commitment Window
+    // (4 startup / 4 active / 32 recovery) that outlives the 30-Tick Decision
+    // Point cadence, so the same claim is now provable directly through
+    // `attack`, with no config override standing in for it.
+    const env = createFighterEnvironment();
+    const brawler = repeatPattern(['attack'], 60);
+    const [aggressor, defender] = fighterAgents(brawler, TURTLE);
     const result = await runMatch(env, [aggressor, defender], SEED);
 
     const notPolled = result.decisions.filter(
@@ -124,25 +180,32 @@ describe('env-fighter driven by the real Harness', () => {
     expect(defender.decideCallCount()).toBeGreaterThan(aggressor.decideCallCount());
   });
 
-  it('leaves an Agent that only ever picks an unaffordable special fully inert', async () => {
-    // Documents the 2.1 behaviour the case above had to configure around:
-    // `special` below its meter cost is a no-op, so such an Agent is polled
-    // at every Decision Point, commits to nothing, and loses on health.
-    // Story 2.2 replaces this with an illegal-Action rejection that applies
-    // the Fallback Action -- when it does, this expectation should change
-    // with it rather than being quietly deleted.
+  it('leaves an Agent that only ever picks an unaffordable special fully inert (AC3)', async () => {
+    // Deferred-work ledger item, now resolved: Story 2.2 has landed, and
+    // `special` below its meter cost is no longer a silent no-op -- it is
+    // rejected as illegal. `observe().legalActions` withholds it, and a
+    // submission of it anyway resolves as the Fallback Action (`stand`),
+    // exactly as a Parse Failure would. Because `stand` opens no commitment,
+    // this Agent is still polled at *every* Decision Point (never committed),
+    // still lands nothing, and the Match still times out at full health --
+    // the same externally observable ending as 2.1, now reached through
+    // illegal-Action rejection rather than a quiet no-op.
     const env = createFighterEnvironment();
-    const special = repeatPattern(['special'], 60);
-    const [stubborn] = fighterAgents(special, TURTLE);
-    const result = await runMatch(env, [stubborn, createScriptedAgent({
-      id: 'bot-turtle',
-      kind: 'bot',
-      script: TURTLE,
-    })], SEED);
+    // Meter starts at 0 and never accrues (neither side ever lands a hit
+    // against `block`/rejected-`special`), so `special` is illegal at every
+    // Decision Point this Match reaches -- not just the first.
+    expect(env.observe(env.reset(SEED), 0).legalActions).not.toContain('special');
 
-    expect(
-      result.decisions.filter((entry) => entry.agentIndex === 0 && entry.action === null),
-    ).toStrictEqual([]);
+    const special = repeatPattern(['special'], 60);
+    const [stubborn, turtle] = fighterAgents(special, TURTLE);
+    const result = await runMatch(env, [stubborn, turtle], SEED);
+
+    const stubbornDecisions = result.decisions.filter((entry) => entry.agentIndex === 0);
+    expect(stubbornDecisions.filter((entry) => entry.action === null)).toStrictEqual([]);
+    // Every one of those polls really happened: an Agent that is never
+    // committed is polled at every Decision Point, not merely logged as if it
+    // were.
+    expect(stubborn.decideCallCount()).toBe(stubbornDecisions.length);
     expect(result.result.endReason).toBe('timeout');
     expect(result.result.healthRemaining).toStrictEqual([
       DEFAULT_FIGHTER_CONFIG.initialHealth,

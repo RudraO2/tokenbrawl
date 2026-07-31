@@ -2,6 +2,13 @@ import { ACTIONS, type LoggedAction } from '@tokenbrawl/contracts';
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_FIGHTER_CONFIG, type FighterConfig } from './config';
 import { createFighterEnvironment } from './environment';
+import {
+  COMMITTED_ATTACK,
+  COMMITTED_NONE,
+  PHASE_RECOVERY,
+  phaseOf,
+  windowTotalTicks,
+} from './frames';
 import type { FighterState } from './state';
 
 type ActionPair = readonly [LoggedAction | null, LoggedAction | null];
@@ -11,6 +18,13 @@ const SEED = 12345;
 /** Close enough to trade: separation equals `minSeparation`, well inside `attackRange`. */
 const CLOSE_QUARTERS: Partial<FighterConfig> = { startPosition: [460, 500] };
 
+const ATTACK_WINDOW_TICKS = windowTotalTicks(DEFAULT_FIGHTER_CONFIG.attackWindow);
+const SPECIAL_WINDOW_TICKS = windowTotalTicks(DEFAULT_FIGHTER_CONFIG.specialWindow);
+/** Ticks of an attack's window left once one Decision Point has been simulated. */
+const ATTACK_TICKS_AFTER_ONE_STEP = ATTACK_WINDOW_TICKS - DEFAULT_FIGHTER_CONFIG.ticksPerDecision;
+/** Largest damage one unblocked `attack` can do: base plus the one-unit jitter. */
+const MAX_ATTACK_DAMAGE = DEFAULT_FIGHTER_CONFIG.attackDamage + DEFAULT_FIGHTER_CONFIG.damageJitter;
+
 function stateOf(overrides: Partial<FighterState> = {}): FighterState {
   return {
     tick: 0,
@@ -19,6 +33,8 @@ function stateOf(overrides: Partial<FighterState> = {}): FighterState {
     position: [460, 500],
     meter: [0, 0],
     commitmentRemaining: [0, 0],
+    committedAction: [COMMITTED_NONE, COMMITTED_NONE],
+    windowHitLanded: [0, 0],
     ...overrides,
   };
 }
@@ -61,10 +77,21 @@ describe('createFighterEnvironment -- adapter surface', () => {
     expect(env.maxTicks).toBe(1200);
   });
 
-  it('offers every Action as legal in this story', () => {
-    // Story 2.2 makes `special` illegal below its meter cost; here the grammar
-    // is the full frozen ACTIONS list at every Decision Point.
-    expect(env.observe(env.reset(SEED), 0).legalActions).toStrictEqual(ACTIONS);
+  it('withholds `special` until the Super Meter can pay for it (AC3)', () => {
+    // Story 2.1 offered the full frozen ACTIONS list at every Decision Point,
+    // which told a model an Action was available that the environment would
+    // then refuse. Story 2.2 makes the grammar honest: `special` appears only
+    // once it is affordable, and `step()` still rejects it if submitted anyway.
+    expect(env.observe(env.reset(SEED), 0).legalActions).not.toContain('special');
+    expect(env.observe(env.reset(SEED), 0).legalActions).toStrictEqual(
+      ACTIONS.filter((action) => action !== 'special'),
+    );
+
+    const armed = stateOf({ meter: [DEFAULT_FIGHTER_CONFIG.specialMeterCost, 0] });
+    // Exactly at the cost, not merely above it: an off-by-one here would make
+    // the Action unreachable at the only meter value a fight reliably hits.
+    expect(env.observe(armed, 0).legalActions).toStrictEqual(ACTIONS);
+    expect(env.observe(armed, 1).legalActions).not.toContain('special');
   });
 });
 
@@ -97,6 +124,11 @@ describe('reset (pure over the seed)', () => {
     expect(state.position).toStrictEqual(DEFAULT_FIGHTER_CONFIG.startPosition);
     expect(state.meter).toStrictEqual([0, 0]);
     expect(state.commitmentRemaining).toStrictEqual([0, 0]);
+    // No Commitment Window is open at tick 0, and no hit has registered --
+    // both new Story 2.2 fields start at their idle values rather than being
+    // left undefined, which `hash()` would refuse to serialise.
+    expect(state.committedAction).toStrictEqual([COMMITTED_NONE, COMMITTED_NONE]);
+    expect(state.windowHitLanded).toStrictEqual([0, 0]);
   });
 });
 
@@ -236,6 +268,8 @@ describe('hash (the Final-State Hash)', () => {
   it('is insensitive to key declaration order', () => {
     const forwards = stateOf();
     const backwards: FighterState = {
+      windowHitLanded: forwards.windowHitLanded,
+      committedAction: forwards.committedAction,
       commitmentRemaining: forwards.commitmentRemaining,
       meter: forwards.meter,
       position: forwards.position,
@@ -262,6 +296,10 @@ describe('hash (the Final-State Hash)', () => {
       { ...base, meter: [base.meter[0], base.meter[1] + 1] },
       { ...base, commitmentRemaining: [base.commitmentRemaining[0] + 1, base.commitmentRemaining[1]] },
       { ...base, commitmentRemaining: [base.commitmentRemaining[0], base.commitmentRemaining[1] + 1] },
+      { ...base, committedAction: [COMMITTED_ATTACK, base.committedAction[1]] },
+      { ...base, committedAction: [base.committedAction[0], COMMITTED_ATTACK] },
+      { ...base, windowHitLanded: [1, base.windowHitLanded[1]] },
+      { ...base, windowHitLanded: [base.windowHitLanded[0], 1] },
     ];
     expect(mutations).toHaveLength(Object.keys(base).length * 2 - 2);
     for (const mutated of mutations) {
@@ -407,13 +445,24 @@ describe('attacks, blocking and simultaneity', () => {
 describe('special and Commitment Windows', () => {
   const env = createFighterEnvironment(CLOSE_QUARTERS);
 
-  it('is inert when the Super Meter cannot pay for it', () => {
+  it('is rejected as illegal, exactly like the Fallback Action, below its cost (AC3)', () => {
+    // Story 2.1 made an unaffordable `special` a silent no-op. Story 2.2
+    // rejects it: the Fallback Action is substituted, which is inert. The
+    // observable difference from a no-op is that the substitution is stated
+    // rather than incidental -- so the strongest assertion available is that
+    // the resulting state is *bit-identical* to having submitted nothing.
     const start = stateOf({ meter: [DEFAULT_FIGHTER_CONFIG.specialMeterCost - 1, 0] });
-    const after = env.step(start, ['special', 'stand']);
+    const rejected = env.step(start, ['special', 'stand']);
+    const submittedNothing = env.step(start, [null, 'stand']);
 
-    expect(after.health).toStrictEqual(start.health);
-    expect(after.meter[0]).toBe(start.meter[0]);
-    expect(after.commitmentRemaining[0]).toBe(0);
+    expect(env.hash(rejected)).toBe(env.hash(submittedNothing));
+    expect(rejected.health).toStrictEqual(start.health);
+    expect(rejected.meter[0]).toBe(start.meter[0]);
+    expect(rejected.commitmentRemaining[0]).toBe(0);
+    expect(rejected.committedAction[0]).toBe(COMMITTED_NONE);
+    // And the Agent was told so: withholding it and refusing it are two halves
+    // of one rule, not alternatives.
+    expect(env.observe(start, 0).legalActions).not.toContain('special');
   });
 
   it('spends meter, deals its damage and commits the attacker when affordable', () => {
@@ -424,7 +473,13 @@ describe('special and Commitment Windows', () => {
       start.health[1] - DEFAULT_FIGHTER_CONFIG.specialDamage,
     );
     expect(after.meter[0]).toBe(DEFAULT_FIGHTER_CONFIG.meterOnHitLanded);
-    expect(after.commitmentRemaining[0]).toBe(DEFAULT_FIGHTER_CONFIG.specialCommitmentTicks);
+    // A 60-Tick window against a 30-Tick cadence: one Decision Point of it has
+    // been simulated, so half of it is still to come. Story 2.1 asserted the
+    // whole 60 here because it decremented the countdown once per step rather
+    // than once per Tick.
+    expect(after.commitmentRemaining[0]).toBe(
+      SPECIAL_WINDOW_TICKS - DEFAULT_FIGHTER_CONFIG.ticksPerDecision,
+    );
   });
 
   it('commits and spends even on a whiff, which is what makes it punishable', () => {
@@ -437,23 +492,31 @@ describe('special and Commitment Windows', () => {
 
     expect(after.health[1]).toBe(start.health[1]);
     expect(after.meter[0]).toBe(0);
-    expect(after.commitmentRemaining[0]).toBe(DEFAULT_FIGHTER_CONFIG.specialCommitmentTicks);
+    expect(after.commitmentRemaining[0]).toBe(
+      SPECIAL_WINDOW_TICKS - DEFAULT_FIGHTER_CONFIG.ticksPerDecision,
+    );
   });
 
-  it('stops polling the committed Agent until the window elapses', () => {
+  it('stops polling the committed Agent for exactly the window it opened', () => {
+    // Two Decision Points of lockout for a 60-Tick window, not three. Story
+    // 2.1 assigned the countdown *after* decrementing it, so the window still
+    // read a full 60 at the end of the step that opened it and a fighter paid
+    // 90 Ticks for a 60-Tick Action. Counting down inside the step that opens
+    // the window is what makes `commitmentRemaining` mean what it says.
     let state = env.step(stateOf({ meter: [DEFAULT_FIGHTER_CONFIG.specialMeterCost, 0] }), [
       'special',
       'stand',
     ]);
+    expect(state.commitmentRemaining[0]).toBe(
+      SPECIAL_WINDOW_TICKS - DEFAULT_FIGHTER_CONFIG.ticksPerDecision,
+    );
     expect(env.isActionable(state, 0)).toBe(false);
     expect(env.isActionable(state, 1)).toBe(true);
 
     state = env.step(state, [null, 'stand']);
-    expect(env.isActionable(state, 0)).toBe(false);
-
-    state = env.step(state, [null, 'stand']);
     expect(env.isActionable(state, 0)).toBe(true);
     expect(state.commitmentRemaining[0]).toBe(0);
+    expect(state.committedAction[0]).toBe(COMMITTED_NONE);
   });
 
   it('decrements the Commitment Window every step, so a Match can never stall', () => {
@@ -464,6 +527,268 @@ describe('special and Commitment Windows', () => {
       expect(state.commitmentRemaining[0]).toBeLessThan(before);
     }
     expect(state.commitmentRemaining).toStrictEqual([0, 0]);
+  });
+});
+
+describe('attack Commitment Windows (AC1)', () => {
+  const env = createFighterEnvironment(CLOSE_QUARTERS);
+
+  it('locks the attacker out of the next Decision Point, and only the next one', () => {
+    // The whole point of the story: Story 2.1's `attack` resolved inside one
+    // Decision Point and opened no window at all, so attacking was free and
+    // nothing could ever be punished. A 40-Tick window against a 30-Tick
+    // cadence costs the attacker exactly one Decision Point.
+    const committed = env.step(env.reset(SEED), ['attack', 'stand']);
+    expect(committed.committedAction[0]).toBe(COMMITTED_ATTACK);
+    expect(committed.commitmentRemaining[0]).toBe(ATTACK_TICKS_AFTER_ONE_STEP);
+    expect(env.isActionable(committed, 0)).toBe(false);
+    expect(env.isActionable(committed, 1)).toBe(true);
+
+    const released = env.step(committed, [null, 'stand']);
+    expect(env.isActionable(released, 0)).toBe(true);
+    expect(released.commitmentRemaining[0]).toBe(0);
+    // The window is fully cleared, not merely counted out: a stale action code
+    // or hit flag left behind would change the Final-State Hash of an
+    // otherwise idle fighter.
+    expect(released.committedAction[0]).toBe(COMMITTED_NONE);
+    expect(released.windowHitLanded[0]).toBe(0);
+  });
+
+  it('spends its startup and active phases inside the Decision Point that opened it', () => {
+    // Both phases are shorter than the cadence, so by the next boundary the
+    // attacker is necessarily in recovery -- which is what makes the punish
+    // window in the case below reachable at all.
+    const committed = env.step(env.reset(SEED), ['attack', 'stand']);
+    expect(
+      phaseOf(DEFAULT_FIGHTER_CONFIG, committed.committedAction[0], committed.commitmentRemaining[0]),
+    ).toBe(PHASE_RECOVERY);
+    expect(
+      DEFAULT_FIGHTER_CONFIG.attackWindow.startup + DEFAULT_FIGHTER_CONFIG.attackWindow.active,
+    ).toBeLessThan(DEFAULT_FIGHTER_CONFIG.ticksPerDecision);
+  });
+
+  it('connects once per window even though its active phase spans several Ticks', () => {
+    const after = env.step(env.reset(SEED), ['attack', 'stand']);
+    const taken = DEFAULT_FIGHTER_CONFIG.initialHealth - after.health[1];
+
+    expect(DEFAULT_FIGHTER_CONFIG.attackWindow.active).toBeGreaterThan(1);
+    expect(taken).toBeGreaterThanOrEqual(DEFAULT_FIGHTER_CONFIG.attackDamage);
+    // One hit's worth, not one per active Tick: without the `windowHitLanded`
+    // flag this would be `active` hits deep and a fight would end in one step.
+    expect(taken).toBeLessThanOrEqual(MAX_ATTACK_DAMAGE);
+    expect(after.windowHitLanded[0]).toBe(1);
+  });
+
+  it('is not shortened by connecting, so recovery is a property of the frame data', () => {
+    const connected = env.step(env.reset(SEED), ['attack', 'stand']);
+    const whiffed = createFighterEnvironment().step(
+      createFighterEnvironment().reset(SEED),
+      ['attack', 'stand'],
+    );
+
+    expect(connected.health[1]).toBeLessThan(DEFAULT_FIGHTER_CONFIG.initialHealth);
+    expect(whiffed.health[1]).toBe(DEFAULT_FIGHTER_CONFIG.initialHealth);
+    expect(connected.commitmentRemaining[0]).toBe(whiffed.commitmentRemaining[0]);
+  });
+
+  it('whiffs when the opponent walks out of range before the active phase (AC2)', () => {
+    // Timing, not distance at the boundary: both fighters start exactly at
+    // `attackRange`, so the attack is in range when it is committed. The
+    // retreating opponent covers `moveUnitsPerTick` per Tick and is out of the
+    // band by the time the active phase arrives. Story 2.1 read separation once
+    // per Decision Point and so could not express this at all.
+    const spaced = createFighterEnvironment({
+      startPosition: [
+        DEFAULT_FIGHTER_CONFIG.startPosition[0],
+        DEFAULT_FIGHTER_CONFIG.startPosition[0] + DEFAULT_FIGHTER_CONFIG.attackRange,
+      ],
+    });
+    const start = spaced.reset(SEED);
+    const escaped = spaced.step(start, ['attack', 'retreat']);
+    const stood = spaced.step(start, ['attack', 'block']);
+
+    expect(
+      DEFAULT_FIGHTER_CONFIG.attackWindow.startup * DEFAULT_FIGHTER_CONFIG.moveUnitsPerTick,
+    ).toBeGreaterThan(0);
+    expect(escaped.health[1]).toBe(DEFAULT_FIGHTER_CONFIG.initialHealth);
+    // The control: standing still in the same band is hit, so the whiff above
+    // is caused by the movement and not by the band being wrong.
+    expect(stood.health[1]).toBeLessThan(DEFAULT_FIGHTER_CONFIG.initialHealth);
+  });
+
+  it('ignores an Action submitted for a fighter that is mid-window', () => {
+    // The Harness sends `null` for a committed Agent, but honouring a non-null
+    // Action here would let any caller cancel a Commitment Window -- and with
+    // it every guarantee the punish window rests on.
+    const midWindow = stateOf({
+      committedAction: [COMMITTED_ATTACK, COMMITTED_NONE],
+      commitmentRemaining: [ATTACK_TICKS_AFTER_ONE_STEP, 0],
+      windowHitLanded: [1, 0],
+    });
+    const after = env.step(midWindow, ['advance', 'stand']);
+
+    expect(after.position).toStrictEqual(midWindow.position);
+    expect(after.committedAction[0]).toBe(COMMITTED_NONE);
+    expect(after.commitmentRemaining[0]).toBe(0);
+  });
+});
+
+describe('whiff punishing (AC2)', () => {
+  it('lands full damage on a fighter that is still recovering', () => {
+    // The scenario the story exists for. p1 attacks from out of range while p2
+    // closes; p1's window outlives the Decision Point, so at the next boundary
+    // p1 is not polled, cannot block, and eats a clean hit.
+    const env = createFighterEnvironment({ startPosition: [420, 540] });
+    const whiffed = env.step(env.reset(SEED), ['attack', 'advance']);
+
+    expect(whiffed.health).toStrictEqual([
+      DEFAULT_FIGHTER_CONFIG.initialHealth,
+      DEFAULT_FIGHTER_CONFIG.initialHealth,
+    ]);
+    expect(env.isActionable(whiffed, 0)).toBe(false);
+    expect(
+      phaseOf(DEFAULT_FIGHTER_CONFIG, whiffed.committedAction[0], whiffed.commitmentRemaining[0]),
+    ).toBe(PHASE_RECOVERY);
+
+    const punished = env.step(whiffed, [null, 'attack']);
+    const taken = whiffed.health[0] - punished.health[0];
+    expect(taken).toBeGreaterThanOrEqual(DEFAULT_FIGHTER_CONFIG.attackDamage);
+
+    // A fighter that *could* block takes strictly less from the same hit, so
+    // "cannot block while committed" is doing real work rather than being an
+    // unobservable implementation detail.
+    const close = createFighterEnvironment(CLOSE_QUARTERS);
+    const blocked = close.step(close.reset(SEED), ['block', 'attack']);
+    const takenWhileBlocking = DEFAULT_FIGHTER_CONFIG.initialHealth - blocked.health[0];
+    expect(takenWhileBlocking).toBeLessThan(taken);
+  });
+
+  it('is damageable at every Tick of the recovery phase, not just the first', () => {
+    // "Damageable for the full recovery duration" swept offset by offset. Each
+    // iteration starts p1 that many Ticks into its window and has p2 attack;
+    // p2's own active phase falls a few Ticks later, well inside what remains.
+    const env = createFighterEnvironment(CLOSE_QUARTERS);
+    const recoveryStart =
+      DEFAULT_FIGHTER_CONFIG.attackWindow.startup + DEFAULT_FIGHTER_CONFIG.attackWindow.active;
+    const offsets: number[] = [];
+
+    for (let offset = recoveryStart; offset < ATTACK_WINDOW_TICKS; offset += 1) {
+      const recovering = stateOf({
+        committedAction: [COMMITTED_ATTACK, COMMITTED_NONE],
+        commitmentRemaining: [ATTACK_WINDOW_TICKS - offset, 0],
+        windowHitLanded: [1, 0],
+      });
+      const punished = env.step(recovering, [null, 'attack']);
+      const taken = DEFAULT_FIGHTER_CONFIG.initialHealth - punished.health[0];
+      if (taken < DEFAULT_FIGHTER_CONFIG.attackDamage) {
+        offsets.push(offset);
+      }
+    }
+
+    expect(recoveryStart).toBeLessThan(ATTACK_WINDOW_TICKS);
+    expect(offsets).toStrictEqual([]);
+  });
+});
+
+describe('movement caps', () => {
+  it('lets a lone closer reach exactly minSeparation', () => {
+    // Story 2.1 halved the closing room whether one fighter was advancing or
+    // two, so a solo advance approached `minSeparation` asymptotically and
+    // never arrived -- which is why its Harness KO case needed a hand-picked
+    // start position. The cap is now split only when both sides are closing.
+    const env = createFighterEnvironment();
+    let state = env.reset(SEED);
+    for (let round = 0; round < 20; round += 1) {
+      state = env.step(state, ['advance', 'block']);
+    }
+    expect(Math.abs(state.position[0] - state.position[1])).toBe(
+      DEFAULT_FIGHTER_CONFIG.minSeparation,
+    );
+  });
+});
+
+describe('meter accrual (AC4)', () => {
+  const env = createFighterEnvironment(CLOSE_QUARTERS);
+
+  it('accrues on a blocked hit too -- the hit landed, it was only reduced', () => {
+    const after = env.step(env.reset(SEED), ['attack', 'block']);
+    expect(DEFAULT_FIGHTER_CONFIG.initialHealth - after.health[1]).toBeLessThan(
+      DEFAULT_FIGHTER_CONFIG.attackDamage,
+    );
+    expect(after.meter[0]).toBe(DEFAULT_FIGHTER_CONFIG.meterOnHitLanded);
+    expect(after.meter[1]).toBe(DEFAULT_FIGHTER_CONFIG.meterOnHitTaken);
+  });
+
+  it('never accrues for a whiff', () => {
+    const far = createFighterEnvironment();
+    const after = far.step(far.reset(SEED), ['attack', 'attack']);
+    expect(after.meter).toStrictEqual([0, 0]);
+  });
+
+  it('never drives the Super Meter below zero when a special is paid for', () => {
+    const exact = stateOf({ meter: [DEFAULT_FIGHTER_CONFIG.specialMeterCost, 0] });
+    const far = createFighterEnvironment({ startPosition: DEFAULT_FIGHTER_CONFIG.startPosition });
+    const after = far.step({ ...exact, position: DEFAULT_FIGHTER_CONFIG.startPosition }, [
+      'special',
+      'stand',
+    ]);
+    expect(after.meter[0]).toBe(0);
+  });
+});
+
+describe('simultaneity at Tick granularity (AC5)', () => {
+  const env = createFighterEnvironment(CLOSE_QUARTERS);
+
+  it('gives the same result whichever side submits which Action', () => {
+    // Swapping the tuple round must mirror the outcome exactly. Jitter is
+    // disabled because the two sides deliberately draw it from disjoint PRNG
+    // bits, which is an intended asymmetry that would mask this property.
+    const fair = createFighterEnvironment({ ...CLOSE_QUARTERS, damageJitter: 0 });
+    const start = fair.reset(SEED);
+    const forwards = fair.step(start, ['attack', 'block']);
+    const backwards = fair.step(start, ['block', 'attack']);
+
+    expect(backwards.health).toStrictEqual([forwards.health[1], forwards.health[0]]);
+    expect(backwards.meter).toStrictEqual([forwards.meter[1], forwards.meter[0]]);
+    expect(backwards.commitmentRemaining).toStrictEqual([
+      forwards.commitmentRemaining[1],
+      forwards.commitmentRemaining[0],
+    ]);
+  });
+
+  it('resolves a mutual trade rather than letting the first hit pre-empt the second', () => {
+    // One health each, so a resolution that checked for a KO between the two
+    // sides *within* the Tick would leave the second fighter alive on 1. Not
+    // `MAX_ATTACK_DAMAGE` health: each side draws its jitter from a different
+    // PRNG bit, so at that health one side can survive on a legitimate
+    // one-unit-lower roll and the case would be flaky rather than wrong.
+    const traded = env.step(stateOf({ health: [1, 1] }), ['attack', 'attack']);
+    // Both connect on the same Tick and both are applied: a sequential
+    // resolution would have let whichever side was processed first survive.
+    expect(traded.health).toStrictEqual([0, 0]);
+    expect(traded.windowHitLanded).toStrictEqual([1, 1]);
+  });
+});
+
+describe('KO freezes the rest of the Decision Point', () => {
+  const env = createFighterEnvironment(CLOSE_QUARTERS);
+
+  it('advances the Tick counter by exactly one cadence and applies nothing further', () => {
+    // `runMatch` advances its own tick counter by `ticksPerDecision` per
+    // iteration, so a step that returned a partial Tick count would put the
+    // Harness's tick and the state's tick permanently out of step -- and every
+    // logged Decision Point after it would carry the wrong tick.
+    const start = stateOf({ health: [1, DEFAULT_FIGHTER_CONFIG.initialHealth] });
+    const after = env.step(start, ['advance', 'attack']);
+
+    expect(after.health[0]).toBe(0);
+    expect(after.tick).toBe(start.tick + DEFAULT_FIGHTER_CONFIG.ticksPerDecision);
+    expect(env.terminal(after)).toMatchObject({ endReason: 'ko', outcome: 'p2' });
+    // p1 was advancing when it died: the freeze means it stops there rather
+    // than walking the remaining Ticks of a Decision Point it did not survive.
+    expect(Math.abs(after.position[0] - start.position[0])).toBeLessThan(
+      DEFAULT_FIGHTER_CONFIG.moveUnitsPerTick * DEFAULT_FIGHTER_CONFIG.ticksPerDecision,
+    );
   });
 });
 
@@ -567,6 +892,27 @@ describe('observe', () => {
   it('is side-relative, so a mirrored state reads identically to both Agents', () => {
     const mirrored = stateOf({ health: [70, 70], meter: [20, 20], position: [400, 560] });
     expect(env.observe(mirrored, 0).state).toBe(env.observe(mirrored, 1).state);
+  });
+
+  it('reports the opponent’s Commitment Window, so a punish is playable (AC2)', () => {
+    // Whiff punishing is only a decision an Agent can make if it can see the
+    // opponent is stuck. Reported as an integer phase code, never a string:
+    // every value in the payload has to survive the integers-only canonical
+    // serialisation the case above pins.
+    const recovering = stateOf({
+      committedAction: [COMMITTED_ATTACK, COMMITTED_NONE],
+      commitmentRemaining: [ATTACK_TICKS_AFTER_ONE_STEP, 0],
+      windowHitLanded: [0, 0],
+    });
+    const defender = JSON.parse(env.observe(recovering, 1).state) as Record<string, number>;
+    const attacker = JSON.parse(env.observe(recovering, 0).state) as Record<string, number>;
+
+    expect(defender.opponentPhase).toBe(PHASE_RECOVERY);
+    expect(defender.opponentCommitmentRemaining).toBe(ATTACK_TICKS_AFTER_ONE_STEP);
+    // The committed fighter's own window is not reported: it is only ever
+    // polled when it has none open, so the value would always be zero.
+    expect(attacker.opponentCommitmentRemaining).toBe(0);
+    expect(Object.keys(attacker)).not.toContain('selfCommitmentRemaining');
   });
 
   it('reports separation and the space behind each fighter', () => {

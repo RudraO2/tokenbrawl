@@ -110,6 +110,7 @@ describe('shipped source discipline', () => {
         'canonical.ts',
         'config.ts',
         'environment.ts',
+        'frames.ts',
         'index.ts',
         'prng.ts',
         'sha256.ts',

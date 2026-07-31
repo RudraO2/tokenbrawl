@@ -41,9 +41,28 @@ const REGISTER_CONTRACTS = resolve(
 
 const SEED = 12345;
 
+/**
+ * Both fighters close to trading range first, then trade.
+ *
+ * Story 2.1's version of this script opened at the default 320-unit separation
+ * and never got inside `attackRange`, so every `attack` in it whiffed and the
+ * hash it pinned never depended on damage, Super Meter, or a Commitment Window
+ * that had connected. Story 2.2 put four new integers per Match into the state
+ * (`committedAction` and `windowHitLanded`) and made hit resolution
+ * tick-sensitive; a cross-process gate that cannot reach those paths is not
+ * covering the parts of the engine most likely to leak process-local state.
+ *
+ * The leading advances also let meter accrue past `specialMeterCost`, so the
+ * `special` further down is a legal Action rather than one rejected for being
+ * unaffordable -- both branches of AC3 are then exercised across processes.
+ */
 const SCRIPT: readonly (readonly [LoggedAction | null, LoggedAction | null])[] = [
   ['advance', 'advance'],
+  ['advance', 'advance'],
+  ['advance', 'advance'],
   ['attack', 'block'],
+  [null, 'attack'],
+  ['attack', 'attack'],
   ['retreat', 'attack'],
   ['advance', 'stand'],
   ['attack', 'attack'],

@@ -2,14 +2,31 @@
  * Frame data for the fighter.
  *
  * Every number the simulation reads lives here -- there are no magic numbers
- * in `environment.ts`. The values below are *starting* values chosen by Story
- * 2.1; Story 2.4's skill-separation gate calibrates them, and Story 2.2 adds
- * the startup/active/recovery breakdown that turns `specialCommitmentTicks`
- * into a real Commitment Window state machine.
+ * in `environment.ts`. The values below are *starting* values: Story 2.1 chose
+ * the first set, Story 2.2 added the startup/active/recovery breakdown that
+ * makes a Commitment Window a real state machine, and Story 2.4's
+ * skill-separation gate calibrates them all.
  *
  * Ticks throughout. Nothing here is a second, and nothing here is a playback
  * rate (INV-1).
  */
+
+/**
+ * One Action's frame data: how long before it can connect, how long it can
+ * connect for, and how long it is helpless afterwards.
+ *
+ * `active >= 1` always -- a window with no active tick is an Action that can
+ * never connect, which `assertIntegerConfig` rejects rather than shipping.
+ */
+export interface CommitmentWindow {
+  /** Ticks before the Action can connect. The opponent's window to walk out of range. */
+  readonly startup: number;
+  /** Ticks during which the Action connects if the opponent is inside its range band. */
+  readonly active: number;
+  /** Ticks after active during which the fighter cannot act, move, or block. */
+  readonly recovery: number;
+}
+
 export interface FighterConfig {
   /** Ticks the simulation advances per Decision Point. */
   readonly ticksPerDecision: number;
@@ -30,8 +47,10 @@ export interface FighterConfig {
   readonly specialRange: number;
   readonly specialDamage: number;
   readonly specialMeterCost: number;
-  /** Ticks the attacker is locked out of Decision Points after a `special`. */
-  readonly specialCommitmentTicks: number;
+  /** Frame data for `attack`: what makes it committal, and punishable on a whiff. */
+  readonly attackWindow: CommitmentWindow;
+  /** Frame data for `special`. Longer in every phase than `attack`, so it is the bigger risk. */
+  readonly specialWindow: CommitmentWindow;
   /** Damage subtracted when the defender submitted `block` at the same Decision Point. */
   readonly blockDamageReduction: number;
   readonly meterOnHitLanded: number;
@@ -45,6 +64,16 @@ export interface FighterConfig {
  * `ticksPerDecision` and `maxTicks` match the Timing model table in
  * `docs/ARCHITECTURE.md`: a Decision Point every 30 Ticks, a Match capped at
  * 1,200 Ticks, so ~40 Decision Points per Agent at the absolute maximum.
+ *
+ * Both Commitment Window totals deliberately exceed `ticksPerDecision` (40 and
+ * 60 against 30), for two reasons that the ACs turn on:
+ *   - a committing fighter provably skips at least one Decision Point, so "not
+ *     polled during the window" is an observable property rather than a claim
+ *     that is trivially true inside a single step; and
+ *   - the recovery tail overlaps the *next* Decision Point's active frames, so
+ *     an opponent who spaced correctly can actually land a punish on it.
+ * `specialWindow` totals 60 ticks -- the same lockout Story 2.1's
+ * `specialCommitmentTicks` applied, now broken into phases.
  */
 export const DEFAULT_FIGHTER_CONFIG: FighterConfig = {
   ticksPerDecision: 30,
@@ -60,13 +89,57 @@ export const DEFAULT_FIGHTER_CONFIG: FighterConfig = {
   specialRange: 140,
   specialDamage: 16,
   specialMeterCost: 50,
-  specialCommitmentTicks: 60,
+  attackWindow: { startup: 4, active: 4, recovery: 32 },
+  specialWindow: { startup: 10, active: 5, recovery: 45 },
   blockDamageReduction: 5,
   meterOnHitLanded: 12,
   meterOnHitTaken: 6,
   maxMeter: 100,
   damageJitter: 1,
 };
+
+/** Keys whose value is a nested `CommitmentWindow` rather than a scalar. */
+const WINDOW_KEYS: readonly string[] = ['attackWindow', 'specialWindow'];
+
+const WINDOW_FIELDS = ['startup', 'active', 'recovery'] as const;
+
+/**
+ * Validate one Commitment Window.
+ *
+ * `active < 1` is rejected because such a window is an Action that opens, locks
+ * the fighter out of Decision Points, and can never connect with anything --
+ * indistinguishable in state from a working Action, and it would hash
+ * deterministically the whole way to a leaderboard.
+ */
+function assertCommitmentWindow(key: string, value: unknown): void {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new Error(
+      `FighterConfig.${key} must be a Commitment Window object, received: ${String(value)}`,
+    );
+  }
+
+  // Named `frames`, never `window`: `scripts/audit-invariants.sh`'s INV-3 sweep
+  // bans a lowercase `window` followed by a dot -- how a DOM reference reads --
+  // and it does not exempt comments either. See the same note in `frames.ts`.
+  const frames = value as Record<string, unknown>;
+  for (const field of WINDOW_FIELDS) {
+    const ticks = frames[field];
+    if (typeof ticks !== 'number' || !Number.isSafeInteger(ticks)) {
+      throw new Error(
+        `FighterConfig.${key}.${field} must be a safe integer, received: ${String(ticks)}`,
+      );
+    }
+    if (ticks < 0) {
+      throw new Error(`FighterConfig.${key}.${field} must not be negative, received: ${ticks}`);
+    }
+  }
+
+  if ((frames.active as number) < 1) {
+    throw new Error(
+      `FighterConfig.${key}.active must be at least 1 tick, or the Action could never connect`,
+    );
+  }
+}
 
 /**
  * Reject a config that could put a non-integer into state.
@@ -75,10 +148,22 @@ export const DEFAULT_FIGHTER_CONFIG: FighterConfig = {
  * a caller computing an override (`initialHealth: base / 3`) rather than
  * writing a literal. Without it the float would travel all the way to
  * `hash()` before anything complained.
+ *
+ * Every key is visited, and each is routed to exactly one check -- the nested
+ * windows, the position pair, or the safe-integer scalar rule. A key that is
+ * neither a window nor `startPosition` must be a safe integer, so a field added
+ * to `FighterConfig` later is validated by default rather than by remembering
+ * to list it here.
  */
 export function assertIntegerConfig(config: FighterConfig): void {
-  const scalarEntries = Object.entries(config).filter(([, value]) => !Array.isArray(value));
-  for (const [key, value] of scalarEntries) {
+  for (const [key, value] of Object.entries(config)) {
+    if (key === 'startPosition') {
+      continue;
+    }
+    if (WINDOW_KEYS.includes(key)) {
+      assertCommitmentWindow(key, value);
+      continue;
+    }
     if (typeof value !== 'number' || !Number.isSafeInteger(value)) {
       throw new Error(`FighterConfig.${key} must be a safe integer, received: ${String(value)}`);
     }
@@ -106,7 +191,6 @@ export function assertIntegerConfig(config: FighterConfig): void {
     'specialRange',
     'specialDamage',
     'specialMeterCost',
-    'specialCommitmentTicks',
     'blockDamageReduction',
     'meterOnHitLanded',
     'meterOnHitTaken',

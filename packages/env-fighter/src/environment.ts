@@ -1,5 +1,5 @@
 import {
-  ACTIONS,
+  FALLBACK_ACTION,
   type EnvironmentAdapter,
   type LoggedAction,
   type Observation,
@@ -7,6 +7,17 @@ import {
 } from '@tokenbrawl/contracts';
 import { canonicalStringify } from './canonical';
 import { assertIntegerConfig, DEFAULT_FIGHTER_CONFIG, type FighterConfig } from './config';
+import {
+  COMMITTED_ATTACK,
+  COMMITTED_NONE,
+  COMMITTED_SPECIAL,
+  PHASE_ACTIVE,
+  damageForCode,
+  legalActionsFor,
+  phaseOf,
+  rangeForCode,
+  windowTotalTicks,
+} from './frames';
 import { mixSeed, nextRngState } from './prng';
 import { sha256Hex } from './sha256';
 import type { FighterState } from './state';
@@ -20,6 +31,11 @@ const AGENT_INDICES: readonly (0 | 1)[] = [0, 1];
 const JITTER_BIT_P1 = 3;
 const JITTER_BIT_P2 = 11;
 
+/** Movement intent for the Decision Point, as a sign applied to "towards the opponent". */
+const MOVE_NONE = 0;
+const MOVE_ADVANCE = 1;
+const MOVE_RETREAT = -1;
+
 function opponentOf(agentIndex: 0 | 1): 0 | 1 {
   return agentIndex === 0 ? 1 : 0;
 }
@@ -28,13 +44,31 @@ function clamp(value: number, low: number, high: number): number {
   return Math.min(high, Math.max(low, value));
 }
 
+/**
+ * Apply the legality rule an Agent is told about through `legalActions`.
+ *
+ * `special` below its Super Meter cost is an *illegal* Action, not a silent
+ * no-op: the Fallback Action is substituted, exactly as it is for a Parse
+ * Failure. That keeps the two failure modes consistent -- an Agent that
+ * ignores the grammar it was given is never rewarded with `block`'s safety or
+ * with a repeat of its previous Action.
+ */
+function legaliseAction(
+  config: FighterConfig,
+  submitted: LoggedAction,
+  meter: number,
+): LoggedAction {
+  if (submitted === 'special' && meter < config.specialMeterCost) {
+    return FALLBACK_ACTION;
+  }
+  return submitted;
+}
+
 export function createFighterEnvironment(
   overrides: Partial<FighterConfig> = {},
 ): EnvironmentAdapter<FighterState> {
   const config: FighterConfig = { ...DEFAULT_FIGHTER_CONFIG, ...overrides };
   assertIntegerConfig(config);
-
-  const moveUnitsPerDecision = config.moveUnitsPerTick * config.ticksPerDecision;
 
   return {
     id: 'fighter-1v1',
@@ -50,6 +84,8 @@ export function createFighterEnvironment(
         position: [config.startPosition[0], config.startPosition[1]],
         meter: [0, 0],
         commitmentRemaining: [0, 0],
+        committedAction: [COMMITTED_NONE, COMMITTED_NONE],
+        windowHitLanded: [0, 0],
       };
     },
 
@@ -68,26 +104,50 @@ export function createFighterEnvironment(
         // what is behind it, never an absolute p1/p2 coordinate. Two mirrored
         // seeds therefore produce byte-identical Observations, which is what
         // Story 7.1's side-swap comparison needs in order to mean anything.
+        //
+        // The opponent's Commitment Window is surfaced because whiff punishing
+        // is only playable if it is visible: an Agent that cannot see that the
+        // opponent is stuck in recovery cannot choose to punish it. Its own
+        // window is not reported -- an Agent is only ever polled when it has
+        // none open, so the value would be `0` at every Decision Point.
         state: canonicalStringify({
+          opponentCommitmentRemaining: state.commitmentRemaining[opponentIndex],
           opponentHealth: state.health[opponentIndex],
           opponentMeter: state.meter[opponentIndex],
+          opponentPhase: phaseOf(
+            config,
+            state.committedAction[opponentIndex],
+            state.commitmentRemaining[opponentIndex],
+          ),
           selfHealth: state.health[agentIndex],
           selfMeter: state.meter[agentIndex],
           separation: Math.abs(self - opponent),
           spaceBehind: facingRight ? self - config.arenaMin : config.arenaMax - self,
           tick: state.tick,
         }),
-        legalActions: ACTIONS,
+        legalActions: legalActionsFor(config, state.meter[agentIndex]),
         tick: state.tick,
       };
     },
 
     /**
-     * One Decision Point. Both Actions resolve against a single immutable
-     * pre-step snapshot -- `state` is read, never written, and every effect
-     * is accumulated into per-Agent tallies that are applied once at the end.
-     * That is what makes simultaneity structural: there is no "first" Agent
-     * for either side's Action to have influenced.
+     * One Decision Point, resolved tick by tick.
+     *
+     * Story 2.1 applied a whole Decision Point as one lump, which made an
+     * `attack` free: it could not be spaced out of, and its attacker was never
+     * exposed afterwards. Here the submitted Actions are *committed* first, and
+     * then `ticksPerDecision` ticks are simulated. Within each tick, both
+     * fighters' movement is computed from one pre-tick snapshot and applied
+     * together, and both fighters' active-phase attacks are judged against the
+     * resulting positions and applied together. That is what makes simultaneity
+     * structural at tick granularity -- strictly stronger than resolving it
+     * once per Decision Point -- and it is why `state` is only ever read.
+     *
+     * A fighter inside a Commitment Window does not move, does not block, and
+     * is not polled, so its recovery is punishable. Movement and windows are
+     * mutually exclusive by construction: a movement intent is only recorded
+     * for a fighter that was actionable this boundary, and neither `advance`
+     * nor `retreat` opens a Commitment Window at all.
      */
     step(
       state: FighterState,
@@ -99,95 +159,160 @@ export function createFighterEnvironment(
         ((rngState >>> JITTER_BIT_P2) & 1) * config.damageJitter,
       ];
 
-      const separation = Math.abs(state.position[0] - state.position[1]);
-      // Halved and applied identically to both sides so that two advancing
-      // Agents cannot end closer than `minSeparation` and neither side gets
-      // the odd unit -- an asymmetric push-apart would be a side advantage
-      // baked into the physics.
-      const advanceCap = Math.max(0, (separation - config.minSeparation) >> 1);
-
-      const nextPosition: [number, number] = [state.position[0], state.position[1]];
-      const damageTaken: [number, number] = [0, 0];
-      const meterSpent: [number, number] = [0, 0];
-      const meterGained: [number, number] = [0, 0];
-      const nextCommitment: [number, number] = [
-        Math.max(0, state.commitmentRemaining[0] - config.ticksPerDecision),
-        Math.max(0, state.commitmentRemaining[1] - config.ticksPerDecision),
+      const position: [number, number] = [state.position[0], state.position[1]];
+      const health: [number, number] = [state.health[0], state.health[1]];
+      const meter: [number, number] = [state.meter[0], state.meter[1]];
+      const committed: [number, number] = [state.committedAction[0], state.committedAction[1]];
+      const remaining: [number, number] = [
+        state.commitmentRemaining[0],
+        state.commitmentRemaining[1],
       ];
+      const hitLanded: [number, number] = [state.windowHitLanded[0], state.windowHitLanded[1]];
+      const moveIntent: [number, number] = [MOVE_NONE, MOVE_NONE];
+      /** `block` is a stance held for this Decision Point's ticks only -- it never survives into the next. */
+      const blocking: [boolean, boolean] = [false, false];
 
+      // --- Commit pass: what each Agent chose at this boundary ---------------
       for (const agentIndex of AGENT_INDICES) {
-        const action = actions[agentIndex];
-        if (action === null || action === 'stand') {
+        const submitted = actions[agentIndex];
+        // `null` is "was not polled". A non-null Action from a fighter that is
+        // mid-window is ignored rather than trusted: the Harness never sends
+        // one, and honouring it would let a caller cancel a Commitment Window.
+        if (submitted === null || remaining[agentIndex] > 0) {
           continue;
         }
 
-        const opponentIndex = opponentOf(agentIndex);
-        const towardsOpponent = state.position[agentIndex] <= state.position[opponentIndex] ? 1 : -1;
+        const action = legaliseAction(config, submitted, meter[agentIndex]);
 
         if (action === 'advance') {
-          const distance = Math.min(moveUnitsPerDecision, advanceCap);
-          nextPosition[agentIndex] = clamp(
-            state.position[agentIndex] + towardsOpponent * distance,
+          moveIntent[agentIndex] = MOVE_ADVANCE;
+        } else if (action === 'retreat') {
+          moveIntent[agentIndex] = MOVE_RETREAT;
+        } else if (action === 'block') {
+          blocking[agentIndex] = true;
+        } else if (action === 'attack' || action === 'special') {
+          const code = action === 'attack' ? COMMITTED_ATTACK : COMMITTED_SPECIAL;
+          const window = action === 'attack' ? config.attackWindow : config.specialWindow;
+          committed[agentIndex] = code;
+          remaining[agentIndex] = windowTotalTicks(window);
+          hitLanded[agentIndex] = 0;
+          if (action === 'special') {
+            // Spent at commit, not on connection: a whiffed `special` costs its
+            // meter, which is what makes throwing one a real decision.
+            meter[agentIndex] -= config.specialMeterCost;
+          }
+        }
+        // `stand` -- the Fallback Action, and what a rejected `special` becomes
+        // -- is inert by construction: no intent, no stance, nothing committed.
+      }
+
+      // --- Tick loop --------------------------------------------------------
+      for (let tick = 0; tick < config.ticksPerDecision; tick += 1) {
+        // A KO freezes the rest of the Decision Point: no posthumous movement,
+        // hit, or window progress. `state.tick` still advances by the full
+        // cadence below, because `runMatch` advances its own tick counter
+        // independently and the two must never disagree.
+        if (health[0] <= 0 || health[1] <= 0) {
+          break;
+        }
+
+        // Movement. Both deltas come from the same pre-tick positions, so
+        // neither fighter's step can be a reaction to the other's.
+        const separationBefore = Math.abs(position[0] - position[1]);
+        const closers =
+          (moveIntent[0] === MOVE_ADVANCE ? 1 : 0) + (moveIntent[1] === MOVE_ADVANCE ? 1 : 0);
+        const closingRoom = Math.max(0, separationBefore - config.minSeparation);
+        // Two fighters closing at once split the room, floor-halved for each,
+        // so neither gets the odd unit -- an asymmetric push-apart would be a
+        // side advantage baked into the physics. A *lone* closer gets the whole
+        // room, so it can actually reach `minSeparation`; Story 2.1 halved
+        // unconditionally, which made a solo advance asymptotic and is why its
+        // Harness KO case needed a hand-picked start position.
+        const closingCap = closers === 2 ? closingRoom >> 1 : closingRoom;
+        const moved: [number, number] = [position[0], position[1]];
+
+        for (const agentIndex of AGENT_INDICES) {
+          if (moveIntent[agentIndex] === MOVE_NONE) {
+            continue;
+          }
+          const towards = position[agentIndex] <= position[opponentOf(agentIndex)] ? 1 : -1;
+          const distance =
+            moveIntent[agentIndex] === MOVE_ADVANCE
+              ? Math.min(config.moveUnitsPerTick, closingCap)
+              : config.moveUnitsPerTick;
+          moved[agentIndex] = clamp(
+            position[agentIndex] + moveIntent[agentIndex] * towards * distance,
             config.arenaMin,
             config.arenaMax,
           );
-          continue;
         }
+        position[0] = moved[0];
+        position[1] = moved[1];
 
-        if (action === 'retreat') {
-          nextPosition[agentIndex] = clamp(
-            state.position[agentIndex] - towardsOpponent * moveUnitsPerDecision,
-            config.arenaMin,
-            config.arenaMax,
+        // Hit resolution. Every active-phase Action is judged against the same
+        // post-movement separation and the same pre-tick blocking stances, and
+        // the results are applied together after both have been decided.
+        const separation = Math.abs(position[0] - position[1]);
+        const damageTaken: [number, number] = [0, 0];
+        const meterGained: [number, number] = [0, 0];
+
+        for (const agentIndex of AGENT_INDICES) {
+          if (hitLanded[agentIndex] === 1) {
+            continue;
+          }
+          const code = committed[agentIndex];
+          if (phaseOf(config, code, remaining[agentIndex]) !== PHASE_ACTIVE) {
+            continue;
+          }
+          if (separation > rangeForCode(config, code)) {
+            continue;
+          }
+
+          const opponentIndex = opponentOf(agentIndex);
+          const reduction = blocking[opponentIndex] ? config.blockDamageReduction : 0;
+          damageTaken[opponentIndex] += Math.max(
+            0,
+            damageForCode(config, code) + jitter[agentIndex] - reduction,
           );
-          continue;
+          meterGained[agentIndex] += config.meterOnHitLanded;
+          meterGained[opponentIndex] += config.meterOnHitTaken;
+          // Only this fighter's own flag: one hit per Commitment Window, and
+          // setting it cannot influence the other fighter's resolution above.
+          hitLanded[agentIndex] = 1;
         }
 
-        // `block` has no effect of its own; it is read below, off the same
-        // pre-step `actions` tuple, when the opponent's damage is computed.
-        if (action === 'block') {
-          continue;
+        for (const agentIndex of AGENT_INDICES) {
+          health[agentIndex] = Math.max(0, health[agentIndex] - damageTaken[agentIndex]);
+          meter[agentIndex] = clamp(
+            meter[agentIndex] + meterGained[agentIndex],
+            0,
+            config.maxMeter,
+          );
         }
 
-        const affordsSpecial = state.meter[agentIndex] >= config.specialMeterCost;
-        // Story 2.2 turns this into an illegal-Action rejection that applies
-        // the Fallback Action. Here an unaffordable `special` is simply inert.
-        if (action === 'special' && !affordsSpecial) {
-          continue;
+        // Window countdown: exactly one tick, so a Match can never stall and
+        // `terminal()`'s timeout branch always stays reachable.
+        for (const agentIndex of AGENT_INDICES) {
+          if (remaining[agentIndex] <= 0) {
+            continue;
+          }
+          remaining[agentIndex] -= 1;
+          if (remaining[agentIndex] === 0) {
+            committed[agentIndex] = COMMITTED_NONE;
+            hitLanded[agentIndex] = 0;
+          }
         }
-
-        const range = action === 'special' ? config.specialRange : config.attackRange;
-        const baseDamage = action === 'special' ? config.specialDamage : config.attackDamage;
-
-        if (action === 'special') {
-          meterSpent[agentIndex] += config.specialMeterCost;
-          nextCommitment[agentIndex] = config.specialCommitmentTicks;
-        }
-
-        if (separation > range) {
-          continue;
-        }
-
-        const blocked = actions[opponentIndex] === 'block';
-        const reduction = blocked ? config.blockDamageReduction : 0;
-        damageTaken[opponentIndex] += Math.max(0, baseDamage + jitter[agentIndex] - reduction);
-        meterGained[agentIndex] += config.meterOnHitLanded;
-        meterGained[opponentIndex] += config.meterOnHitTaken;
       }
 
       return {
         tick: state.tick + config.ticksPerDecision,
         rngState,
-        health: [
-          Math.max(0, state.health[0] - damageTaken[0]),
-          Math.max(0, state.health[1] - damageTaken[1]),
-        ],
-        position: [nextPosition[0], nextPosition[1]],
-        meter: [
-          clamp(state.meter[0] - meterSpent[0] + meterGained[0], 0, config.maxMeter),
-          clamp(state.meter[1] - meterSpent[1] + meterGained[1], 0, config.maxMeter),
-        ],
-        commitmentRemaining: [nextCommitment[0], nextCommitment[1]],
+        health: [health[0], health[1]],
+        position: [position[0], position[1]],
+        meter: [meter[0], meter[1]],
+        commitmentRemaining: [remaining[0], remaining[1]],
+        committedAction: [committed[0], committed[1]],
+        windowHitLanded: [hitLanded[0], hitLanded[1]],
       };
     },
 
