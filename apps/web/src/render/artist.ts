@@ -36,14 +36,19 @@ export interface FighterArtist {
   draw(ctx: Canvas2D, fighter: DrawnFighter, theme: Theme): void;
 }
 
-/** Body box, in pixels. Chunky on purpose -- this is a brutalist player. */
-const BODY_WIDTH = 44;
-const BODY_HEIGHT = 96;
+/**
+ * Body box, in pixels. Chunky on purpose -- this is a brutalist player, and
+ * the first draft's 44x96 fighters read as specks in a 960-wide arena. Sized
+ * against the arena rather than against a sprite sheet: the fighters are the
+ * subject, so they get the vertical space.
+ */
+const BODY_WIDTH = 64;
+const BODY_HEIGHT = 160;
 /** How far a committed strike reaches out of the body box, drawn as a bar. */
-const STRIKE_LENGTH = 52;
-const STRIKE_HEIGHT = 14;
+const STRIKE_LENGTH = 72;
+const STRIKE_HEIGHT = 20;
 /** Vertical offset of the strike bar from the top of the body. */
-const STRIKE_RISE = 34;
+const STRIKE_RISE = 56;
 
 /**
  * The in-repo artist: a fighter is a hard-edged block with a border, a hard

@@ -1,5 +1,5 @@
+import type { CommandLog } from '@tokenbrawl/contracts';
 import { renderApp, type HostView, type MountPoint } from './main';
-import { buildDemoLog } from './replay/demo-log';
 
 /**
  * The page entry point, and the only file that touches a global.
@@ -16,15 +16,25 @@ import { buildDemoLog } from './replay/demo-log';
  * type-level half of INV-3 repo-wide -- so the globals are narrowed here
  * instead, at the one boundary that genuinely needs them.
  *
- * Until Story 4.6 lets a visitor supply their own, the log is a Match between
- * two Baseline Bots generated in the browser. That it works at all is AD-4
- * demonstrated end to end: the Harness and the Environment Adapter running
- * unmodified outside Node.
+ * Until Story 4.6 lets a visitor supply their own, the log is a precomputed
+ * Match between two Baseline Bots, fetched as a static file. It is *not* built
+ * in the browser: `buildCommandLog` reaches `node:crypto` through
+ * `canonical-hash.ts` and pulls in Ajv, so a page that generated its own log
+ * died on load. Fetching is the architecture anyway (INV-8: precompute plus
+ * static hosting) and is exactly how a real tournament log will arrive.
+ *
+ * What still runs in the browser is the whole simulation -- `replayCommandLog`,
+ * the Environment Adapter and every frame of re-simulation. That is AD-4
+ * demonstrated end to end.
  */
+
+/** Same-origin, so it is covered by the no-remote-asset sweep in `style-discipline.test.ts`. */
+const DEMO_REPLAY_URL = '/replays/demo.command-log.json';
 
 interface BrowserGlobals {
   readonly document?: { querySelector(selectors: string): MountPoint | null };
   readonly window?: HostView;
+  readonly fetch?: (url: string) => Promise<{ readonly ok: boolean; readonly status: number; json(): Promise<unknown> }>;
 }
 
 async function boot(): Promise<void> {
@@ -32,12 +42,22 @@ async function boot(): Promise<void> {
   const root = globals.document?.querySelector('#app');
   const view = globals.window;
 
-  if (root == null || view == null) {
-    throw new Error('boot: this environment has no document or window to mount into.');
+  if (root == null || view == null || globals.fetch == null) {
+    throw new Error('boot: this environment has no document, window or fetch to mount into.');
   }
 
   try {
-    const log = await buildDemoLog();
+    const response = await globals.fetch(DEMO_REPLAY_URL);
+    if (!response.ok) {
+      throw new Error(
+        `could not load ${DEMO_REPLAY_URL} (HTTP ${String(response.status)})`,
+      );
+    }
+    // Cast, not validation: `buildReplayFilm` routes through
+    // `replayCommandLog`, which checks the schema version before it reads any
+    // other field and guards every field it then uses (AD-3). Running Ajv here
+    // would drag the validator into the bundle for no additional safety.
+    const log = (await response.json()) as CommandLog;
     renderApp(root, log, view);
   } catch (error) {
     // A player that fails silently looks identical to one that is still

@@ -31,8 +31,15 @@ export interface DrawFrameOptions {
   readonly artist?: FighterArtist;
 }
 
-/** Arena floor sits this far above the bottom edge, leaving room for the HUD. */
-const FLOOR_INSET = 72;
+/**
+ * Arena floor sits this far above the bottom edge.
+ *
+ * Small on purpose. The first draft left 72px of empty ground below the
+ * fighters and a 540-tall arena above them, so two thirds of the stage was
+ * black -- which reads as an unfinished layout rather than as space. A
+ * fighting-game viewport is wide and short.
+ */
+const FLOOR_INSET = 40;
 /** Health and meter bars live in this band at the top. */
 const HUD_TOP = 24;
 const HUD_BAR_HEIGHT = 20;
@@ -117,10 +124,11 @@ export function drawFrame(ctx: Canvas2D, frame: RenderFrame, options: DrawFrameO
   ctx.fillStyle = theme.bg;
   ctx.fillRect(0, 0, viewport.width, viewport.height);
 
-  // The floor is a rule, not a gradient horizon.
-  ctx.strokeStyle = theme.ink;
-  ctx.lineWidth = theme.borderWidth;
-  ctx.strokeRect(0, groundY, viewport.width, theme.borderWidth);
+  // The floor is a solid rule, not a gradient horizon. `fillRect` rather than
+  // `strokeRect`: stroking a 4px-tall box draws its two long edges and leaves a
+  // hairline gap between them, which renders as a double line.
+  ctx.fillStyle = theme.ink;
+  ctx.fillRect(0, groundY, viewport.width, theme.borderWidth);
 
   const positions: readonly number[] = [0, 1].map((index) =>
     interpolatedX(

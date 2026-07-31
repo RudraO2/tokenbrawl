@@ -30,6 +30,12 @@ function walk(directory: string, collected: SourceFile[]): SourceFile[] {
   for (const entry of readdirSync(directory, { withFileTypes: true })) {
     const full = join(directory, entry.name);
     if (entry.isDirectory()) {
+      // `src/testing/` is Node-only tooling that never reaches the bundle --
+      // `demo-log.ts` deliberately imports `buildCommandLog`, which is exactly
+      // what the checks below forbid a shipped file to do.
+      if (entry.name === 'testing') {
+        continue;
+      }
       walk(full, collected);
       continue;
     }
@@ -40,7 +46,7 @@ function walk(directory: string, collected: SourceFile[]): SourceFile[] {
   return collected;
 }
 
-/** Every shipped TypeScript file in the app. Test files are exempt: this one reads `node:fs` to do its job. */
+/** Every file that actually reaches the browser bundle. Tests and `src/testing/` are exempt. */
 function shippedFiles(): readonly SourceFile[] {
   return walk(SRC, []);
 }
@@ -141,6 +147,37 @@ describe('shipped player source discipline', () => {
     expect([...new Set(bare.map((entry) => entry.split(': ')[1]))]).toStrictEqual([
       '@tokenbrawl/contracts',
     ]);
+  });
+
+  it('imports nothing from core that cannot run in a browser', () => {
+    // A real defect this story hit, found by opening the page rather than by
+    // any test: `command-log.ts` imports `canonical-hash.ts`, which imports
+    // `node:crypto`, and it pulls in Ajv besides. Vite externalises
+    // `node:crypto`, so the page died on load with "Module node:crypto has
+    // been externalized for browser compatibility" -- a blank screen, and
+    // every unit test still green, because none of them run in a browser.
+    //
+    // `packages/core/src/replay.ts` documents the same constraint from the
+    // other side: it stays dependency-starved so a bare Node child can load
+    // it. It turns out to bind the browser exactly as hard. AD-4 says an
+    // Environment Adapter must run in Node and in a browser alike, and
+    // `audit-invariants.sh` enforces that for `packages/env-*` only -- this is
+    // the same rule for the consumer that AD-4 permits to import one.
+    const browserHostile = /from\s+['"][^'"]*\/(command-log|canonical-hash)['"]/;
+    expect(offendingLines(browserHostile)).toStrictEqual([]);
+  });
+
+  it('imports no Node built-in and no Node global (AD-4, for the consumer)', () => {
+    const builtin =
+      /from\s+['"]node:[a-z_/]+['"]|from\s+['"](fs|path|crypto|os|util|stream|child_process)['"]/;
+    expect(offendingLines(builtin)).toStrictEqual([]);
+
+    // Globals need no import and break a bundle just as hard. `globalThis` is
+    // the sanctioned way to reach a host object (see `boot.ts`), so a bare
+    // `process.`/`Buffer.` is what is banned.
+    expect(offendingLines(/(^|[^A-Za-z0-9_$.])(process|Buffer|__dirname|__filename)\s*[.(]/)).toStrictEqual(
+      [],
+    );
   });
 
   it('adds no runtime dependency to the app', () => {

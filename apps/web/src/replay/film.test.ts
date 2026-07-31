@@ -3,7 +3,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { replayCommandLog } from '../../../../packages/core/src/replay';
 import { createFighterEnvironment } from '../../../../packages/env-fighter/src/environment';
 import { createMockEnvironment } from '../../../../packages/core/src/testing/mock-environment';
-import { buildDemoLog } from './demo-log';
+import { buildDemoLog } from '../testing/demo-log';
 import { BASIS_POINTS_FULL, FRAMES_PER_DECISION, PLAYBACK_FPS, buildReplayFilm } from './film';
 
 /**

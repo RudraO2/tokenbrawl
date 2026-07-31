@@ -22,9 +22,15 @@ import './styles/app.css';
  * wrong result.
  */
 
-/** Fixed backbuffer size; CSS scales it, so playback is resolution-independent. */
+/**
+ * Fixed backbuffer size; CSS scales it, so playback is resolution-independent.
+ *
+ * 12:5 rather than 16:9. The arena is a single horizontal axis and the
+ * fighters are 160px tall, so a 540-tall stage left most of the frame empty --
+ * the shape of the viewport should follow the shape of the game.
+ */
 const CANVAS_WIDTH = 960;
-const CANVAS_HEIGHT = 540;
+const CANVAS_HEIGHT = 400;
 
 /**
  * The DOM surface this player touches, declared structurally rather than by

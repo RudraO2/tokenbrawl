@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createFighterEnvironment } from '../../../packages/env-fighter/src/environment';
 import { decisionPointCount, hashChip } from './main';
-import { buildDemoLog } from './replay/demo-log';
+import { buildDemoLog } from './testing/demo-log';
 import { buildReplayFilm } from './replay/film';
 
 /**
