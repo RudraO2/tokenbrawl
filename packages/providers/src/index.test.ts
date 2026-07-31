@@ -62,3 +62,34 @@ describe('the Story 3.3 barrel', () => {
     expect(barrel.GOOGLE_PROVIDER_ID).toBe('google-ai-studio');
   });
 });
+
+describe('the Story 3.4 barrel', () => {
+  it('exposes the Metering Probe and the track it forces', () => {
+    for (const name of [
+      'runMeteringProbe',
+      'probeDeployments',
+      'probeRequestBody',
+      'probeWireFamilyFor',
+      'mapProbeUsage',
+      'classifyProbeUsage',
+      'PROBE_SYSTEM_PROMPT',
+      'PROBE_USER_PROMPT',
+      'trackFor',
+      'withMeteringProbe',
+      'deploymentIdentityFrom',
+      'applyMeteringProbe',
+      'partitionByTrack',
+      'formatMeteringExclusions',
+    ]) {
+      expect(barrel).toHaveProperty(name);
+    }
+  });
+
+  it('reaches the leaderboard decision through the barrel, which is where a consumer will call it', () => {
+    // Story 7.2 publishes ratings and 4.x renders them; both reach this
+    // package through the barrel, and a module in `src/` that is never
+    // exported is invisible to every one of them.
+    expect(barrel.trackFor('reports-reasoning')).toBe('main');
+    expect(barrel.trackFor(undefined)).toBe('reflex');
+  });
+});
