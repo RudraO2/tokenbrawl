@@ -1,5 +1,5 @@
 import type { FighterConfig } from '../../../../packages/env-fighter/src/config';
-import { phaseOf } from '../../../../packages/env-fighter/src/frames';
+import { COMMITTED_NONE, phaseOf } from '../../../../packages/env-fighter/src/frames';
 import type { FighterState } from '../../../../packages/env-fighter/src/state';
 import { BASIS_POINTS_FULL, type RenderFrame } from '../replay/film';
 import { animationFor, isFree } from './animation';
@@ -93,6 +93,60 @@ function interpolatedX(
   return ((units - config.arenaMin) / span) * viewport.width;
 }
 
+/** The Commitment Window a fighter is inside partway through a Decision Point. */
+interface LiveWindow {
+  readonly committedAction: number;
+  readonly remaining: number;
+}
+
+/**
+ * Recovers the Commitment Window's *sub-Decision-Point* state, which is the
+ * only way the strike is ever visible.
+ *
+ * The film samples the simulation at Decision Point boundaries, 30 ticks apart.
+ * An `attack` window is 4 startup + 4 active + 32 recovery = 40 ticks and it
+ * opens *at* a boundary, so by the next sample 10 ticks remain -- already deep
+ * in recovery. The eight ticks in which the attack winds up and connects fall
+ * strictly between two samples, and reading `from.commitmentRemaining`
+ * directly means nothing ever observes them: a census over the demo Match
+ * found `attack-startup` and `attack-active` played on zero of 360 playback
+ * frames. The art was there, the clips were wired, and the swing was
+ * unreachable. A viewer saw only the follow-through.
+ *
+ * So the window is reconstructed from whichever endpoint actually holds it and
+ * wound forward by the ticks elapsed within this Decision Point. A window that
+ * is open at `to` opened during this step, so at the step's start it held
+ * `to.commitmentRemaining + ticksPerDecision`; one open only at `from` was
+ * already running and expires during the step.
+ *
+ * This is presentation arithmetic over state the simulation already produced.
+ * It reads no clock, feeds nothing back, and changes no hash -- the same
+ * standing as position interpolation.
+ */
+function liveWindow(
+  frame: RenderFrame,
+  agentIndex: 0 | 1,
+  config: FighterConfig,
+  ticksElapsed: number,
+): LiveWindow {
+  const openedThisStep = frame.to.committedAction[agentIndex] !== COMMITTED_NONE;
+  const committedAction = openedThisStep
+    ? frame.to.committedAction[agentIndex]
+    : frame.from.committedAction[agentIndex];
+
+  if (committedAction === COMMITTED_NONE) {
+    return { committedAction: COMMITTED_NONE, remaining: 0 };
+  }
+
+  const remainingAtStart = openedThisStep
+    ? frame.to.commitmentRemaining[agentIndex] + config.ticksPerDecision
+    : frame.from.commitmentRemaining[agentIndex];
+  const remaining = remainingAtStart - ticksElapsed;
+
+  // Expired partway through the step: the fighter is free for the rest of it.
+  return remaining > 0 ? { committedAction, remaining } : { committedAction: COMMITTED_NONE, remaining: 0 };
+}
+
 /** Draws one bar: hard shadow, flat fill, ink border. No radius, no gradient. */
 function drawBar(
   ctx: Canvas2D,
@@ -155,12 +209,13 @@ export function drawFrame(ctx: Canvas2D, frame: RenderFrame, options: DrawFrameO
     ),
   );
 
+  const ticksElapsed = Math.floor(
+    (frame.progressBasisPoints * config.ticksPerDecision) / BASIS_POINTS_FULL,
+  );
+
   for (const agentIndex of [0, 1] as const) {
-    const phase = phaseOf(
-      config,
-      frame.from.committedAction[agentIndex],
-      frame.from.commitmentRemaining[agentIndex],
-    );
+    const window = liveWindow(frame, agentIndex, config, ticksElapsed);
+    const phase = phaseOf(config, window.committedAction, window.remaining);
 
     const fighter: DrawnFighter = {
       x: positions[agentIndex],
@@ -169,19 +224,19 @@ export function drawFrame(ctx: Canvas2D, frame: RenderFrame, options: DrawFrameO
       // facing, because nothing in the simulation depends on one.
       facing: positions[agentIndex] <= positions[agentIndex === 0 ? 1 : 0] ? 1 : -1,
       phase,
-      committedAction: frame.from.committedAction[agentIndex],
+      committedAction: window.committedAction,
       agentIndex,
       // Every input is state the simulation already carries. `to` is the state
       // this Decision Point resolves into, so comparing it with `from` is how
       // "took damage" and "moved" are known without inventing either.
       animation: animationFor({
-        committedAction: frame.from.committedAction[agentIndex],
+        committedAction: window.committedAction,
         phase,
         health: frame.to.health[agentIndex],
         previousHealth: frame.from.health[agentIndex],
         movedUnits: frame.to.position[agentIndex] - frame.from.position[agentIndex],
         blocking:
-          isFree(frame.from.committedAction[agentIndex]) &&
+          isFree(window.committedAction) &&
           frame.to.health[agentIndex] === frame.from.health[agentIndex] &&
           frame.to.position[agentIndex] === frame.from.position[agentIndex],
         frameIndex: frame.index,

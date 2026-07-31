@@ -324,3 +324,47 @@ describe.each(PACKS)('sprite pack %s', (pack) => {
     expect(starts).toStrictEqual([...starts].sort((a, b) => a - b));
   });
 });
+
+describe('the strike is actually reachable (regression)', () => {
+  it('plays startup and active during a real Match, not only recovery', async () => {
+    // The defect this pins: the film samples state at Decision Point
+    // boundaries 30 ticks apart, an attack window is 40 ticks and opens ON a
+    // boundary, so the 8 ticks in which the strike winds up and connects fall
+    // strictly between two samples. A census over the demo Match found
+    // attack-startup and attack-active on ZERO of 360 playback frames -- the
+    // art was there, the clips were wired, and the swing was unreachable.
+    const { createFighterEnvironment } = await import(
+      '../../../../packages/env-fighter/src/environment'
+    );
+    const { DEFAULT_FIGHTER_CONFIG } = await import('../../../../packages/env-fighter/src/config');
+    const { buildReplayFilm } = await import('../replay/film');
+    const { drawFrame } = await import('./renderer');
+
+    const log = JSON.parse(
+      readFileSync(join(HERE, '..', '..', 'public', 'replays', 'demo.command-log.json'), 'utf8'),
+    );
+    const film = buildReplayFilm(log, createFighterEnvironment());
+
+    const seen = new Set<string>();
+    const spy = {
+      id: 'spy',
+      draw: (_ctx: unknown, f: { animation: { clip: string } }) => seen.add(f.animation.clip),
+    };
+    const noop = new Proxy(
+      { fillStyle: '', strokeStyle: '', lineWidth: 0, font: '', textAlign: '', imageSmoothingEnabled: true, globalAlpha: 1 },
+      { get: (t, k) => (k in t ? (t as Record<string, unknown>)[k as string] : () => undefined) },
+    );
+
+    for (const frame of film.frames) {
+      drawFrame(noop as never, frame, {
+        config: DEFAULT_FIGHTER_CONFIG,
+        viewport: { width: 960, height: 400 },
+        artists: [spy as never, spy as never],
+      });
+    }
+
+    expect(seen).toContain('attack-startup');
+    expect(seen).toContain('attack-active');
+    expect(seen).toContain('attack-recovery');
+  });
+});
