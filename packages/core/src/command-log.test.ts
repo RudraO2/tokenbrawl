@@ -390,6 +390,10 @@ describe('buildCommandLog optional-field omission', () => {
       result: { outcome: 'p1', endTick: 1, endReason: 'timeout', healthRemaining: [10, 5] },
       finalStateHash: FIXTURE_STATE_HASH,
       tokenBankStart: 25_000,
+      cacheStats: [
+        { agentIndex: 0, agentId: 'bot:p1', billableCalls: 0, totalTokens: 0, cachedTokens: 0, cacheHitRate: 0, conservativeDebitCalls: 0 },
+        { agentIndex: 1, agentId: 'bot:p2', billableCalls: 0, totalTokens: 0, cachedTokens: 0, cacheHitRate: 0, conservativeDebitCalls: 0 },
+      ],
     };
 
     const log = buildCommandLog(matchResult, {
@@ -425,6 +429,10 @@ describe('buildCommandLog tokenBankStart reconciliation (Story 1.5, I/O matrix)'
       result: { outcome: 'p1', endTick: 1, endReason: 'timeout', healthRemaining: [10, 5] },
       finalStateHash: FIXTURE_STATE_HASH,
       tokenBankStart,
+      cacheStats: [
+        { agentIndex: 0, agentId: 'bot:p1', billableCalls: 0, totalTokens: 0, cachedTokens: 0, cacheHitRate: 0, conservativeDebitCalls: 0 },
+        { agentIndex: 1, agentId: 'bot:p2', billableCalls: 0, totalTokens: 0, cachedTokens: 0, cacheHitRate: 0, conservativeDebitCalls: 0 },
+      ],
     };
   }
 

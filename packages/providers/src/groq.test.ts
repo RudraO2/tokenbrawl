@@ -166,7 +166,7 @@ describe('mapGroqResponse (AC4)', () => {
   it('maps a recorded live 200 to the completion text and the raw completion count', () => {
     expect(mapGroqResponse(RECORDED_200)).toStrictEqual({
       text: 'ACTION: attack',
-      usage: { tokensSpent: 3, reasoningTokens: null },
+      usage: { tokensSpent: 3, reasoningTokens: null, cachedTokens: null },
       reasoning: null,
     });
   });
@@ -179,7 +179,7 @@ describe('mapGroqResponse (AC4)', () => {
 
     expect(mapGroqResponse(body)).toStrictEqual({
       text: 'attack',
-      usage: { tokensSpent: 137, reasoningTokens: 90 },
+      usage: { tokensSpent: 137, reasoningTokens: 90, cachedTokens: null },
       reasoning: 'they are committed',
     });
   });
@@ -189,6 +189,7 @@ describe('mapGroqResponse (AC4)', () => {
     expect(mapGroqResponse(noUsage).usage).toStrictEqual({
       tokensSpent: null,
       reasoningTokens: null,
+      cachedTokens: null,
     });
 
     // A reasoning count of a genuine 0 is not the same fact and is kept.
@@ -199,7 +200,30 @@ describe('mapGroqResponse (AC4)', () => {
     expect(mapGroqResponse(zeroReasoning).usage).toStrictEqual({
       tokensSpent: 4,
       reasoningTokens: 0,
+      cachedTokens: null,
     });
+  });
+
+  it('reports cachedTokens verbatim when the provider carries prompt_tokens_details (Story 3.5)', () => {
+    const body = JSON.stringify({
+      choices: [{ message: { content: 'attack' } }],
+      usage: { completion_tokens: 100, prompt_tokens_details: { cached_tokens: 40 } },
+    });
+
+    expect(mapGroqResponse(body).usage).toStrictEqual({
+      tokensSpent: 100,
+      reasoningTokens: null,
+      cachedTokens: 40,
+    });
+  });
+
+  it('treats a genuine cached_tokens of 0 as an honest report, not as unreported', () => {
+    const body = JSON.stringify({
+      choices: [{ message: { content: 'attack' } }],
+      usage: { completion_tokens: 100, prompt_tokens_details: { cached_tokens: 0 } },
+    });
+
+    expect(mapGroqResponse(body).usage.cachedTokens).toBe(0);
   });
 
   it('treats a malformed count as unreported rather than passing it to the bank', () => {

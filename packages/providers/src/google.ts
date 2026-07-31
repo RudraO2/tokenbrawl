@@ -73,6 +73,7 @@ interface GoogleCandidate {
 interface GoogleUsageMetadata {
   readonly candidatesTokenCount?: unknown;
   readonly thoughtsTokenCount?: unknown;
+  readonly cachedContentTokenCount?: unknown;
 }
 
 interface GoogleBody {
@@ -160,6 +161,12 @@ export function mapGoogleResponse(bodyText: string): ProviderResponse {
     usage: {
       tokensSpent: reportedCount(body.usageMetadata?.candidatesTokenCount),
       reasoningTokens: reportedCount(body.usageMetadata?.thoughtsTokenCount),
+      // Story 3.5: only present when the call used an explicit CachedContent
+      // resource, which the game path never sets up -- so this is honestly
+      // `null` (no cache signal) on every ordinary Match call today, and the
+      // mapping is here so a future cached-content Deployment is picked up
+      // with no code change.
+      cachedTokens: reportedCount(body.usageMetadata?.cachedContentTokenCount),
     },
     reasoning: null,
   };

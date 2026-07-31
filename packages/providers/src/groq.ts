@@ -63,6 +63,7 @@ export interface GroqClient extends ProviderClient {
 interface GroqUsage {
   readonly completion_tokens?: unknown;
   readonly completion_tokens_details?: { readonly reasoning_tokens?: unknown } | null;
+  readonly prompt_tokens_details?: { readonly cached_tokens?: unknown } | null;
 }
 
 interface GroqMessage {
@@ -165,6 +166,7 @@ export function mapGroqResponse(bodyText: string): ProviderResponse {
   const message = choice.message ?? null;
   const content = message?.content;
   const details = body.usage?.completion_tokens_details ?? null;
+  const promptDetails = body.usage?.prompt_tokens_details ?? null;
   const separateReasoning = message?.reasoning;
 
   return {
@@ -174,6 +176,11 @@ export function mapGroqResponse(bodyText: string): ProviderResponse {
     usage: {
       tokensSpent: reportedCount(body.usage?.completion_tokens),
       reasoningTokens: reportedCount(details?.reasoning_tokens),
+      // Story 3.5: Groq's OpenAI-compatible shape reports cached prompt
+      // tokens here when it reports them at all. `reportedCount` keeps the
+      // same "not reported" vs "reported zero" distinction the other two
+      // counts already hold (INV-5, AD-6).
+      cachedTokens: reportedCount(promptDetails?.cached_tokens),
     },
     reasoning: typeof separateReasoning === 'string' ? separateReasoning : null,
   };

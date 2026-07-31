@@ -118,14 +118,27 @@ describe('mapCerebrasResponse (AC4)', () => {
   it('maps a 200 to the completion text and the raw completion count', () => {
     expect(mapCerebrasResponse(RECORDED_200)).toStrictEqual({
       text: 'ACTION: attack',
-      usage: { tokensSpent: 3, reasoningTokens: null },
+      usage: { tokensSpent: 3, reasoningTokens: null, cachedTokens: null },
       reasoning: null,
     });
   });
 
   it('never coerces an unreported count to zero (INV-5)', () => {
     const noUsage = JSON.stringify({ choices: [{ message: { content: 'attack' } }] });
-    expect(mapCerebrasResponse(noUsage).usage).toStrictEqual({ tokensSpent: null, reasoningTokens: null });
+    expect(mapCerebrasResponse(noUsage).usage).toStrictEqual({
+      tokensSpent: null,
+      reasoningTokens: null,
+      cachedTokens: null,
+    });
+  });
+
+  it('reports cachedTokens verbatim when the provider carries prompt_tokens_details (Story 3.5)', () => {
+    const body = JSON.stringify({
+      choices: [{ message: { content: 'attack' } }],
+      usage: { completion_tokens: 100, prompt_tokens_details: { cached_tokens: 40 } },
+    });
+
+    expect(mapCerebrasResponse(body).usage.cachedTokens).toBe(40);
   });
 
   it('throws on a body that is not a chat completion at all', () => {

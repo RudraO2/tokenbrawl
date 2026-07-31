@@ -75,6 +75,7 @@ export { REFLEX_SCAFFOLD, SCAFFOLD, assemblePrompt, selectScaffold } from './sca
 export { createDeployment } from './deployment';
 export type {
   DeploymentConfig,
+  DeploymentDecision,
   ProviderClient,
   ProviderRequest,
   ProviderResponse,
@@ -83,3 +84,12 @@ export type {
 
 export { createMockProviderClient } from './testing/mock-provider';
 export type { MockProviderClient, MockProviderConfig } from './testing/mock-provider';
+
+// ---------------------------------------------------------------------------
+// Story 3.5: per-call provenance (already carried by the frozen contracts)
+// and prompt-cache accounting -- conservative debiting and a per-Match,
+// per-Agent cache-hit report.
+// ---------------------------------------------------------------------------
+
+export { computeCacheStats, formatCacheDeviations } from './caching';
+export type { CacheStats } from './caching';

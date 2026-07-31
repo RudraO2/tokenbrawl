@@ -37,8 +37,20 @@ export function createTokenBank(start: number = DEFAULT_TOKEN_BANK_START): Token
  * Metering Probe result, not a free call -- so the bank is returned
  * untouched. Coercing `null` to `0` here would silently hand an unmetered
  * Deployment an infinite budget while the log still looked correct.
+ *
+ * `cachedTokens` (Story 3.5, AC4/AC5) is excluded from the debit when the
+ * provider reported it: only `tokensSpent - cachedTokens` is billed. `null`
+ * (the default) means the provider reported no cache signal at all, and the
+ * debit stays conservative -- the full `tokensSpent` is charged, including
+ * whatever was actually served from cache -- rather than guessing a hit rate
+ * that was never reported.
  */
-export function debitTokenBank(bank: TokenBank, tokensSpent: number | null, agentId: string): TokenBank {
+export function debitTokenBank(
+  bank: TokenBank,
+  tokensSpent: number | null,
+  agentId: string,
+  cachedTokens: number | null = null,
+): TokenBank {
   if (tokensSpent === null) {
     return bank;
   }
@@ -47,7 +59,15 @@ export function debitTokenBank(bank: TokenBank, tokensSpent: number | null, agen
     throw new Error(`debitTokenBank: Agent "${agentId}" reported an invalid tokensSpent: ${tokensSpent}`);
   }
 
-  return { remaining: Math.max(0, bank.remaining - tokensSpent) };
+  let billable = tokensSpent;
+  if (cachedTokens !== null) {
+    if (!Number.isSafeInteger(cachedTokens) || cachedTokens < 0 || cachedTokens > tokensSpent) {
+      throw new Error(`debitTokenBank: Agent "${agentId}" reported an invalid cachedTokens: ${cachedTokens}`);
+    }
+    billable = tokensSpent - cachedTokens;
+  }
+
+  return { remaining: Math.max(0, bank.remaining - billable) };
 }
 
 /**

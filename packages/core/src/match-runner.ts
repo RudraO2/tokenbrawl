@@ -7,6 +7,8 @@ import {
   type LoggedAction,
   type TerminalResult,
 } from '@tokenbrawl/contracts';
+import { computeCacheStats } from './caching';
+import type { CacheStats } from './caching';
 import { DEFAULT_TOKEN_BANK_START, createTokenBank, debitTokenBank } from './token-bank';
 import type { TokenBank } from './token-bank';
 
@@ -36,6 +38,14 @@ export interface MatchOptions {
  */
 export interface MatchDecisionEntry extends Omit<DecisionEntry, 'action'> {
   readonly action: LoggedAction | null;
+  /**
+   * Cached-prompt tokens excluded from this decision's Token Bank debit, or
+   * `null` when the provider reported no cache signal at all (Story 3.5).
+   * Never written to a Command Log -- the schema is frozen -- this lives
+   * only on the in-memory `MatchResult` so `computeCacheStats` can measure a
+   * cache-hit rate and a conservative-debit count per Agent.
+   */
+  readonly cachedTokens?: number | null;
 }
 
 /**
@@ -50,6 +60,8 @@ export interface MatchResult {
   readonly finalStateHash: string;
   /** The Token Bank size every Agent started this Match with (Story 1.5). */
   readonly tokenBankStart: number;
+  /** Per-Agent cache-hit accounting over this Match (Story 3.5, AC3). */
+  readonly cacheStats: readonly [CacheStats, CacheStats];
 }
 
 /**
@@ -165,7 +177,11 @@ export async function runMatch<TState>(
         if (pollResult === null) {
           throw new Error(`Agent "${agent.id}" was actionable but never polled -- this is a runMatch bug.`);
         }
-        banks[agentIndex] = debitTokenBank(banks[agentIndex], decision.tokensSpent, agent.id);
+        // `Decision` is the frozen shape; `cachedTokens` rides on it as an
+        // extra runtime field a `Deployment`'s `decide()` fills in (Story
+        // 3.5) but that the frozen `Agent` port has no room to declare.
+        const cachedTokens = (decision as Decision & { cachedTokens?: number | null }).cachedTokens ?? null;
+        banks[agentIndex] = debitTokenBank(banks[agentIndex], decision.tokensSpent, agent.id, cachedTokens);
 
         decisions.push({
           tick,
@@ -180,6 +196,7 @@ export async function runMatch<TState>(
           rawResponse: decision.rawResponse,
           provider: decision.provider,
           endpoint: decision.endpoint,
+          cachedTokens,
         });
       } else {
         // Banking fields are written only for a Deployment (INV-4/Story
@@ -209,5 +226,6 @@ export async function runMatch<TState>(
     result: terminalResult,
     finalStateHash: env.hash(state),
     tokenBankStart,
+    cacheStats: computeCacheStats(decisions, [agents[0].id, agents[1].id]),
   };
 }

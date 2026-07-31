@@ -124,7 +124,7 @@ describe('mapGoogleResponse (AC4)', () => {
   it('maps a 200 to the completion text and the raw candidates token count', () => {
     expect(mapGoogleResponse(RECORDED_200)).toStrictEqual({
       text: 'ACTION: attack',
-      usage: { tokensSpent: 3, reasoningTokens: null },
+      usage: { tokensSpent: 3, reasoningTokens: null, cachedTokens: null },
       reasoning: null,
     });
   });
@@ -134,12 +134,28 @@ describe('mapGoogleResponse (AC4)', () => {
       candidates: [{ content: { parts: [{ text: 'attack' }] } }],
       usageMetadata: { candidatesTokenCount: 50, thoughtsTokenCount: 120 },
     });
-    expect(mapGoogleResponse(body).usage).toStrictEqual({ tokensSpent: 50, reasoningTokens: 120 });
+    expect(mapGoogleResponse(body).usage).toStrictEqual({
+      tokensSpent: 50,
+      reasoningTokens: 120,
+      cachedTokens: null,
+    });
   });
 
   it('never coerces an unreported count to zero (INV-5)', () => {
     const noUsage = JSON.stringify({ candidates: [{ content: { parts: [{ text: 'attack' }] } }] });
-    expect(mapGoogleResponse(noUsage).usage).toStrictEqual({ tokensSpent: null, reasoningTokens: null });
+    expect(mapGoogleResponse(noUsage).usage).toStrictEqual({
+      tokensSpent: null,
+      reasoningTokens: null,
+      cachedTokens: null,
+    });
+  });
+
+  it('reports cachedContentTokenCount as cachedTokens when present (Story 3.5)', () => {
+    const body = JSON.stringify({
+      candidates: [{ content: { parts: [{ text: 'attack' }] } }],
+      usageMetadata: { candidatesTokenCount: 50, cachedContentTokenCount: 20 },
+    });
+    expect(mapGoogleResponse(body).usage.cachedTokens).toBe(20);
   });
 
   it('joins multiple parts and maps an empty/absent part list to an empty string', () => {

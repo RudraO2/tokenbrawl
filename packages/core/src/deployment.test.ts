@@ -2,6 +2,7 @@ import { FALLBACK_ACTION, type Observation } from '@tokenbrawl/contracts';
 import { describe, expect, it } from 'vitest';
 import { buildCommandLog, computeConfigHash, computeMatchId, validateCommandLog } from './command-log';
 import { createDeployment } from './deployment';
+import type { DeploymentDecision } from './deployment';
 import { runMatch } from './match-runner';
 import { REFLEX_MAX_TOKENS } from './token-bank';
 import { createMockProviderClient } from './testing/mock-provider';
@@ -160,6 +161,28 @@ describe('the Decision a Deployment reports (AD-6, INV-5, INV-6)', () => {
     expect(decision.tokensSpent).toBeNull();
     expect(decision.reasoningTokens).toBeNull();
     expect(decision.reasoning).toBeNull();
+  });
+
+  it('passes cachedTokens through unmodified (Story 3.5, AD-6)', async () => {
+    const client = createMockProviderClient({
+      script: [{ text: 'attack', usage: { tokensSpent: 137, reasoningTokens: 90, cachedTokens: 40 } }],
+    });
+    const agent = createDeployment({ client });
+
+    const decision = (await agent.decide(agent.observe(OBSERVATION, 5_000, false))) as DeploymentDecision;
+
+    expect(decision.cachedTokens).toBe(40);
+  });
+
+  it('reports cachedTokens as null (never coerced to 0) when the provider reports no cache signal', async () => {
+    const client = createMockProviderClient({
+      script: [{ text: 'attack', usage: { tokensSpent: 137, reasoningTokens: null } }],
+    });
+    const agent = createDeployment({ client });
+
+    const decision = (await agent.decide(agent.observe(OBSERVATION, 5_000, false))) as DeploymentDecision;
+
+    expect(decision.cachedTokens).toBeNull();
   });
 
   it('records the client identity per call by default', async () => {

@@ -459,6 +459,72 @@ describe('runMatch: Token Bank (Story 1.5, I/O matrix)', () => {
   });
 });
 
+describe('runMatch: cache accounting and conservative debit (Story 3.5, I/O matrix)', () => {
+  it('excludes cachedTokens from the debit and records them on the entry when the provider reports cache signal', async () => {
+    const env = createMockEnvironment({ maxTicks: 1, ticksPerDecision: 1 });
+    const agent0 = createScriptedAgent({
+      id: 'dep:p1',
+      kind: 'deployment',
+      script: ['attack'],
+      usage: [{ tokensSpent: 120, cachedTokens: 40 }],
+    });
+    const agent1 = createScriptedAgent({ id: 'bot:p2', kind: 'bot', script: ['block'] });
+
+    const result = await runMatch(env, [agent0, agent1], SEED, { tokenBankStart: 25_000 });
+
+    const [p1Entry] = result.decisions.filter((entry) => entry.agentIndex === 0);
+    expect(p1Entry?.cachedTokens).toBe(40);
+    // 120 spent, 40 cached -- only 80 debited.
+    expect(p1Entry?.bankRemaining).toBe(24_920);
+  });
+
+  it('charges tokensSpent in full -- conservative -- when the provider reports no cache signal', async () => {
+    const env = createMockEnvironment({ maxTicks: 1, ticksPerDecision: 1 });
+    const agent0 = createScriptedAgent({
+      id: 'dep:p1',
+      kind: 'deployment',
+      script: ['attack'],
+      usage: [{ tokensSpent: 120 }],
+    });
+    const agent1 = createScriptedAgent({ id: 'bot:p2', kind: 'bot', script: ['block'] });
+
+    const result = await runMatch(env, [agent0, agent1], SEED, { tokenBankStart: 25_000 });
+
+    const [p1Entry] = result.decisions.filter((entry) => entry.agentIndex === 0);
+    expect(p1Entry?.cachedTokens).toBeNull();
+    expect(p1Entry?.bankRemaining).toBe(24_880);
+  });
+
+  it('surfaces per-Agent cache stats on the MatchResult, with the conservative call counted', async () => {
+    const env = createMockEnvironment({ maxTicks: 2, ticksPerDecision: 1 });
+    const agent0 = createScriptedAgent({
+      id: 'dep:p1',
+      kind: 'deployment',
+      script: ['attack', 'attack'],
+      usage: [
+        { tokensSpent: 100, cachedTokens: 25 },
+        { tokensSpent: 100 },
+      ],
+    });
+    const agent1 = createScriptedAgent({ id: 'bot:p2', kind: 'bot', script: ['block', 'block'] });
+
+    const result = await runMatch(env, [agent0, agent1], SEED, { tokenBankStart: 25_000 });
+
+    const [p1Stats, p2Stats] = result.cacheStats;
+    expect(p1Stats).toStrictEqual({
+      agentIndex: 0,
+      agentId: 'dep:p1',
+      billableCalls: 2,
+      totalTokens: 200,
+      cachedTokens: 25,
+      cacheHitRate: 0.125,
+      conservativeDebitCalls: 1,
+    });
+    // A Baseline Bot bills nothing.
+    expect(p2Stats.billableCalls).toBe(0);
+  });
+});
+
 describe('runMatch: Parse Failure (Story 1.6, I/O matrix)', () => {
   it('Deployment Parse Failure: logs action stand, parseFailure true, verbatim rawResponse, and still debits the bank', async () => {
     const env = createMockEnvironment({ maxTicks: 1, ticksPerDecision: 1 });

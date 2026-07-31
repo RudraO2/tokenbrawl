@@ -1,10 +1,13 @@
-import type { Action, Agent, Decision, Observation, Prompt } from '@tokenbrawl/contracts';
+import type { Action, Agent, Observation, Prompt } from '@tokenbrawl/contracts';
+import type { DeploymentDecision } from '../deployment';
 import { yieldMicrotasks } from './async-delay';
 
 /** One call's reported usage. Mirrors the two fields of `Decision` a script can vary; everything else about the Decision is fixed. */
 export interface ScriptedAgentUsage {
   readonly tokensSpent: number | null;
   readonly reasoningTokens?: number | null;
+  /** Cached tokens to report for this call. Omitted/`null` means no cache signal (Story 3.5). */
+  readonly cachedTokens?: number | null;
 }
 
 export interface ScriptedAgentConfig {
@@ -68,7 +71,7 @@ export function createScriptedAgent(config: ScriptedAgentConfig): ScriptedAgent 
       return prompt;
     },
 
-    async decide(prompt: Prompt): Promise<Decision> {
+    async decide(prompt: Prompt): Promise<DeploymentDecision> {
       decideCalls += 1;
 
       if (cursor >= script.length) {
@@ -88,6 +91,7 @@ export function createScriptedAgent(config: ScriptedAgentConfig): ScriptedAgent 
         rawResponse: `${action}:${prompt.user}`,
         provider: 'mock',
         endpoint: 'mock',
+        cachedTokens: usage.cachedTokens ?? null,
       };
     },
   };

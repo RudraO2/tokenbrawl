@@ -63,6 +63,55 @@ describe('debitTokenBank (I/O matrix: Overdraft)', () => {
   });
 });
 
+describe('debitTokenBank (I/O matrix: cache exclusion, Story 3.5)', () => {
+  it('excludes cachedTokens from the debit when the provider reports cache signal', () => {
+    const bank = createTokenBank(25_000);
+    const debited = debitTokenBank(bank, 120, 'agent:p1', 40);
+
+    expect(debited.remaining).toBe(24_920);
+  });
+
+  it('charges the full tokensSpent -- conservative -- when cachedTokens is null (no cache signal)', () => {
+    const bank = createTokenBank(25_000);
+    const debited = debitTokenBank(bank, 120, 'agent:p1', null);
+
+    expect(debited.remaining).toBe(24_880);
+  });
+
+  it('defaults to the conservative (no-cache-signal) path when cachedTokens is omitted', () => {
+    const bank = createTokenBank(25_000);
+    const debited = debitTokenBank(bank, 120, 'agent:p1');
+
+    expect(debited.remaining).toBe(24_880);
+  });
+
+  it('treats a reported cachedTokens of 0 as an honest report, billing tokensSpent in full', () => {
+    const bank = createTokenBank(25_000);
+    const debited = debitTokenBank(bank, 120, 'agent:p1', 0);
+
+    expect(debited.remaining).toBe(24_880);
+  });
+
+  it('clamps at 0 when cachedTokens equals tokensSpent exactly', () => {
+    const bank = createTokenBank(25_000);
+    const debited = debitTokenBank(bank, 120, 'agent:p1', 120);
+
+    expect(debited.remaining).toBe(25_000);
+  });
+
+  it.each([-5, 3.5, Number.MAX_VALUE])('throws naming the Agent for a malformed cachedTokens %p', (bad) => {
+    const bank = createTokenBank(25_000);
+
+    expect(() => debitTokenBank(bank, 120, 'agent:the-culprit', bad)).toThrow(/agent:the-culprit/);
+  });
+
+  it('throws when cachedTokens exceeds tokensSpent', () => {
+    const bank = createTokenBank(25_000);
+
+    expect(() => debitTokenBank(bank, 100, 'agent:p1', 101)).toThrow(/agent:p1/);
+  });
+});
+
 describe('debitTokenBank (I/O matrix: Bad usage report)', () => {
   it.each([-5, 3.5, Number.MAX_VALUE])('throws naming the Agent for tokensSpent %p', (bad) => {
     const bank = createTokenBank(25_000);

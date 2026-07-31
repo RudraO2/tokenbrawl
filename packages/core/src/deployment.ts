@@ -43,6 +43,13 @@ export interface ProviderRequest {
 export interface ProviderUsage {
   readonly tokensSpent: number | null;
   readonly reasoningTokens: number | null;
+  /**
+   * Cached-prompt tokens this call served from the provider's own prompt
+   * cache, when the provider reports cache signal at all (Story 3.5, AD-11).
+   * Absent or `null` both mean "no cache signal" -- never coerced to `0`,
+   * which would falsely claim a reported 100% cache miss.
+   */
+  readonly cachedTokens?: number | null;
 }
 
 export interface ProviderResponse {
@@ -69,6 +76,17 @@ export interface ProviderClient {
   readonly endpoint: string;
   readonly model: string;
   complete(request: ProviderRequest): Promise<ProviderResponse>;
+}
+
+/**
+ * A Deployment's `Decision`, widened with the one field the frozen `Decision`
+ * shape has no room for (Story 3.5). `cachedTokens` never reaches a Command
+ * Log entry -- the schema is frozen and untouched -- it exists purely so
+ * `runMatch` can exclude cached tokens from the Token Bank debit (AC4/AC5)
+ * without core reaching back into a `ProviderResponse` it no longer has.
+ */
+export interface DeploymentDecision extends Decision {
+  readonly cachedTokens: number | null;
 }
 
 export interface DeploymentConfig {
@@ -116,7 +134,7 @@ export function createDeployment(config: DeploymentConfig): Agent {
 
     observe: assemblePrompt,
 
-    async decide(prompt: Prompt): Promise<Decision> {
+    async decide(prompt: Prompt): Promise<DeploymentDecision> {
       const response = await client.complete({
         system: prompt.system,
         user: prompt.user,
@@ -131,6 +149,7 @@ export function createDeployment(config: DeploymentConfig): Agent {
         rawResponse: response.text,
         provider: response.provider ?? client.provider,
         endpoint: response.endpoint ?? client.endpoint,
+        cachedTokens: response.usage.cachedTokens ?? null,
       };
     },
   };
