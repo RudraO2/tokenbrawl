@@ -54,9 +54,11 @@ survive a public repository.
 |---|---|---|---|
 | Mountain Dusk (`apps/web/public/sprites/mountain-dusk/`) | https://ansimuz.itch.io/mountain-dusk-parallax-background | **CC0 1.0 Universal** | 2026-08-01 |
 
-Verified twice: the pack's bundled `public-license.pdf` (kept beside the
-layers) contains "Creative Commons Zero (CC0", and the itch.io page states
-"Creative Commons Zero v1.0 Universal".
+Verified twice: the pack's bundled `public-license.pdf` contains "Creative
+Commons Zero (CC0", and the itch.io page states "Creative Commons Zero v1.0
+Universal". The PDF lives at `docs/licences/mountain-dusk-public-license.pdf`,
+not in `public/` — it is 816 KB, `public/` ships verbatim, and the licence
+would otherwise outweigh every sprite in the app four times over.
 
 Six layers drawn back to front, static rather than parallaxed — the arena is a
 single fixed axis with no camera, so a scroll would be motion corresponding to

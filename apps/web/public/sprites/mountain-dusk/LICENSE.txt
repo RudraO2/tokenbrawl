@@ -4,8 +4,12 @@ by ansimuz — https://ansimuz.itch.io/mountain-dusk-parallax-background
 Creative Commons Zero (CC0 1.0 Universal).
 
 Verified 2026-08-01 two ways:
-  1. The pack's own bundled `public-license.pdf` (kept beside this file)
-     contains the string "Creative Commons Zero (CC0".
+  1. The pack's own bundled `public-license.pdf` contains the string
+     "Creative Commons Zero (CC0". It is kept at
+     docs/licences/mountain-dusk-public-license.pdf rather than beside the art:
+     it is 816 KB and `public/` is deployed verbatim, so shipping it would make
+     the licence 4x heavier than every sprite in the app combined. Provenance
+     belongs in the repo; it does not belong on the wire.
   2. The itch.io page states "Creative Commons Zero v1.0 Universal".
 
 Layers used (version A, 320x240 each): sky, far-clouds, far-mountains,
