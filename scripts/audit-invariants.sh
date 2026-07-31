@@ -252,6 +252,39 @@ else
   fi
 fi
 
+# --- AD-4: environment adapters run in Node and in a browser alike ----------
+#
+# The replay player re-runs the very same engine that CI ran, so a Node
+# built-in anywhere in an env-* package's shipped graph breaks the web app at
+# bundle time -- long after the story that introduced it was reviewed. Until
+# Story 2.1 this was documented in a source comment and nothing else.
+#
+# Scope is `packages/env-*/src` only: a package's own `vitest.config.ts` is
+# build tooling that never reaches a browser, and test files are exempt for
+# the same reason (`source-discipline.test.ts` imports `node:fs` precisely so
+# it can run this check a second time from inside the suite).
+echo
+echo "AD-4  environment adapters import no Node built-in"
+ENV_SRC_DIRS=()
+for d in packages/env-*/src; do [ -d "$d" ] && ENV_SRC_DIRS+=("$d"); done
+if [ ${#ENV_SRC_DIRS[@]} -eq 0 ]; then
+  skip "no environment adapter packages yet"
+else
+  builtins='assert|buffer|child_process|crypto|events|fs|fs/promises|http|http2|https|inspector|module|net|os|path|perf_hooks|process|readline|stream|string_decoder|timers|tls|tty|url|util|v8|vm|worker_threads|zlib'
+  hits=$(grep -rnE --include='*.ts' --include='*.tsx' --include='*.mts' --include='*.cts' \
+          --include='*.js' --include='*.jsx' --include='*.mjs' --include='*.cjs' \
+          --exclude='*.test.ts' --exclude='*.spec.ts' --exclude='*.test.tsx' --exclude='*.spec.tsx' \
+          --exclude-dir=node_modules --exclude-dir=dist --exclude-dir=build --exclude-dir=coverage --exclude-dir=.turbo \
+          "(from|import|require\()[[:space:]]*\(?[[:space:]]*['\"](node:($builtins)|$builtins)['\"]" \
+          "${ENV_SRC_DIRS[@]}" 2>/dev/null)
+  if [ -n "$hits" ]; then
+    fail "Node built-in imported by a shipped environment-adapter file (AD-4: must run unmodified in a browser):"
+    echo "$hits" | sed 's/^/          /'
+  else
+    pass "no Node built-in imported by a shipped environment-adapter file"
+  fi
+fi
+
 # --- INV-4: thinking budget metered, never set ------------------------------
 echo
 echo "INV-4  thinking budget is metered, never set"
