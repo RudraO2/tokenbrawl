@@ -19,7 +19,7 @@ export type PlaceholderAction = Action;
 // ---------------------------------------------------------------------------
 
 export { runMatch } from './match-runner';
-export type { MatchDecisionEntry, MatchResult } from './match-runner';
+export type { MatchDecisionEntry, MatchOptions, MatchResult } from './match-runner';
 
 export { yieldMicrotasks } from './testing/async-delay';
 
@@ -27,7 +27,7 @@ export { createMockEnvironment, DEFAULT_MOCK_ENVIRONMENT_CONFIG } from './testin
 export type { MockEnvironmentConfig, MockState } from './testing/mock-environment';
 
 export { createScriptedAgent } from './testing/mock-agent';
-export type { ScriptedAgent, ScriptedAgentConfig } from './testing/mock-agent';
+export type { ScriptedAgent, ScriptedAgentConfig, ScriptedAgentUsage } from './testing/mock-agent';
 
 // ---------------------------------------------------------------------------
 // Story 1.3: Command Log persistence and schema validation.
@@ -49,3 +49,10 @@ export type { BuildCommandLogParams, ComputeMatchIdParams } from './command-log'
 
 export { replayCommandLog } from './replay';
 export type { ReplayResult } from './replay';
+
+// ---------------------------------------------------------------------------
+// Story 1.5: Token Bank metering and Reflex Mode.
+// ---------------------------------------------------------------------------
+
+export { DEFAULT_TOKEN_BANK_START, REFLEX_MAX_TOKENS, maxTokensFor } from './token-bank';
+export type { TokenBank } from './token-bank';

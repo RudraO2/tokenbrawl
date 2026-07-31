@@ -343,7 +343,7 @@ describe('computeConfigHash wired through buildCommandLog end-to-end', () => {
   });
 });
 
-describe('buildCommandLog optional-field omission (bypasses runMatch, which cannot yet produce these fields)', () => {
+describe('buildCommandLog optional-field omission', () => {
   it('omits keys whose source value is undefined and keeps a null reasoning/rawResponse value', () => {
     const matchResult: MatchResult = {
       decisions: [
@@ -362,6 +362,7 @@ describe('buildCommandLog optional-field omission (bypasses runMatch, which cann
       ],
       result: { outcome: 'p1', endTick: 1, endReason: 'timeout', healthRemaining: [10, 5] },
       finalStateHash: FIXTURE_STATE_HASH,
+      tokenBankStart: 25_000,
     };
 
     const log = buildCommandLog(matchResult, {
@@ -385,5 +386,76 @@ describe('buildCommandLog optional-field omission (bypasses runMatch, which cann
     expect(entry?.reflexMode).toBe(true);
     expect(entry?.reasoning).toBeNull();
     expect(entry?.rawResponse).toBe('garbled');
+    // Both agents are bots -- absent regardless of what MatchResult carried.
+    expect(log).not.toHaveProperty('tokenBankStart');
+  });
+});
+
+describe('buildCommandLog tokenBankStart reconciliation (Story 1.5, I/O matrix)', () => {
+  function matchResultWith(tokenBankStart: number): MatchResult {
+    return {
+      decisions: [],
+      result: { outcome: 'p1', endTick: 1, endReason: 'timeout', healthRemaining: [10, 5] },
+      finalStateHash: FIXTURE_STATE_HASH,
+      tokenBankStart,
+    };
+  }
+
+  it('includes tokenBankStart from MatchResult when any Agent is a Deployment', () => {
+    const log = buildCommandLog(matchResultWith(25_000), {
+      environment: { id: 'mock-environment', version: '1.0.0' },
+      seed: SEED,
+      configHash: FIXTURE_CONFIG_HASH,
+      agents: [
+        { id: 'groq:llama', kind: 'deployment', deployment: { provider: 'groq', endpoint: 'https://api.groq.com', model: 'llama' } },
+        { id: 'bot:p2', kind: 'bot' },
+      ],
+    });
+
+    expect(log.tokenBankStart).toBe(25_000);
+  });
+
+  it('omits tokenBankStart when every Agent is a Baseline Bot, even though MatchResult carried one', () => {
+    const log = buildCommandLog(matchResultWith(25_000), {
+      environment: { id: 'mock-environment', version: '1.0.0' },
+      seed: SEED,
+      configHash: FIXTURE_CONFIG_HASH,
+      agents: [
+        { id: 'bot:p1', kind: 'bot' },
+        { id: 'bot:p2', kind: 'bot' },
+      ],
+    });
+
+    expect(log).not.toHaveProperty('tokenBankStart');
+  });
+
+  it('accepts params.tokenBankStart agreeing with matchResult.tokenBankStart', () => {
+    const log = buildCommandLog(matchResultWith(25_000), {
+      environment: { id: 'mock-environment', version: '1.0.0' },
+      seed: SEED,
+      configHash: FIXTURE_CONFIG_HASH,
+      tokenBankStart: 25_000,
+      agents: [
+        { id: 'groq:llama', kind: 'deployment', deployment: { provider: 'groq', endpoint: 'https://api.groq.com', model: 'llama' } },
+        { id: 'bot:p2', kind: 'bot' },
+      ],
+    });
+
+    expect(log.tokenBankStart).toBe(25_000);
+  });
+
+  it('throws when params.tokenBankStart disagrees with matchResult.tokenBankStart -- two consumers must never derive different values for one Match', () => {
+    expect(() =>
+      buildCommandLog(matchResultWith(25_000), {
+        environment: { id: 'mock-environment', version: '1.0.0' },
+        seed: SEED,
+        configHash: FIXTURE_CONFIG_HASH,
+        tokenBankStart: 30_000,
+        agents: [
+          { id: 'groq:llama', kind: 'deployment', deployment: { provider: 'groq', endpoint: 'https://api.groq.com', model: 'llama' } },
+          { id: 'bot:p2', kind: 'bot' },
+        ],
+      }),
+    ).toThrow(/25000|30000/);
   });
 });

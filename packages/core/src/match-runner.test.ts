@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import type { Agent, Decision } from '@tokenbrawl/contracts';
 import { describe, expect, it } from 'vitest';
 import { runMatch } from './match-runner';
+import { DEFAULT_TOKEN_BANK_START, REFLEX_MAX_TOKENS, maxTokensFor } from './token-bank';
 import { yieldMicrotasks } from './testing/async-delay';
 import { createMockEnvironment } from './testing/mock-environment';
 import { createScriptedAgent } from './testing/mock-agent';
@@ -81,7 +82,11 @@ describe('runMatch: never-returning Agent', () => {
     expect(settled).toBe(false);
     // Confirms runMatch actually threads its own budget/reflex values into
     // observe() rather than this test's mock coincidentally matching them.
-    expect(observedBudgetRemaining).toBe(Number.MAX_SAFE_INTEGER);
+    // Both dead the moment Story 1.5 landed: before it, every Agent was
+    // observed with an unmetered budget (Number.MAX_SAFE_INTEGER) and Reflex
+    // Mode never engaged; now a fresh, un-debited bank starts at
+    // DEFAULT_TOKEN_BANK_START and reflexMode is false until it empties.
+    expect(observedBudgetRemaining).toBe(DEFAULT_TOKEN_BANK_START);
     expect(observedReflexMode).toBe(false);
 
     // Clean teardown: release the stalled Agent so the suite can exit.
@@ -197,6 +202,158 @@ describe('runMatch: Commitment Window', () => {
 
     const agent1Entries = result.decisions.filter((entry) => entry.agentIndex === 1);
     expect(agent1Entries.every((entry) => entry.action === 'attack')).toBe(true);
+  });
+});
+
+describe('runMatch: Token Bank (Story 1.5, I/O matrix)', () => {
+  it('debits a Deployment bank by tokensSpent and writes tokensSpent/reasoningTokens/bankRemaining/reflexMode only for Deployment entries', async () => {
+    const env = createMockEnvironment({ maxTicks: 3, ticksPerDecision: 1 });
+    const agent0 = createScriptedAgent({
+      id: 'dep:p1',
+      kind: 'deployment',
+      script: ['attack', 'attack', 'attack'],
+      usage: [{ tokensSpent: 120, reasoningTokens: 40 }, { tokensSpent: 80 }, { tokensSpent: 0 }],
+    });
+    const agent1 = createScriptedAgent({ id: 'bot:p2', kind: 'bot', script: ['block', 'block', 'block'] });
+
+    const result = await runMatch(env, [agent0, agent1], SEED, { tokenBankStart: 25_000 });
+
+    expect(result.tokenBankStart).toBe(25_000);
+
+    const p1Entries = result.decisions.filter((entry) => entry.agentIndex === 0);
+    expect(p1Entries.map((entry) => entry.bankRemaining)).toStrictEqual([24_880, 24_800, 24_800]);
+    expect(p1Entries.every((entry) => entry.reflexMode === false)).toBe(true);
+    expect(p1Entries[0]?.tokensSpent).toBe(120);
+    expect(p1Entries[0]?.reasoningTokens).toBe(40);
+    // Usage row 2 supplied no reasoningTokens -- must come back null, never 0.
+    expect(p1Entries[1]?.reasoningTokens).toBeNull();
+
+    const p2Entries = result.decisions.filter((entry) => entry.agentIndex === 1);
+    for (const entry of p2Entries) {
+      expect(entry).not.toHaveProperty('tokensSpent');
+      expect(entry).not.toHaveProperty('reasoningTokens');
+      expect(entry).not.toHaveProperty('bankRemaining');
+      expect(entry).not.toHaveProperty('reflexMode');
+    }
+  });
+
+  it('exhaustion boundary: the emptying call logs reflexMode false, and only the next call is polled with reflexMode true / maxTokensFor 8', async () => {
+    const env = createMockEnvironment({ maxTicks: 2, ticksPerDecision: 1 });
+    const agent0 = createScriptedAgent({
+      id: 'dep:p1',
+      kind: 'deployment',
+      script: ['attack', 'attack'],
+      usage: [{ tokensSpent: 100 }, { tokensSpent: 0 }],
+    });
+    const agent1 = createScriptedAgent({ id: 'bot:p2', kind: 'bot', script: ['block', 'block'] });
+
+    const result = await runMatch(env, [agent0, agent1], SEED, { tokenBankStart: 100 });
+
+    const p1Entries = result.decisions.filter((entry) => entry.agentIndex === 0);
+    expect(p1Entries[0]).toMatchObject({ reflexMode: false, bankRemaining: 0 });
+    expect(p1Entries[1]).toMatchObject({ reflexMode: true, bankRemaining: 0 });
+
+    const prompts = agent0.capturedPrompts();
+    expect(prompts[0]?.budgetRemaining).toBe(100);
+    expect(prompts[0]?.reflexMode).toBe(false);
+    expect(prompts[1]?.budgetRemaining).toBe(0);
+    expect(prompts[1]?.reflexMode).toBe(true);
+    expect(prompts[1] && maxTokensFor(prompts[1])).toBe(REFLEX_MAX_TOKENS);
+  });
+
+  it('overdraft: bankRemaining clamps at 0 rather than going negative', async () => {
+    const env = createMockEnvironment({ maxTicks: 1, ticksPerDecision: 1 });
+    const agent0 = createScriptedAgent({
+      id: 'dep:p1',
+      kind: 'deployment',
+      script: ['attack'],
+      usage: [{ tokensSpent: 500 }],
+    });
+    const agent1 = createScriptedAgent({ id: 'bot:p2', kind: 'bot', script: ['block'] });
+
+    const result = await runMatch(env, [agent0, agent1], SEED, { tokenBankStart: 30 });
+
+    expect(result.decisions.find((entry) => entry.agentIndex === 0)?.bankRemaining).toBe(0);
+  });
+
+  it('both Deployments exhausted: the Match still reaches a normal TerminalResult with both in Reflex Mode, no error thrown', async () => {
+    const env = createMockEnvironment({ maxTicks: 2, ticksPerDecision: 1 });
+    const agent0 = createScriptedAgent({
+      id: 'dep:p1',
+      kind: 'deployment',
+      script: ['attack', 'attack'],
+      usage: [{ tokensSpent: 50 }, { tokensSpent: 0 }],
+    });
+    const agent1 = createScriptedAgent({
+      id: 'dep:p2',
+      kind: 'deployment',
+      script: ['block', 'block'],
+      usage: [{ tokensSpent: 50 }, { tokensSpent: 0 }],
+    });
+
+    const result = await runMatch(env, [agent0, agent1], SEED, { tokenBankStart: 50 });
+
+    const finalTickEntries = result.decisions.filter((entry) => entry.tick === 1);
+    expect(finalTickEntries).toHaveLength(2);
+    expect(finalTickEntries.every((entry) => entry.reflexMode === true)).toBe(true);
+    expect(result.result.endReason).toBe('timeout');
+  });
+
+  it('zero-size bank: every call from tick 0 is reflexMode true', async () => {
+    const env = createMockEnvironment({ maxTicks: 1, ticksPerDecision: 1 });
+    const agent0 = createScriptedAgent({
+      id: 'dep:p1',
+      kind: 'deployment',
+      script: ['attack'],
+      usage: [{ tokensSpent: 0 }],
+    });
+    const agent1 = createScriptedAgent({ id: 'bot:p2', kind: 'bot', script: ['block'] });
+
+    const result = await runMatch(env, [agent0, agent1], SEED, { tokenBankStart: 0 });
+
+    expect(result.decisions.find((entry) => entry.agentIndex === 0)?.reflexMode).toBe(true);
+    expect(agent0.capturedPrompts()[0]?.reflexMode).toBe(true);
+  });
+
+  it('a null tokensSpent report leaves the bank untouched and is preserved as null, never coerced to 0', async () => {
+    const env = createMockEnvironment({ maxTicks: 2, ticksPerDecision: 1 });
+    const agent0 = createScriptedAgent({
+      id: 'dep:p1',
+      kind: 'deployment',
+      script: ['attack', 'attack'],
+      usage: [{ tokensSpent: null }, { tokensSpent: 100 }],
+    });
+    const agent1 = createScriptedAgent({ id: 'bot:p2', kind: 'bot', script: ['block', 'block'] });
+
+    const result = await runMatch(env, [agent0, agent1], SEED, { tokenBankStart: 25_000 });
+
+    const p1Entries = result.decisions.filter((entry) => entry.agentIndex === 0);
+    expect(p1Entries[0]?.tokensSpent).toBeNull();
+    expect(p1Entries[0]?.bankRemaining).toBe(25_000);
+    expect(p1Entries[1]?.bankRemaining).toBe(24_900);
+  });
+
+  it('bad usage report throws naming the Agent and the rejected value, without corrupting the bank', async () => {
+    const env = createMockEnvironment({ maxTicks: 1, ticksPerDecision: 1 });
+    const agent0 = createScriptedAgent({
+      id: 'dep:bad-actor',
+      kind: 'deployment',
+      script: ['attack'],
+      usage: [{ tokensSpent: -5 }],
+    });
+    const agent1 = createScriptedAgent({ id: 'bot:p2', kind: 'bot', script: ['block'] });
+
+    await expect(runMatch(env, [agent0, agent1], SEED)).rejects.toThrow(/dep:bad-actor/);
+  });
+
+  it('bad config throws from runMatch before any Agent is polled', async () => {
+    const env = createMockEnvironment({ maxTicks: 1, ticksPerDecision: 1 });
+    const agent0 = createScriptedAgent({ id: 'dep:p1', kind: 'deployment', script: ['attack'] });
+    const agent1 = createScriptedAgent({ id: 'bot:p2', kind: 'bot', script: ['block'] });
+
+    await expect(runMatch(env, [agent0, agent1], SEED, { tokenBankStart: -1 })).rejects.toThrow();
+    expect(agent0.decideCallCount()).toBe(0);
+    expect(agent1.decideCallCount()).toBe(0);
   });
 });
 

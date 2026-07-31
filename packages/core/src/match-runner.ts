@@ -7,16 +7,21 @@ import type {
   LoggedAction,
   TerminalResult,
 } from '@tokenbrawl/contracts';
+import { DEFAULT_TOKEN_BANK_START, createTokenBank, debitTokenBank } from './token-bank';
+import type { TokenBank } from './token-bank';
 
 /**
- * Token Bank metering (INV-4) is out of scope for this story (see the
- * story's "Never" list). Every Agent is observed with an effectively
- * unmetered budget and Reflex Mode never engages; a later Token Bank story
- * replaces these constants with real accounting threaded through match
- * state.
+ * Optional per-Match configuration. A trailing options object (rather than a
+ * new positional parameter) so the three existing call sites
+ * (`match-runner.test.ts`, `command-log.test.ts`, `make-determinism-fixture.ts`)
+ * keep compiling unchanged, and the determinism fixture's inputs stay
+ * identical -- a hash move during regeneration is then unambiguously a real
+ * bug rather than a signature artefact.
  */
-const UNMETERED_BUDGET = Number.MAX_SAFE_INTEGER;
-const REFLEX_MODE = false;
+export interface MatchOptions {
+  /** Starting Token Bank per Agent. Defaults to `DEFAULT_TOKEN_BANK_START`. */
+  readonly tokenBankStart?: number;
+}
 
 /**
  * One logged decision for one Agent at one Decision Point.
@@ -42,6 +47,8 @@ export interface MatchResult {
   readonly decisions: readonly MatchDecisionEntry[];
   readonly result: TerminalResult;
   readonly finalStateHash: string;
+  /** The Token Bank size every Agent started this Match with (Story 1.5). */
+  readonly tokenBankStart: number;
 }
 
 /**
@@ -62,7 +69,13 @@ export async function runMatch<TState>(
   env: EnvironmentAdapter<TState>,
   agents: readonly [Agent, Agent],
   seed: number,
+  options?: MatchOptions,
 ): Promise<MatchResult> {
+  const tokenBankStart = options?.tokenBankStart ?? DEFAULT_TOKEN_BANK_START;
+  // Both banks are constructed before any Agent is polled, so a bad config
+  // value throws before a single decide() call ever fires.
+  const banks: [TokenBank, TokenBank] = [createTokenBank(tokenBankStart), createTokenBank(tokenBankStart)];
+
   let state = env.reset(seed);
   const decisions: MatchDecisionEntry[] = [];
   let tick = 0;
@@ -80,7 +93,11 @@ export async function runMatch<TState>(
       }
 
       const observation = env.observe(state, agentIndex);
-      const prompt = agents[agentIndex].observe(observation, UNMETERED_BUDGET, REFLEX_MODE);
+      // Read before this call, never after: the call that empties the bank
+      // is not itself in Reflex Mode, only the next one is (Story 1.5).
+      const budgetRemaining = banks[agentIndex].remaining;
+      const reflexMode = budgetRemaining === 0;
+      const prompt = agents[agentIndex].observe(observation, budgetRemaining, reflexMode);
       const decidePromise = agents[agentIndex].decide(prompt);
       pending.push(
         decidePromise.then((decision) => {
@@ -123,12 +140,31 @@ export async function runMatch<TState>(
 
       const action: Action = decision.action;
       actionsForStep[agentIndex] = action;
+
+      const agent = agents[agentIndex];
+      // Same "before this call" bank state the Prompt was built from in the
+      // poll pass above -- nothing mutates banks[agentIndex] between the two
+      // passes, so recomputing it here (rather than threading a second
+      // per-agent array through) cannot disagree with what was sent.
+      const reflexModeForThisCall = banks[agentIndex].remaining === 0;
+      banks[agentIndex] = debitTokenBank(banks[agentIndex], decision.tokensSpent, agent.id);
+
       decisions.push({
         tick,
         agentIndex,
         action,
-        tokensSpent: decision.tokensSpent ?? undefined,
-        reasoningTokens: decision.reasoningTokens ?? undefined,
+        // Banking fields are written only for a Deployment (INV-4/Story
+        // 1.5): a Baseline Bot consumes nothing, so all four stay absent
+        // rather than being derived from a zero value, which would collapse
+        // "cannot consume" and "consumed nothing" into one shape.
+        ...(agent.kind === 'deployment'
+          ? {
+              tokensSpent: decision.tokensSpent,
+              reasoningTokens: decision.reasoningTokens,
+              bankRemaining: banks[agentIndex].remaining,
+              reflexMode: reflexModeForThisCall,
+            }
+          : {}),
         reasoning: decision.reasoning,
         rawResponse: decision.rawResponse,
         provider: decision.provider,
@@ -145,5 +181,6 @@ export async function runMatch<TState>(
     decisions,
     result: terminalResult,
     finalStateHash: env.hash(state),
+    tokenBankStart,
   };
 }

@@ -266,6 +266,21 @@ if [ -d packages ]; then
   else
     pass "no reasoning-effort parameter sent"
   fi
+
+  # The positive half: a Token Bank must actually exist and be wired in, not
+  # merely absent-of-banned-keys. Story 1.5 landed this; an invariant that
+  # only forbids is half a gate.
+  token_bank_file="packages/core/src/token-bank.ts"
+  match_runner_file="packages/core/src/match-runner.ts"
+  if [ ! -f "$token_bank_file" ]; then
+    fail "no Token Bank module at $token_bank_file"
+  elif ! grep -qE '\bREFLEX_MAX_TOKENS\b *= *8\b' "$token_bank_file"; then
+    fail "REFLEX_MAX_TOKENS is not pinned to 8 in $token_bank_file"
+  elif grep -qE '\bUNMETERED_BUDGET\b' "$match_runner_file" 2>/dev/null; then
+    fail "$match_runner_file still contains UNMETERED_BUDGET -- Token Bank metering is not wired in"
+  else
+    pass "Token Bank module present, REFLEX_MAX_TOKENS is 8, and match-runner.ts is metered"
+  fi
 else
   skip "no packages/ yet"
 fi

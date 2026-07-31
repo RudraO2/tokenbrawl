@@ -1,6 +1,12 @@
 import type { Action, Agent, Decision, Observation, Prompt } from '@tokenbrawl/contracts';
 import { yieldMicrotasks } from './async-delay';
 
+/** One call's reported usage. Mirrors the two fields of `Decision` a script can vary; everything else about the Decision is fixed. */
+export interface ScriptedAgentUsage {
+  readonly tokensSpent: number | null;
+  readonly reasoningTokens?: number | null;
+}
+
 export interface ScriptedAgentConfig {
   readonly id: string;
   readonly kind?: 'deployment' | 'bot';
@@ -8,17 +14,29 @@ export interface ScriptedAgentConfig {
   readonly script: readonly Action[];
   /** Awaited inside `decide()` before resolving. Defaults to a no-op microtask yield -- inject `() => yieldMicrotasks(N)` to simulate latency. */
   readonly delay?: () => Promise<void>;
+  /**
+   * Per-call usage reports, in call order, indexed the same as `script`.
+   * Missing entries (including an omitted array entirely) default to
+   * `{ tokensSpent: 0, reasoningTokens: 0 }` -- Token Bank exhaustion and the
+   * null-vs-zero distinction (Story 1.5) cannot otherwise be tested against
+   * an Agent that always reports 0.
+   */
+  readonly usage?: readonly ScriptedAgentUsage[];
 }
 
 /**
- * A scripted mock `Agent`, plus test-only call-count introspection (not part
- * of the frozen `Agent` port; safe to ignore in any code that only depends
- * on the `Agent` interface).
+ * A scripted mock `Agent`, plus test-only call-count and Prompt-capture
+ * introspection (not part of the frozen `Agent` port; safe to ignore in any
+ * code that only depends on the `Agent` interface).
  */
 export interface ScriptedAgent extends Agent {
   readonly observeCallCount: () => number;
   readonly decideCallCount: () => number;
+  /** Every Prompt this Agent's `observe()` has built, in call order -- what the Harness actually passed, not a re-hand-rolled assumption. */
+  readonly capturedPrompts: () => readonly Prompt[];
 }
+
+const DEFAULT_USAGE: ScriptedAgentUsage = { tokensSpent: 0, reasoningTokens: 0 };
 
 export function createScriptedAgent(config: ScriptedAgentConfig): ScriptedAgent {
   const { id, script } = config;
@@ -28,6 +46,7 @@ export function createScriptedAgent(config: ScriptedAgentConfig): ScriptedAgent 
   let cursor = 0;
   let observeCalls = 0;
   let decideCalls = 0;
+  const prompts: Prompt[] = [];
 
   return {
     id,
@@ -35,15 +54,18 @@ export function createScriptedAgent(config: ScriptedAgentConfig): ScriptedAgent 
 
     observeCallCount: () => observeCalls,
     decideCallCount: () => decideCalls,
+    capturedPrompts: () => prompts,
 
     observe(observation: Observation, budgetRemaining: number, reflexMode: boolean): Prompt {
       observeCalls += 1;
-      return {
+      const prompt: Prompt = {
         system: 'mock-scaffold',
         user: observation.state,
         budgetRemaining,
         reflexMode,
       };
+      prompts.push(prompt);
+      return prompt;
     },
 
     async decide(prompt: Prompt): Promise<Decision> {
@@ -53,14 +75,15 @@ export function createScriptedAgent(config: ScriptedAgentConfig): ScriptedAgent 
         throw new Error(`Scripted agent "${id}" exhausted its script after ${script.length} action(s).`);
       }
       const action = script[cursor];
+      const usage = config.usage?.[cursor] ?? DEFAULT_USAGE;
       cursor += 1;
 
       await delay();
 
       return {
         action,
-        tokensSpent: 0,
-        reasoningTokens: 0,
+        tokensSpent: usage.tokensSpent,
+        reasoningTokens: usage.reasoningTokens ?? null,
         reasoning: null,
         rawResponse: `${action}:${prompt.user}`,
         provider: 'mock',

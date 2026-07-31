@@ -127,13 +127,35 @@ export function buildCommandLog(matchResult: MatchResult, params: BuildCommandLo
     .map((entry) => toDecisionEntry(entry))
     .filter((entry): entry is DecisionEntry => entry !== null);
 
+  // Two consumers of one Match may each carry a tokenBankStart -- the
+  // MatchResult that actually ran, and a caller-supplied config value -- and
+  // must never be allowed to silently disagree (mirrors the reconciliation
+  // rule this function already applies nowhere else, because this is the
+  // only doubly-sourced field). Presence in the emitted log is driven by
+  // whether any Agent is a Deployment, per the schema's own "absent means
+  // banking disabled (Baseline-Bot-only matches)" rule -- never by whether a
+  // value happened to be supplied.
+  if (
+    params.tokenBankStart !== undefined &&
+    matchResult.tokenBankStart !== undefined &&
+    params.tokenBankStart !== matchResult.tokenBankStart
+  ) {
+    throw new Error(
+      `buildCommandLog: tokenBankStart mismatch -- params says ${params.tokenBankStart}, matchResult says ${matchResult.tokenBankStart}`,
+    );
+  }
+  const reconciledTokenBankStart = params.tokenBankStart ?? matchResult.tokenBankStart;
+  const hasDeployment = params.agents.some((agent) => agent.kind === 'deployment');
+
   const candidate: CommandLog = {
     schemaVersion: SCHEMA_VERSION,
     matchId,
     environment: params.environment,
     seed: params.seed,
     configHash: params.configHash,
-    ...(params.tokenBankStart !== undefined ? { tokenBankStart: params.tokenBankStart } : {}),
+    ...(hasDeployment && reconciledTokenBankStart !== undefined
+      ? { tokenBankStart: reconciledTokenBankStart }
+      : {}),
     agents: params.agents,
     decisions,
     result: matchResult.result,
