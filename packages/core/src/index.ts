@@ -63,3 +63,23 @@ export type { TokenBank } from './token-bank';
 
 export { computeParseFailureRates } from './metrics';
 export type { ParseFailureRate } from './metrics';
+
+// ---------------------------------------------------------------------------
+// Story 3.1: the Scaffold, the Action grammar, and the Deployment Agent.
+// ---------------------------------------------------------------------------
+
+export { ACTION_GRAMMAR, parseAction } from './action-grammar';
+
+export { REFLEX_SCAFFOLD, SCAFFOLD, assemblePrompt, selectScaffold } from './scaffold';
+
+export { createDeployment } from './deployment';
+export type {
+  DeploymentConfig,
+  ProviderClient,
+  ProviderRequest,
+  ProviderResponse,
+  ProviderUsage,
+} from './deployment';
+
+export { createMockProviderClient } from './testing/mock-provider';
+export type { MockProviderClient, MockProviderConfig } from './testing/mock-provider';
