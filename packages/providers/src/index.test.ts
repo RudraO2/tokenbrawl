@@ -39,3 +39,26 @@ describe('the Story 3.2 barrel', () => {
     expect(barrel.GROQ_PROVIDER_ID).toBe('groq');
   });
 });
+
+describe('the Story 3.3 barrel', () => {
+  it('exposes the Cerebras and Google AI Studio adapters plus tournament-config validation', () => {
+    for (const name of [
+      'createCerebrasClient',
+      'cerebrasRequestBody',
+      'mapCerebrasResponse',
+      'CEREBRAS_PROVIDER_ID',
+      'createGoogleClient',
+      'googleRequestBody',
+      'mapGoogleResponse',
+      'GOOGLE_PROVIDER_ID',
+      'validateTournamentConfig',
+    ]) {
+      expect(barrel).toHaveProperty(name);
+    }
+  });
+
+  it('names the two new providers as the contracts already allow', () => {
+    expect(barrel.CEREBRAS_PROVIDER_ID).toBe('cerebras');
+    expect(barrel.GOOGLE_PROVIDER_ID).toBe('google-ai-studio');
+  });
+});

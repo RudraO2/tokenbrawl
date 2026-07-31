@@ -42,3 +42,23 @@ export type {
 
 export { GROQ_PROVIDER_ID, createGroqClient, groqRequestBody, mapGroqResponse } from './groq';
 export type { GroqClient, GroqClientConfig } from './groq';
+
+// ---------------------------------------------------------------------------
+// Story 3.3: Cerebras and Google AI Studio adapters, plus tournament-config
+// validation (one ranked Deployment per provider, no OpenRouter in a
+// tournament).
+// ---------------------------------------------------------------------------
+
+export {
+  CEREBRAS_PROVIDER_ID,
+  cerebrasRequestBody,
+  createCerebrasClient,
+  mapCerebrasResponse,
+} from './cerebras';
+export type { CerebrasClient, CerebrasClientConfig } from './cerebras';
+
+export { GOOGLE_PROVIDER_ID, createGoogleClient, googleRequestBody, mapGoogleResponse } from './google';
+export type { GoogleClient, GoogleClientConfig } from './google';
+
+export { validateTournamentConfig } from './tournament-config';
+export type { TournamentConfigValidation, TournamentDeploymentConfig } from './tournament-config';

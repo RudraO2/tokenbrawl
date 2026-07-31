@@ -28,6 +28,65 @@
           "tokensPerMinute": 6000
         }
       }
+    },
+    "cerebras": {
+      "_comment": [
+        "Story 3.3. Cerebras publishes rate limits per-account rather than a",
+        "static table (inference-docs.cerebras.ai/support/rate-limits, fetched",
+        "2026-08-01) -- 30 RPM / ~1,000 RPD / 60,000 TPM is the figure this",
+        "story measured against a real free-tier key. Re-verify at the start",
+        "of each epic; a materially different account would need this file",
+        "updated, not the adapter."
+      ],
+      "endpoints": ["https://api.cerebras.ai/v1/chat/completions"],
+      "fallbackBackoffMs": 60000,
+      "maxBackoffMs": 120000,
+      "defaults": {
+        "requestsPerMinute": 30,
+        "requestsPerDay": 1000,
+        "tokensPerMinute": 60000
+      },
+      "models": {
+        "llama3.1-8b": {
+          "requestsPerMinute": 30,
+          "requestsPerDay": 1000,
+          "tokensPerMinute": 60000
+        }
+      }
+    },
+    "google-ai-studio": {
+      "_comment": [
+        "Story 3.3. Google AI Studio's console is the authoritative source of",
+        "current numbers (ai.google.dev/gemini-api/docs/rate-limits points",
+        "there rather than publishing a static table). RPM/RPD below are as",
+        "measured 2026-07-30; TPM is a conservative estimate pending",
+        "re-verification against the console -- flagged in deferred-work.md.",
+        "Two models, two endpoints: the model is part of the URL path for",
+        "this provider, so each is its own allowlist entry (INV-8)."
+      ],
+      "endpoints": [
+        "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
+        "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent"
+      ],
+      "fallbackBackoffMs": 60000,
+      "maxBackoffMs": 120000,
+      "defaults": {
+        "requestsPerMinute": 10,
+        "requestsPerDay": 1500,
+        "tokensPerMinute": 250000
+      },
+      "models": {
+        "gemini-2.5-flash": {
+          "requestsPerMinute": 10,
+          "requestsPerDay": 1500,
+          "tokensPerMinute": 250000
+        },
+        "gemini-2.5-pro": {
+          "requestsPerMinute": 5,
+          "requestsPerDay": 50,
+          "tokensPerMinute": 100000
+        }
+      }
     }
   }
 }

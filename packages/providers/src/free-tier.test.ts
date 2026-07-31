@@ -99,6 +99,22 @@ describe('the free-tier config file (AC5)', () => {
   });
 });
 
+describe('the Story 3.3 providers (AC5)', () => {
+  it('carries the Cerebras and Google AI Studio numbers this story measured', () => {
+    expect(freeTierLimitsFor('cerebras', 'llama3.1-8b')).toStrictEqual({
+      requestsPerMinute: 30,
+      requestsPerDay: 1000,
+      tokensPerMinute: 60_000,
+    });
+    expect(freeTierLimitsFor('google-ai-studio', 'gemini-2.5-flash')).toStrictEqual({
+      requestsPerMinute: 10,
+      requestsPerDay: 1500,
+      tokensPerMinute: 250_000,
+    });
+    expect(freeTierLimitsFor('google-ai-studio', 'gemini-2.5-pro').requestsPerDay).toBe(50);
+  });
+});
+
 describe('the free-tier allowlist (INV-8)', () => {
   it('accepts the allowlisted Groq endpoint', () => {
     expect(() => {
