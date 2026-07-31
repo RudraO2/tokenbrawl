@@ -22,10 +22,32 @@ export interface Canvas2D {
   lineWidth: number;
   font: string;
   textAlign: string;
+  /**
+   * Nearest-neighbour when false. The sheet is pixel art at 64x96 and is drawn
+   * larger than that, so smoothing turns crisp edges to mush -- the one canvas
+   * setting that decides whether this looks like a sprite or like a blurred
+   * shape.
+   */
+  imageSmoothingEnabled: boolean;
+  globalAlpha: number;
   fillRect(x: number, y: number, width: number, height: number): void;
   strokeRect(x: number, y: number, width: number, height: number): void;
   fillText(text: string, x: number, y: number): void;
   clearRect(x: number, y: number, width: number, height: number): void;
+  /** The 9-argument form only: a sprite is always a sub-rectangle of a sheet. */
+  drawImage(
+    image: unknown,
+    sx: number,
+    sy: number,
+    sw: number,
+    sh: number,
+    dx: number,
+    dy: number,
+    dw: number,
+    dh: number,
+  ): void;
   save(): void;
   restore(): void;
+  translate(x: number, y: number): void;
+  scale(x: number, y: number): void;
 }

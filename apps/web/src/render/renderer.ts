@@ -2,6 +2,7 @@ import type { FighterConfig } from '../../../../packages/env-fighter/src/config'
 import { phaseOf } from '../../../../packages/env-fighter/src/frames';
 import type { FighterState } from '../../../../packages/env-fighter/src/state';
 import { BASIS_POINTS_FULL, type RenderFrame } from '../replay/film';
+import { animationFor, isFree } from './animation';
 import type { Canvas2D } from './canvas2d';
 import { createBlockArtist, type DrawnFighter, type FighterArtist } from './artist';
 import { THEME, type Theme } from './theme';
@@ -142,19 +143,36 @@ export function drawFrame(ctx: Canvas2D, frame: RenderFrame, options: DrawFrameO
   );
 
   for (const agentIndex of [0, 1] as const) {
+    const phase = phaseOf(
+      config,
+      frame.from.committedAction[agentIndex],
+      frame.from.commitmentRemaining[agentIndex],
+    );
+
     const fighter: DrawnFighter = {
       x: positions[agentIndex],
       groundY,
       // Fighters always face each other; nothing in the simulation stores a
       // facing, because nothing in the simulation depends on one.
       facing: positions[agentIndex] <= positions[agentIndex === 0 ? 1 : 0] ? 1 : -1,
-      phase: phaseOf(
-        config,
-        frame.from.committedAction[agentIndex],
-        frame.from.commitmentRemaining[agentIndex],
-      ),
+      phase,
       committedAction: frame.from.committedAction[agentIndex],
       agentIndex,
+      // Every input is state the simulation already carries. `to` is the state
+      // this Decision Point resolves into, so comparing it with `from` is how
+      // "took damage" and "moved" are known without inventing either.
+      animation: animationFor({
+        committedAction: frame.from.committedAction[agentIndex],
+        phase,
+        health: frame.to.health[agentIndex],
+        previousHealth: frame.from.health[agentIndex],
+        movedUnits: frame.to.position[agentIndex] - frame.from.position[agentIndex],
+        blocking:
+          isFree(frame.from.committedAction[agentIndex]) &&
+          frame.to.health[agentIndex] === frame.from.health[agentIndex] &&
+          frame.to.position[agentIndex] === frame.from.position[agentIndex],
+        frameIndex: frame.index,
+      }),
     };
     artist.draw(ctx, fighter, theme);
   }

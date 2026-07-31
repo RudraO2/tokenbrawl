@@ -1,5 +1,7 @@
 import type { CommandLog } from '@tokenbrawl/contracts';
 import { renderApp, type HostView, type MountPoint } from './main';
+import { createSpriteArtist, type FighterArtist } from './render/artist';
+import { createSpriteSheet, validateSpriteSheetLayout } from './render/sprite-sheet';
 
 /**
  * The page entry point, and the only file that touches a global.
@@ -28,13 +30,59 @@ import { renderApp, type HostView, type MountPoint } from './main';
  * demonstrated end to end.
  */
 
-/** Same-origin, so it is covered by the no-remote-asset sweep in `style-discipline.test.ts`. */
+/** Same-origin, so both are covered by the no-remote-asset sweep in `style-discipline.test.ts`. */
 const DEMO_REPLAY_URL = '/replays/demo.command-log.json';
+const SPRITE_LAYOUT_URL = '/sprites/fighter.layout.json';
+
+interface LoadedImage {
+  readonly width: number;
+  readonly height: number;
+  decode(): Promise<void>;
+  src: string;
+}
 
 interface BrowserGlobals {
   readonly document?: { querySelector(selectors: string): MountPoint | null };
   readonly window?: HostView;
   readonly fetch?: (url: string) => Promise<{ readonly ok: boolean; readonly status: number; json(): Promise<unknown> }>;
+  readonly Image?: new () => LoadedImage;
+}
+
+/**
+ * Loads the sprite sheet, or returns `null`.
+ *
+ * Returning `null` rather than throwing is deliberate. The fighters are the
+ * subject of the page but they are not the *claim* it makes -- a browser that
+ * cannot decode the sheet should still show a replay whose hash verifies, drawn
+ * by the block artist, rather than an error page. The one thing that must never
+ * happen is silence, so the reason is reported.
+ */
+async function loadArtist(globals: BrowserGlobals): Promise<FighterArtist | undefined> {
+  try {
+    const response = await globals.fetch?.(SPRITE_LAYOUT_URL);
+    if (response === undefined || !response.ok) {
+      return undefined;
+    }
+    const layout = validateSpriteSheetLayout(await response.json());
+
+    if (globals.Image === undefined) {
+      return undefined;
+    }
+    const image = new globals.Image();
+    image.src = layout.image;
+    await image.decode();
+
+    return createSpriteArtist(createSpriteSheet(image, layout));
+  } catch (error) {
+    // Reported, not swallowed: a sheet that silently failed to load looks
+    // identical to one nobody ever wired up.
+    console.warn(
+      `Sprite sheet unavailable, falling back to the block artist: ${String(
+        error instanceof Error ? error.message : error,
+      )}`,
+    );
+    return undefined;
+  }
 }
 
 async function boot(): Promise<void> {
@@ -58,7 +106,7 @@ async function boot(): Promise<void> {
     // other field and guards every field it then uses (AD-3). Running Ajv here
     // would drag the validator into the bundle for no additional safety.
     const log = (await response.json()) as CommandLog;
-    renderApp(root, log, view);
+    renderApp(root, log, view, await loadArtist(globals));
   } catch (error) {
     // A player that fails silently looks identical to one that is still
     // loading. Say what went wrong, on the page, in the house style.

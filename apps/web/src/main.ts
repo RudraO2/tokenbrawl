@@ -4,6 +4,7 @@ import { createFighterEnvironment } from '../../../packages/env-fighter/src/envi
 import { createPlaybackClock, type PlaybackClock } from './player/clock';
 import { buildReplayFilm, type ReplayFilm } from './replay/film';
 import type { Canvas2D } from './render/canvas2d';
+import type { FighterArtist } from './render/artist';
 import { drawFrame } from './render/renderer';
 import './styles/app.css';
 
@@ -96,6 +97,7 @@ export function mountPlayer(
   canvas: CanvasSurface,
   log: unknown,
   view: HostView,
+  artist?: FighterArtist,
 ): MountedPlayer {
   const env = createFighterEnvironment();
   const film = buildReplayFilm(log, env);
@@ -110,7 +112,7 @@ export function mountPlayer(
   const viewport = { width: CANVAS_WIDTH, height: CANVAS_HEIGHT };
 
   const paint = (index: number): void => {
-    drawFrame(ctx, film.frames[index], { config: DEFAULT_FIGHTER_CONFIG, viewport });
+    drawFrame(ctx, film.frames[index], { config: DEFAULT_FIGHTER_CONFIG, viewport, artist });
   };
 
   const clock = createPlaybackClock({
@@ -151,7 +153,12 @@ export function decisionPointCount(film: ReplayFilm): number {
  * Wires the page. Kept a thin, obviously-correct sequence of DOM writes, with
  * every decision it displays computed by a pure function above.
  */
-export function renderApp(root: MountPoint, log: CommandLog, view: HostView): MountedPlayer {
+export function renderApp(
+  root: MountPoint,
+  log: CommandLog,
+  view: HostView,
+  artist?: FighterArtist,
+): MountedPlayer {
   root.innerHTML = `
     <header class="tb-masthead">
       <h1 class="tb-wordmark">Tokenbrawl</h1>
@@ -169,7 +176,7 @@ export function renderApp(root: MountPoint, log: CommandLog, view: HostView): Mo
     throw new Error('renderApp: the shell did not mount.');
   }
 
-  const mounted = mountPlayer(canvas as unknown as CanvasSurface, log, view);
+  const mounted = mountPlayer(canvas as unknown as CanvasSurface, log, view, artist);
   const chip = hashChip(mounted.film);
 
   readout.innerHTML = `

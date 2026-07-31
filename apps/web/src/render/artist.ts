@@ -1,4 +1,6 @@
+import type { AnimationState } from './animation';
 import type { Canvas2D } from './canvas2d';
+import type { SpriteSheet } from './sprite-sheet';
 import { phaseFill, type Theme } from './theme';
 
 /**
@@ -29,6 +31,8 @@ export interface DrawnFighter {
   /** `COMMITTED_*` from env-fighter. Drives the reach of the drawn strike. */
   readonly committedAction: number;
   readonly agentIndex: 0 | 1;
+  /** Which clip and frame the simulation's own state selected. See `animation.ts`. */
+  readonly animation: AnimationState;
 }
 
 export interface FighterArtist {
@@ -97,6 +101,71 @@ export function createBlockArtist(): FighterArtist {
         ctx.fillRect(strikeX, top + STRIKE_RISE, STRIKE_LENGTH, STRIKE_HEIGHT);
         ctx.strokeRect(strikeX, top + STRIKE_RISE, STRIKE_LENGTH, STRIKE_HEIGHT);
       }
+    },
+  });
+}
+
+/** How much larger than its source pixels the sheet is drawn. Integer, so the art stays crisp. */
+const SPRITE_SCALE = 2;
+
+/**
+ * Draws a fighter from a sprite sheet.
+ *
+ * Two things make this read as a fighting game rather than as a diagram, and
+ * both are here rather than in the sheet:
+ *
+ * - **Facing is a horizontal flip**, done with `scale(-1, 1)` about the
+ *   fighter's own centre. The sheet holds one direction only, which halves the
+ *   art and guarantees the two directions can never drift apart.
+ * - **A hit tints the frame** by overpainting in `--tb-warn` at low alpha. The
+ *   simulation says damage landed at this Decision Point and the viewer needs
+ *   to see it land; a flinch pose alone is easy to miss at five Decision Points
+ *   per second.
+ *
+ * `imageSmoothingEnabled` is forced off. The source is 64x96 pixel art drawn at
+ * twice that, and smoothing is the difference between a sprite and a smear.
+ */
+export function createSpriteArtist(sheet: SpriteSheet): FighterArtist {
+  return Object.freeze({
+    id: 'sprite-artist',
+
+    draw(ctx: Canvas2D, fighter: DrawnFighter, theme: Theme): void {
+      const source = sheet.frameFor(fighter.animation.clip, fighter.animation.frame);
+      const width = sheet.frameWidth * SPRITE_SCALE;
+      const height = sheet.frameHeight * SPRITE_SCALE;
+
+      ctx.save();
+      ctx.imageSmoothingEnabled = false;
+
+      // Translate to the fighter's feet, then flip about that point. Drawing at
+      // -width/2 afterwards keeps the sprite centred whichever way it faces.
+      ctx.translate(fighter.x, fighter.groundY - height);
+      if (fighter.facing === -1) {
+        ctx.translate(0, height);
+        ctx.scale(-1, 1);
+        ctx.translate(0, -height);
+      }
+
+      ctx.drawImage(
+        sheet.image,
+        source.sx,
+        source.sy,
+        source.sw,
+        source.sh,
+        -width / 2,
+        0,
+        width,
+        height,
+      );
+
+      if (fighter.animation.clip === 'hit') {
+        ctx.globalAlpha = 0.55;
+        ctx.fillStyle = theme.warn;
+        ctx.fillRect(-width / 2, 0, width, height);
+        ctx.globalAlpha = 1;
+      }
+
+      ctx.restore();
     },
   });
 }

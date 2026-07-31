@@ -216,7 +216,7 @@ describe('the block artist', () => {
     const ctx = createRecordingCanvas();
     createBlockArtist().draw(
       ctx,
-      { x: 200, groundY: 400, facing: 1, phase: PHASE_IDLE, committedAction: COMMITTED_NONE, agentIndex: 0 },
+      { x: 200, groundY: 400, facing: 1, phase: PHASE_IDLE, committedAction: COMMITTED_NONE, agentIndex: 0, animation: { clip: 'idle', frame: 0 } },
       THEME,
     );
 
@@ -228,7 +228,7 @@ describe('the block artist', () => {
     const ctx = createRecordingCanvas();
     createBlockArtist().draw(
       ctx,
-      { x: 200, groundY: 400, facing: 1, phase: PHASE_IDLE, committedAction: COMMITTED_NONE, agentIndex: 0 },
+      { x: 200, groundY: 400, facing: 1, phase: PHASE_IDLE, committedAction: COMMITTED_NONE, agentIndex: 0, animation: { clip: 'idle', frame: 0 } },
       THEME,
     );
 
@@ -243,13 +243,13 @@ describe('the block artist', () => {
     const rightward = createRecordingCanvas();
     createBlockArtist().draw(
       rightward,
-      { x: 200, groundY: 400, facing: 1, phase: PHASE_ACTIVE, committedAction: COMMITTED_ATTACK, agentIndex: 0 },
+      { x: 200, groundY: 400, facing: 1, phase: PHASE_ACTIVE, committedAction: COMMITTED_ATTACK, agentIndex: 0, animation: { clip: 'idle', frame: 0 } },
       THEME,
     );
     const leftward = createRecordingCanvas();
     createBlockArtist().draw(
       leftward,
-      { x: 200, groundY: 400, facing: -1, phase: PHASE_ACTIVE, committedAction: COMMITTED_ATTACK, agentIndex: 1 },
+      { x: 200, groundY: 400, facing: -1, phase: PHASE_ACTIVE, committedAction: COMMITTED_ATTACK, agentIndex: 1, animation: { clip: 'idle', frame: 0 } },
       THEME,
     );
 

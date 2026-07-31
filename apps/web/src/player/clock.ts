@@ -104,6 +104,14 @@ export function createPlaybackClock(config: PlaybackClockConfig): PlaybackClock 
       return;
     }
 
+    // Rewind. Without this the clock cannot be started twice: after a full
+    // playback `index` sits at the last frame, so the next `start()` advances
+    // straight past the end and emits an out-of-range index instead of
+    // replaying. Found by clicking the Replay button rather than by any test --
+    // every case here started from a fresh clock, which is exactly the state a
+    // second press is not in.
+    state.index = -1;
+
     if (config.reducedMotion === true) {
       // No scheduling at all. Emitting the last frame directly is what makes
       // this branch honest -- a "reduced" animation that still ran, only

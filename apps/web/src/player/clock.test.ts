@@ -155,6 +155,49 @@ describe('the playback clock', () => {
     expect(driver.cancelled().length).toBe(1);
   });
 
+  it('replays from the beginning after running to the end', () => {
+    // The Replay button's whole job. Before the rewind in `start()`, a second
+    // press advanced past the last frame and emitted an out-of-range index --
+    // every other case here starts from a fresh clock, which is precisely the
+    // state a second press is not in.
+    const driver = createDriver();
+    const seen: number[] = [];
+    const clock = createPlaybackClock({
+      frameCount: 3,
+      onFrame: (index) => seen.push(index),
+      requestFrame: driver.requestFrame,
+    });
+
+    clock.start();
+    driver.pump(5);
+    expect(seen).toStrictEqual([0, 1, 2]);
+
+    clock.start();
+    driver.pump(5);
+    expect(seen).toStrictEqual([0, 1, 2, 0, 1, 2]);
+  });
+
+  it('never emits an index outside the film, however often it is restarted', () => {
+    const driver = createDriver();
+    const seen: number[] = [];
+    const clock = createPlaybackClock({
+      frameCount: 4,
+      onFrame: (index) => seen.push(index),
+      requestFrame: driver.requestFrame,
+    });
+
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      clock.stop();
+      clock.start();
+      driver.pump(10);
+    }
+
+    for (const index of seen) {
+      expect(index).toBeGreaterThanOrEqual(0);
+      expect(index).toBeLessThan(4);
+    }
+  });
+
   it('honours reduced motion by landing on the final frame with no animation', () => {
     const driver = createDriver();
     const seen: number[] = [];
