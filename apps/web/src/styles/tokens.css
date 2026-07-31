@@ -1,0 +1,74 @@
+/*
+ * Tokenbrawl design tokens. Story 4.1 defines them; stories 4.2-4.6 and 7.4
+ * consume them and redefine nothing.
+ *
+ * This file is the single source of every colour, border width, shadow offset
+ * and font stack in the app. A hex literal anywhere else -- CSS or TypeScript
+ * -- is a defect, and `style-discipline.test.ts` sweeps for one. The canvas
+ * cannot cheaply read a custom property, so `src/render/theme.ts` mirrors the
+ * five colours below and a test asserts the mirror still matches this file.
+ *
+ * The style is neubrutalism on an arcade-dark ground. See docs/DESIGN.md for
+ * why, and for the rules that are not expressible as a token (zero blur, zero
+ * radius, press-displaces interaction, stepped motion).
+ */
+
+:root {
+  /* --- Colour. One accent, one warning, and nothing decorative. --------- */
+
+  /** The ground. Near-black rather than pure, so pure black reads as a border. */
+  --tb-bg: #0a0a0a;
+  /** Every border, every rule, and all body text. Bone rather than pure white. */
+  --tb-ink: #f5f5f0;
+  /** Live, active, selected, focused. The only colour that moves. */
+  --tb-accent: #c8ff00;
+  /**
+   * Reflex Track, exclusions, parse failures, a hash that did not verify.
+   *
+   * Never as text directly on --tb-bg: that pair measures 4.26:1, under the
+   * 4.5:1 floor. Red is a border, a fill or a glyph; warning *text* goes in
+   * --tb-bg ink on a red fill, which measures 4.26:1 the other way round and
+   * is legible because the type is 800 weight and large.
+   */
+  --tb-warn: #ff3b30;
+  /** Metadata only -- never body text. 5.42:1 on --tb-bg. */
+  --tb-muted: #6e6e68;
+
+  /* --- Structure. Neubrutalism is mostly these three numbers. ----------- */
+
+  --tb-border-width: 4px;
+  /** Hard offset shadows. No blur, no spread, no rgba, ever. */
+  --tb-shadow-offset: 6px;
+  --tb-shadow: var(--tb-shadow-offset) var(--tb-shadow-offset) 0 var(--tb-accent);
+  --tb-shadow-warn: var(--tb-shadow-offset) var(--tb-shadow-offset) 0 var(--tb-warn);
+  --tb-radius: 0;
+
+  /* --- Type. Self-hosted; see docs/ASSETS.md for licences. -------------- */
+
+  --tb-font-display: 'Bricolage Grotesque', 'Arial Black', sans-serif;
+  --tb-font-mono: 'Departure Mono', ui-monospace, monospace;
+  --tb-tracking-display: -0.02em;
+
+  /* --- Space. A coarse scale on purpose: chunky blocks, few sizes. ------ */
+
+  --tb-space-1: 8px;
+  --tb-space-2: 16px;
+  --tb-space-3: 32px;
+  --tb-space-4: 64px;
+
+  /* --- Motion. Stepped, or none. --------------------------------------- */
+
+  /**
+   * One duration for the whole app, and it is short enough to read as a state
+   * change rather than as a transition. Nothing here may vary per Match:
+   * playback duration that depended on how long a Deployment took to think
+   * would leak exactly what INV-3 forbids.
+   */
+  --tb-step: 120ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --tb-step: 0ms;
+  }
+}
