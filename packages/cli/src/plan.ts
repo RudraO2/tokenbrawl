@@ -57,12 +57,26 @@ export function planMatch(seed: number, agentIds: readonly [string, string]): Pl
 }
 
 /**
- * Round-robin: every unordered pair of declared Agents, over every seed.
+ * Round-robin: every unordered pair of declared Agents, over every seed, from
+ * **both sides** (Story 7.1, AD-12).
  *
- * The Agent at the lower declaration index plays side 0, every time. That is a
- * side bias and it is **Story 7.1's to remove** -- mirrored seeds and side
- * swaps are that story's entire subject, and deciding it here would leave 5.1
- * and 7.1 disagreeing about what a tournament is. Recorded in the ledger.
+ * Until 7.1 the Agent at the lower declaration index played side 0 every time.
+ * That is a side bias, and a pairing measured from one side only cannot tell a
+ * side advantage in the Environment apart from a skill difference between the
+ * two Agents -- the one thing a leaderboard exists to report. So each pairing
+ * and seed now yields two Matches with the Agents in opposite array positions.
+ *
+ * They are separate Matches with distinct `matchId`s, never one Match carrying
+ * a "sides swapped" flag. `computeMatchId` already hashes `agentIds` in order,
+ * so the two orderings get their own ids, their own logs and their own resume
+ * entries with no extra machinery.
+ *
+ * The two orientations are emitted **adjacently**. AD-9 makes the resumable
+ * state the set of committed logs, so plan order decides what a killed segment
+ * leaves behind: adjacency means an interruption leaves whole mirrored pairs
+ * plus at most one half-pair. Emitting a one-sided pass and mirroring it
+ * afterwards would leave an entire tournament of one-sided data on exactly the
+ * interruption this project's five-segment schedule makes routine.
  *
  * Seed-major ordering, so an interrupted run has completed whole seeds rather
  * than a ragged prefix of one pairing. It costs nothing and makes a partial
@@ -74,7 +88,10 @@ export function planTournament(config: RunConfig): readonly PlannedMatch[] {
     const seed = config.seedBase + offset;
     for (let first = 0; first < config.agents.length; first += 1) {
       for (let second = first + 1; second < config.agents.length; second += 1) {
-        planned.push(planMatch(seed, [config.agents[first].id, config.agents[second].id]));
+        const lower = config.agents[first].id;
+        const higher = config.agents[second].id;
+        planned.push(planMatch(seed, [lower, higher]));
+        planned.push(planMatch(seed, [higher, lower]));
       }
     }
   }
