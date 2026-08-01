@@ -1,0 +1,72 @@
+{
+  "story": "7-1-mirrored-seeds-and-side-swaps",
+  "environment": {
+    "id": "fighter-1v1",
+    "version": "1.0.0"
+  },
+  "configHash": "891e524089af5b88da76fcfb9149be945cb0d33738d2eda472498475180b48a2",
+  "seedBase": 20260731,
+  "seedCount": 100,
+  "matches": 600,
+  "mirroredPairs": 300,
+  "unpairedMatches": 0,
+  "side0ScoreBasisPoints": 4900,
+  "advantageBasisPoints": -100,
+  "ciLowerBasisPoints": 4683,
+  "ciUpperBasisPoints": 5116,
+  "detected": false,
+  "bootstrap": {
+    "method": "percentile",
+    "resamples": 2000,
+    "seed": 20260801,
+    "confidenceBasisPoints": 9500
+  },
+  "ratingFloor": {
+    "minimumMatchesPerPairing": 30,
+    "minimumMirroredSeedsPerPairing": 15
+  },
+  "coverage": [
+    {
+      "pairing": [
+        "aggressive",
+        "random"
+      ],
+      "matches": 200,
+      "matchesBySide": [
+        100,
+        100
+      ],
+      "mirroredSeeds": 100,
+      "provisional": false,
+      "exclusions": []
+    },
+    {
+      "pairing": [
+        "aggressive",
+        "spacing-aware"
+      ],
+      "matches": 200,
+      "matchesBySide": [
+        100,
+        100
+      ],
+      "mirroredSeeds": 100,
+      "provisional": false,
+      "exclusions": []
+    },
+    {
+      "pairing": [
+        "random",
+        "spacing-aware"
+      ],
+      "matches": 200,
+      "matchesBySide": [
+        100,
+        100
+      ],
+      "mirroredSeeds": 100,
+      "provisional": false,
+      "exclusions": []
+    }
+  ]
+}

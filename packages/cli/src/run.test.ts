@@ -214,8 +214,8 @@ describe('runPlannedMatches', () => {
     };
 
     await runPlannedMatches(planned, BOT_CONFIG, { io: observing });
-    // 1, 2 -- not 0, 0 then a batch at the end.
-    expect(seen).toStrictEqual([1, 2]);
+    // 1, 2, 3, 4 -- not 0, 0, 0, 0 then a batch at the end.
+    expect(seen).toStrictEqual([1, 2, 3, 4]);
   });
 
   it('does nothing at all, not even creating a directory, for an empty plan', async () => {
@@ -231,7 +231,8 @@ describe('runPlannedMatches', () => {
   it('prints one result line per Match', async () => {
     const io = createMemoryIo();
     await runPlannedMatches(planTournament(BOT_CONFIG), BOT_CONFIG, { io });
-    expect(io.stdout).toHaveLength(2);
+    // One pairing x 2 seeds x 2 side swaps (Story 7.1).
+    expect(io.stdout).toHaveLength(4);
     expect(io.stdout[0]).toContain('bot:aggressive vs bot:spacing');
   });
 });
@@ -390,8 +391,10 @@ describe('AC3/AC4: parking a Deployment past its daily quota', () => {
   it('parks the Deployment and skips its remaining Matches, but keeps running everything else', async () => {
     const io = createMemoryIo({ env: { GROQ_API_KEY: KEY } });
     const quota = createQuotaTracker();
-    // 3 agents, 1 seed -> (spacing,aggressive), (spacing,groq), (aggressive,groq)
-    // in that plan order. The first Match against groq is the one that parks it.
+    // 3 agents, 1 seed, both sides (Story 7.1) -> (spacing,aggressive),
+    // (aggressive,spacing), (spacing,groq), (groq,spacing), (aggressive,groq),
+    // (groq,aggressive) in that plan order. The third Match is the first
+    // against groq, and it is the one that parks it.
     const planned = planTournament(THREE_AGENT_CONFIG);
 
     const summary = await runPlannedMatches(planned, THREE_AGENT_CONFIG, {
@@ -402,10 +405,10 @@ describe('AC3/AC4: parking a Deployment past its daily quota', () => {
     });
 
     expect(summary.parked).toStrictEqual(['groq:llama-3.1-8b-instant']);
-    // bot-vs-bot ran; the first groq pairing ran (and parked mid-flight); the
-    // second groq pairing was skipped entirely.
-    expect(summary.completed).toBe(2);
-    expect(summary.written).toHaveLength(2);
+    // Both bot-vs-bot orientations ran; the first groq Match ran (and parked
+    // it mid-flight); every later groq Match was skipped entirely.
+    expect(summary.completed).toBe(3);
+    expect(summary.written).toHaveLength(3);
     expect(quota.isParked('groq:llama-3.1-8b-instant')).toBe(true);
 
     expect(io.stderr.join('\n')).toContain('parked:');
@@ -424,8 +427,8 @@ describe('AC3/AC4: parking a Deployment past its daily quota', () => {
     });
 
     expect(summary.parked).toStrictEqual([]);
-    // All three Matches ran; none were skipped for parking.
-    expect(summary.completed).toBe(3);
+    // All six Matches ran; none were skipped for parking.
+    expect(summary.completed).toBe(6);
   });
 
   it('carries no quota state between two trackers -- a fresh run rediscovers it, never assumes it', async () => {
