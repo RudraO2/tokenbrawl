@@ -96,10 +96,17 @@ describe('INV-8: every workflow runs on free minutes for a public repository', (
 });
 
 describe('AC1: the tournament is cron-scheduled and manually dispatchable', () => {
-  it('runs one segment per weekday', () => {
-    // Five segments, because ~4,500 calls per Deployment against a 1,000-RPD
-    // ceiling is 4.5 days. Weekly tournament, daily segment.
-    expect(tournamentSource()).toMatch(/^\s*- cron: '0 3 \* \* 1-5'$/m);
+  it('runs one segment every day, not only on weekdays', () => {
+    // Nine segments, because Story 7.1's both-sides plan is ~9,000 calls per
+    // Deployment against a 1,000-RPD ceiling. Seven days rather than five
+    // because the free-tier allowance resets daily whether or not it is used:
+    // a Monday-to-Friday cadence discards two days of it per week.
+    //
+    // Pinned rather than left to prose for the reason every schedule value in
+    // this file is pinned: a cron expression's correctness is only observable
+    // a week later, so a quiet edit back to `1-5` would silently stretch every
+    // tournament by five days and nothing would go red.
+    expect(tournamentSource()).toMatch(/^\s*- cron: '0 3 \* \* \*'$/m);
   });
 
   it('can also be dispatched by hand, defaulting to the rehearsal', () => {
