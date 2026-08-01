@@ -117,9 +117,12 @@ export function createBlockArtist(): FighterArtist {
  * - **Facing is a horizontal flip**, done with `scale(-1, 1)` about the
  *   fighter's own x. A pack holds one direction only, which halves the art and
  *   guarantees the two directions can never drift apart.
- * - **A hit tints the frame** in `--tb-warn` at low alpha. The simulation says
- *   damage landed at this Decision Point and the viewer needs to see it land; a
- *   flinch pose alone is easy to miss at five Decision Points per second.
+ * - **A hit brackets the fighter** in an opaque 4px `--tb-warn` box. The
+ *   simulation says damage landed at this Decision Point and the viewer needs
+ *   to see it land; a flinch pose alone is easy to miss at five Decision Points
+ *   per second. Opaque and hard-edged rather than a translucent wash, because
+ *   the house style bans translucency and because a wash over the whole sprite
+ *   frame covered a third of the arena.
  *
  * `imageSmoothingEnabled` is forced off. This is pixel art drawn at twice its
  * source size, and smoothing is the difference between a sprite and a smear.
@@ -164,10 +167,23 @@ export function createSpriteArtist(sheet: SpriteSheet): FighterArtist {
       );
 
       if (fighter.animation.clip === 'hit') {
-        ctx.globalAlpha = 0.55;
-        ctx.fillStyle = theme.warn;
-        ctx.fillRect(-width / 2, top, width, height);
-        ctx.globalAlpha = 1;
+        // A hard warn-coloured bracket around the fighter, opaque and 4px, in
+        // the same language as every other edge on the page.
+        //
+        // This replaced a `globalAlpha = 0.55` fill over the whole 600x600
+        // frame, which was wrong twice. It was translucency, which the house
+        // style bans outright (docs/DESIGN.md: "no glassmorphism, no
+        // translucency, no glow") -- and `style-discipline.test.ts` never saw
+        // it, because that sweep reads CSS and this is a canvas call. And a
+        // frame-sized fill for a character occupying about 80 of its 200
+        // source pixels painted a red pane across a third of the arena rather
+        // than a flash on the fighter who was hit. Found by looking at the
+        // page during Story 4.3, not by any test.
+        const markWidth = Math.floor(width / 3);
+        const markHeight = Math.floor((sheet.anchorY * sheet.scale * 2) / 3);
+        ctx.strokeStyle = theme.warn;
+        ctx.lineWidth = theme.borderWidth;
+        ctx.strokeRect(-Math.floor(markWidth / 2), -markHeight, markWidth, markHeight);
       }
 
       ctx.restore();

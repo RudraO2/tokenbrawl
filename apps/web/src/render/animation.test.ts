@@ -368,3 +368,109 @@ describe('the strike is actually reachable (regression)', () => {
     expect(seen).toContain('attack-recovery');
   });
 });
+
+/**
+ * Story 4.3 found this by opening the page: the hit marker.
+ *
+ * Story 4.1 drew it as `globalAlpha = 0.55` over the whole 600x600 sprite
+ * frame. That is a translucent surface, which docs/DESIGN.md bans outright, and
+ * at three-times scale over a character occupying roughly 80 of its 200 source
+ * pixels it painted a red pane across a third of the arena rather than a flash
+ * on the fighter who was hit. Neither the unit suite nor the CSS style sweep
+ * could see it -- one is a canvas call, the other reads declarations.
+ */
+describe('the hit marker (4.3)', () => {
+  interface Call {
+    readonly op: string;
+    readonly args: readonly number[];
+    readonly strokeStyle: string;
+    readonly alpha: number;
+  }
+
+  async function drawHit(clip: string): Promise<readonly Call[]> {
+    const { createSpriteArtist } = await import('./artist');
+    const { THEME } = await import('./theme');
+    const calls: Call[] = [];
+    const surface: Record<string, unknown> = {
+      fillStyle: '',
+      strokeStyle: '',
+      lineWidth: 0,
+      font: '',
+      textAlign: '',
+      imageSmoothingEnabled: true,
+      globalAlpha: 1,
+    };
+    const record = (op: string, args: readonly number[]): void => {
+      calls.push({
+        op,
+        args,
+        strokeStyle: String(surface.strokeStyle),
+        alpha: Number(surface.globalAlpha),
+      });
+    };
+    const ctx = new Proxy(surface, {
+      get: (target, key: string) =>
+        key in target
+          ? target[key]
+          : (...args: unknown[]): void => record(key, args.filter((a) => typeof a === 'number')),
+      set: (target, key: string, value) => {
+        target[key] = value;
+        return true;
+      },
+    });
+
+    const sheet = {
+      frameWidth: 200,
+      frameHeight: 200,
+      scale: 3,
+      anchorY: 120,
+      frameFor: () => ({ image: 'x.png', sx: 0, sy: 0, sw: 200, sh: 200 }),
+      imageFor: () => ({ width: 200, height: 200 }),
+    };
+
+    createSpriteArtist(sheet as never).draw(
+      ctx as never,
+      {
+        x: 480,
+        groundY: 360,
+        facing: 1,
+        phase: 0,
+        committedAction: 0,
+        agentIndex: 0,
+        animation: { clip, frame: 0 },
+      } as never,
+      THEME,
+    );
+    return calls;
+  }
+
+  it('marks a hit with an opaque hard-edged stroke, never a translucent wash', async () => {
+    const { THEME } = await import('./theme');
+    const calls = await drawHit('hit');
+
+    const stroke = calls.find((call) => call.op === 'strokeRect');
+    expect(stroke?.strokeStyle).toBe(THEME.warn);
+    // Opaque. This is the assertion the old implementation fails.
+    expect(stroke?.alpha).toBe(1);
+    expect(calls.every((call) => call.alpha === 1)).toBe(true);
+    expect(calls.some((call) => call.op === 'fillRect')).toBe(false);
+  });
+
+  it('sizes the marker to the fighter, not to the sprite frame', async () => {
+    const calls = await drawHit('hit');
+    const stroke = calls.find((call) => call.op === 'strokeRect');
+
+    // The frame is 200x200 at 3x = 600x600. A marker that size covers a third
+    // of a 960-wide arena, which is what made the old wash unusable.
+    const [, , width, height] = stroke?.args ?? [];
+    expect(width).toBeLessThan(600 / 2);
+    expect(height).toBeLessThan(600 / 2);
+    expect(width).toBeGreaterThan(0);
+    expect(height).toBeGreaterThan(0);
+  });
+
+  it('draws no marker at all when the fighter was not hit', async () => {
+    const calls = await drawHit('idle');
+    expect(calls.some((call) => call.op === 'strokeRect')).toBe(false);
+  });
+});

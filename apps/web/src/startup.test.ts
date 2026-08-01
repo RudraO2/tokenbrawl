@@ -649,3 +649,38 @@ describe('the states a Deployment log will carry (4.3 AC2, AC3)', () => {
     expect(html).toContain('tb-reasoning--text');
   });
 });
+
+describe('two hover targets, one selection', () => {
+  it('will not let a stale release close the panel a visitor moved to', async () => {
+    // Tab to one fighter, then move the mouse onto the other. The second takes
+    // the selection and the first's `blur` arrives afterwards -- which without
+    // a guard closes a panel that is being read.
+    const { log } = await buildDemoBundle();
+    const harness = createHarness(log);
+
+    await startup(harness.globals);
+    harness.root.fire('[data-agent="0"]', 'focus');
+    harness.root.fire('[data-agent="1"]', 'pointerenter');
+    const showingP2 = harness.root.html();
+    harness.root.fire('[data-agent="0"]', 'blur');
+
+    expect(harness.root.html()).toBe(showingP2);
+    expect(showingP2).toContain(log.agents[1].id);
+  });
+
+  it('still resumes when the target that owns the selection releases', async () => {
+    const { log } = await buildDemoBundle();
+    const harness = createHarness(log);
+
+    const result = await startup(harness.globals);
+    harness.runFrames(2);
+    harness.root.fire('[data-agent="0"]', 'focus');
+    harness.root.fire('[data-agent="1"]', 'pointerenter');
+    expect(result?.mounted.clock.isRunning()).toBe(false);
+
+    harness.root.fire('[data-agent="1"]', 'pointerleave', { pointerType: 'mouse' });
+
+    expect(result?.mounted.clock.isRunning()).toBe(true);
+    expect(harness.root.html()).toContain('Hover, tap or tab to a fighter');
+  });
+});

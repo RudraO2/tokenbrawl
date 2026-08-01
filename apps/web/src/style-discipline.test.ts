@@ -182,6 +182,39 @@ describe('neubrutalism, as rules rather than adjectives', () => {
   });
 });
 
+describe('the canvas obeys the same rules as the stylesheet', () => {
+  it('sets no partial alpha outside the one place scenery is dimmed', () => {
+    // Every other rule in this file reads CSS, and the canvas is a hole in that
+    // exactly the size of `globalAlpha`. Story 4.1's sprite artist tinted a hit
+    // with `globalAlpha = 0.55` over the whole 600x600 sprite frame: a
+    // translucent surface, which docs/DESIGN.md bans outright, painting a red
+    // pane across a third of the arena. Nothing here saw it, because it is a
+    // canvas call rather than a declaration. Now it is one grep.
+    //
+    // `backdrop.ts` is the single exemption and it is named rather than
+    // pattern-matched: dimming the scenery composites once to a flat opaque
+    // image, it is recorded in docs/ASSETS.md with its reason, and it is the
+    // difference between scenery and a competing subject.
+    const offences: string[] = [];
+    for (const { path, source } of styledFiles()) {
+      if (path === 'render/backdrop.ts') {
+        continue;
+      }
+      for (const [index, line] of source.split('\n').entries()) {
+        const trimmed = line.trim();
+        if (trimmed.startsWith('//') || trimmed.startsWith('*') || trimmed.startsWith('/*')) {
+          continue;
+        }
+        // Assigning anything but 1 is a translucent draw.
+        if (/globalAlpha\s*=\s*(?!1\b)/.test(line)) {
+          offences.push(`${path}:${String(index + 1)}: ${trimmed}`);
+        }
+      }
+    }
+    expect(offences).toStrictEqual([]);
+  });
+});
+
 describe('the site renders identically offline', () => {
   it('fetches no asset from another origin', () => {
     // No font CDN, no remote stylesheet, no remote image. This is the offline

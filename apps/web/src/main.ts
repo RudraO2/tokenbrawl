@@ -557,6 +557,13 @@ export function renderApp(root: MountPoint, log: CommandLog, view: HostView): Mo
       if (event?.pointerType === 'touch') {
         return;
       }
+      // Only the target that owns the current selection may end it. Reachable:
+      // tab to one fighter, then move the mouse onto the other. The second
+      // takes the selection, and the first's `blur` arrives afterwards -- which
+      // without this guard closes a panel the visitor is looking at.
+      if (selection.agentIndex !== agentIndex) {
+        return;
+      }
       selection.agentIndex = null;
       renderPanel();
       if (selection.resumeOnRelease) {
