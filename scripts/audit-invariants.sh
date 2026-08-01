@@ -400,21 +400,31 @@ else
 fi
 
 # --- INV-7: identical scaffolds --------------------------------------------
+#
+# Scope widened from `packages/` to `packages/ apps/` in Story 4.6, closing a
+# gap Story 3.1 recorded in deferred-work.md and named 4.6 as the story that
+# would hit it: BYOK gives a *browser* the ability to run a Deployment, so a
+# per-Deployment prompt override introduced under `apps/web/src` would have
+# escaped both this sweep and `scaffold-discipline.test.ts`'s in-suite one.
+# `apps/web/src/source-discipline.test.ts` now runs the same check from inside
+# the suite, for the same reason every other discipline rule is checked twice.
 echo
 echo "INV-7  scaffolds are identical across deployments"
-if [ -d packages ]; then
-  hits=$(grep -rnE --include='*.ts' \
+INV7_DIRS=()
+for d in packages apps; do [ -d "$d" ] && INV7_DIRS+=("$d"); done
+if [ ${#INV7_DIRS[@]} -gt 0 ]; then
+  hits=$(grep -rnE --include='*.ts' --include='*.tsx' --include='*.mts' --include='*.cts' \
           --exclude-dir=node_modules --exclude-dir=dist --exclude-dir=build --exclude-dir=coverage --exclude-dir=.turbo \
           '(promptOverride|systemPromptFor|scaffoldFor|perModelPrompt|modelSpecificPrompt)' \
-          packages 2>/dev/null | grep -vE '\.test\.ts|\.spec\.ts')
+          "${INV7_DIRS[@]}" 2>/dev/null | grep -vE '\.test\.ts|\.spec\.ts|\.test\.tsx|\.spec\.tsx')
   if [ -n "$hits" ]; then
     fail "per-deployment prompt override mechanism found:"
     echo "$hits" | sed 's/^/          /'
   else
-    pass "no per-deployment prompt override mechanism"
+    pass "no per-deployment prompt override mechanism in packages/ or apps/"
   fi
 else
-  skip "no packages/ yet"
+  skip "no packages/ or apps/ yet"
 fi
 
 # --- INV-8: zero recurring cost --------------------------------------------

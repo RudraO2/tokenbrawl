@@ -6,7 +6,9 @@ import type { CommandLog } from '@tokenbrawl/contracts';
 import type { Canvas2D } from './render/canvas2d';
 import type { MountPoint, MountPointChild } from './main';
 import { DEMO_REPLAY_URL, resolveSidecarUrl, startup, type BrowserGlobals } from './startup';
+import { runByokMatch } from './byok/run';
 import { buildDemoBundle } from './testing/demo-log';
+import { chatCompletionBody, createFakeTransport } from './testing/byok-transport';
 import { DEMO_SIDECAR_PATH } from './testing/sidecar-split';
 
 /**
@@ -91,6 +93,8 @@ interface FakeRoot extends MountPoint {
   readonly node: (selector: string) => MountPointChild | null;
   readonly attribute: (selector: string, name: string) => string | undefined;
   readonly painted: () => readonly string[];
+  /** Every `drawFrame` this canvas has served, across every player mounted onto it. */
+  readonly paintCount: () => number;
   readonly listeners: () => ReadonlyMap<string, ((event?: { readonly pointerType?: string }) => void)[]>;
   readonly fire: (selector: string, type: string, event?: { readonly pointerType?: string }) => void;
   readonly html: () => string;
@@ -134,6 +138,7 @@ function createRoot(): FakeRoot {
     node: (selector: string) => nodes.get(selector) ?? null,
     attribute: (selector: string, name: string) => attributes.get(`${selector}:${name}`),
     painted: () => canvas.texts(),
+    paintCount: () => canvas.paints(),
     querySelector: (selector: string): MountPointChild | null =>
       selector === 'canvas' ? (canvas.surface as MountPointChild) : child(selector),
     listeners: () => listeners,
@@ -149,6 +154,8 @@ function createRoot(): FakeRoot {
 interface Harness {
   readonly globals: BrowserGlobals;
   readonly root: FakeRoot;
+  /** The `#byok` host, which is a separate element from `#app` on the real page. */
+  readonly byokHost: FakeRoot;
   readonly painted: () => readonly string[];
   readonly frames: () => number;
   readonly runFrames: (count: number) => void;
@@ -161,9 +168,12 @@ function createHarness(
     readonly sidecar?: unknown;
     readonly spritesResolve?: boolean;
     readonly json?: (url: string) => Promise<unknown>;
+    /** A page with no BYOK panel at all -- which must still play the replay. */
+    readonly noByokHost?: boolean;
   } = {},
 ): Harness {
   const root = createRoot();
+  const byokHost = createRoot();
   const queue: (() => void)[] = [];
   const requested: string[] = [];
 
@@ -184,7 +194,15 @@ function createHarness(
   };
 
   const globals: BrowserGlobals = {
-    document: { querySelector: () => root },
+    // Two hosts, because the page has two (Story 4.6). `#byok` is a separate
+    // element outside `#app` precisely so that re-mounting the player on a BYOK
+    // Match does not delete the panel that produced it -- a fake that answered
+    // both lookups with one node would have the panel and the player writing
+    // over each other, which is the defect the split exists to prevent.
+    document: {
+      querySelector: (selector: string) =>
+        selector === '#byok' ? (options.noByokHost === true ? null : byokHost) : root,
+    },
     window: {
       requestAnimationFrame: (callback) => {
         queue.push(callback);
@@ -206,6 +224,7 @@ function createHarness(
   return {
     globals,
     root,
+    byokHost,
     painted: () => root.painted(),
     frames: () => queue.length,
     runFrames: (count: number): void => {
@@ -984,5 +1003,116 @@ describe('the timeline scrub (4.5)', () => {
 
     harness.root.fire('[data-agent="0"]', 'focus');
     expect(harness.root.node('[data-announce]')?.innerHTML).toContain(log.agents[0].id);
+  });
+});
+
+describe('the BYOK panel and the player it replaces (Story 4.6)', () => {
+  /** A real BYOK log, played out over a fake transport -- no network, no keys that exist. */
+  async function byokLog(): Promise<CommandLog> {
+    const transport = createFakeTransport({
+      body: (call) => chatCompletionBody(call % 2 === 0 ? 'ACTION: advance' : 'ACTION: block'),
+    });
+    return runByokMatch({
+      fighters: [
+        { provider: 'groq', model: 'llama-3.1-8b-instant', apiKey: 'gsk_test_key_000000001' },
+        { provider: 'cerebras', model: 'llama3.1-8b', apiKey: 'csk_test_key_000000002' },
+      ],
+      seed: 4_601,
+      fetch: transport.fetch,
+    });
+  }
+
+  it('mounts the panel into its own host, outside the player shell', async () => {
+    const { log } = await buildDemoBundle();
+    const harness = createHarness(log);
+
+    const result = await startup(harness.globals);
+
+    expect(result?.byok).not.toBeNull();
+    expect(harness.byokHost.innerHTML).toContain('Run your own fight');
+    // And the player's own shell is untouched by it.
+    expect(harness.root.innerHTML).not.toContain('Run your own fight');
+    expect(harness.root.innerHTML).toContain('tb-canvas');
+  });
+
+  it('replays a BYOK Match through the same player, hash verified (AC4)', async () => {
+    const { log } = await buildDemoBundle();
+    const harness = createHarness(log);
+    const result = await startup(harness.globals);
+
+    const mounted = result?.showLog(await byokLog());
+
+    expect(mounted?.film.matchesRecordedHash).toBe(true);
+    expect(result?.current()).toBe(mounted);
+    expect(mounted?.clock.isRunning()).toBe(true);
+  });
+
+  it('marks the replaced Match as excluded from ratings (AD-11)', async () => {
+    const { log } = await buildDemoBundle();
+    const harness = createHarness(log);
+    const result = await startup(harness.globals);
+
+    expect(harness.root.html()).not.toContain('not rated');
+    result?.showLog(await byokLog());
+    expect(harness.root.html()).toContain('not rated');
+  });
+
+  it('stops the previous clock, so two fights never run at once', async () => {
+    // Without this the old `requestAnimationFrame` loop keeps painting a canvas
+    // that is no longer in the document.
+    const { log } = await buildDemoBundle();
+    const harness = createHarness(log);
+    const result = await startup(harness.globals);
+    const demo = result?.mounted;
+
+    result?.showLog(await byokLog());
+
+    expect(demo?.clock.isRunning()).toBe(false);
+    expect(result?.current().clock.isRunning()).toBe(true);
+  });
+
+  it('paints the replacement immediately, so the stage is never blank', async () => {
+    const { log } = await buildDemoBundle();
+    // No `await dressed` here, deliberately: the sidecar is left pending, which
+    // is the state a slow link is actually in, and the replacement must paint
+    // without waiting for it -- the same rule Story 4.2 set for the first mount.
+    const harness = createHarness(log, { spritesResolve: true });
+    const result = await startup(harness.globals);
+
+    const before = harness.root.paintCount();
+    result?.showLog(await byokLog());
+
+    // `renderApp` paints frame zero before it returns, on the new log as much
+    // as on the first one.
+    expect(harness.root.paintCount()).toBeGreaterThan(before);
+  });
+
+  it('never pours the demo reasoning into the Match that replaced it', async () => {
+    // The sidecar is fetched for the demo log and lands after a BYOK Match may
+    // already have taken the stage. Adopting it then would put one Match's
+    // thinking under another Match's fight -- a race that is never reproduced
+    // once it ships, which is why the guard is explicit rather than a
+    // this-cannot-happen comment.
+    const { log, sidecar } = await buildDemoBundle();
+    const harness = createHarness(log, { spritesResolve: true, sidecar });
+    const result = await startup(harness.globals);
+
+    const replacement = result?.showLog(await byokLog());
+    await result?.dressed;
+
+    // A BYOK log carries its reasoning inline, so `inline` is the honest state.
+    // `ready` here would mean the demo's sidecar had been adopted into it.
+    expect(replacement?.reasoning.status()).toBe('inline');
+    expect(result?.current()).toBe(replacement);
+  });
+
+  it('leaves the player alone when the page has no BYOK host at all', async () => {
+    const { log } = await buildDemoBundle();
+    const harness = createHarness(log, { noByokHost: true });
+
+    const result = await startup(harness.globals);
+
+    expect(result?.byok).toBeNull();
+    expect(result?.mounted.clock.isRunning()).toBe(true);
   });
 });

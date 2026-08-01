@@ -2,7 +2,7 @@ import type { AgentIdentity } from '@tokenbrawl/contracts';
 
 /**
  * Story 4.6: AD-11's "BYOK Matches never enter the leaderboard", as a
- * predicate rather than as a sentence in a document.
+ * predicate rather than as a sentence somebody has to remember.
  *
  * It lives in `packages/core` and not in `apps/web`, even though 4.6 is the
  * story that needs it, because the *consumer* that must not get this wrong is
@@ -17,7 +17,7 @@ import type { AgentIdentity } from '@tokenbrawl/contracts';
  * `apps/web` can import it: `command-log.ts` reaches `node:crypto` through
  * `canonical-hash.ts` and pulls in Ajv, which Vite cannot bundle for a browser
  * (see `apps/web/src/source-discipline.test.ts`). The check itself needs
- * neither -- it reads two fields off an already-validated document.
+ * neither -- it reads two fields off an already-validated Command Log.
  *
  * The shape it accepts is deliberately narrower than `CommandLog`: everything
  * this rule depends on is in `agents`, and a parameter typed to the whole

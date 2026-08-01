@@ -470,8 +470,200 @@ body {
   outline-offset: var(--tb-space-1);
 }
 
+/* --- BYOK panel (Story 4.6) --------------------------------------------- *
+ *
+ * Its own block below the player, not a modal and not a sidebar: running your
+ * own fight is the second thing this page offers, not an interruption of the
+ * first. Deliberately wider than the transport above it and flush to the left
+ * edge of the content, so the page reads as three stacked slabs of different
+ * widths rather than as a centred column.
+ */
+
+.tb-byok {
+  border: var(--tb-border-width) solid var(--tb-ink);
+  box-shadow: var(--tb-shadow);
+  background: var(--tb-bg);
+  padding: var(--tb-space-3);
+  margin-bottom: var(--tb-space-4);
+  max-width: 1200px;
+}
+
+.tb-byok-heading {
+  margin: 0 0 var(--tb-space-2);
+  font-size: 32px;
+  font-weight: 800;
+  letter-spacing: var(--tb-tracking-display);
+  text-transform: uppercase;
+  line-height: 1;
+}
+
+.tb-byok-intro {
+  margin: 0 0 var(--tb-space-3);
+  max-width: 70ch;
+  line-height: 1.4;
+  font-size: 17px;
+}
+
+/* Three blocks while there is room; stacked on a phone. */
+.tb-byok-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: var(--tb-space-3);
+}
+
+.tb-byok-fighter {
+  border: var(--tb-border-width) solid var(--tb-ink);
+  padding: var(--tb-space-2);
+  margin: 0;
+  min-width: 0;
+}
+
+/* Sits on the border, ink on the ground, so the box reads as a labelled slab. */
+.tb-byok-legend {
+  font-family: var(--tb-font-mono);
+  font-size: 14px;
+  text-transform: uppercase;
+  background: var(--tb-accent);
+  color: var(--tb-bg);
+  padding: 0 var(--tb-space-1);
+}
+
+.tb-byok-label {
+  display: block;
+  margin: var(--tb-space-2) 0 var(--tb-space-1);
+  font-family: var(--tb-font-mono);
+  font-size: 13px;
+  text-transform: uppercase;
+  color: var(--tb-muted);
+}
+
+/*
+ * One rule for every control. `appearance: none` strips the platform chrome
+ * from the selects and the number input's spinner surround; what replaces it is
+ * a flat fill, a 4px ink border and square ends, exactly like every other edge
+ * on the page.
+ */
+.tb-byok-input {
+  appearance: none;
+  -webkit-appearance: none;
+  display: block;
+  width: 100%;
+  padding: var(--tb-space-1);
+  background: var(--tb-bg);
+  color: var(--tb-ink);
+  border: var(--tb-border-width) solid var(--tb-ink);
+  font-family: var(--tb-font-mono);
+  font-size: 14px;
+  transition: border-color var(--tb-step) step-end;
+}
+
+.tb-byok-input:hover {
+  border-color: var(--tb-accent);
+}
+
+.tb-byok-input:focus-visible {
+  outline: 3px solid var(--tb-accent);
+  outline-offset: var(--tb-space-1);
+}
+
+/* A disabled option is a CLI-only provider: shown, greyed, unselectable (AC5). */
+.tb-byok-input option:disabled {
+  color: var(--tb-muted);
+}
+
+.tb-byok-check {
+  display: flex;
+  align-items: center;
+  gap: var(--tb-space-1);
+  margin: var(--tb-space-2) 0;
+  font-family: var(--tb-font-mono);
+  font-size: 13px;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+/*
+ * The native checkbox, tinted. Rebuilding one would mean rebuilding its
+ * keyboard behaviour and its announcement, and `accent-color` is a flat fill
+ * rather than a decoration.
+ */
+.tb-byok-check input {
+  width: 20px;
+  height: 20px;
+  accent-color: var(--tb-accent);
+}
+
+.tb-byok-check input:focus-visible {
+  outline: 3px solid var(--tb-accent);
+  outline-offset: var(--tb-space-1);
+}
+
+.tb-byok-run {
+  width: 100%;
+  margin-top: var(--tb-space-2);
+}
+
+.tb-byok-run:disabled {
+  border-color: var(--tb-muted);
+  color: var(--tb-muted);
+  box-shadow: 0 0 0 var(--tb-muted);
+  cursor: default;
+}
+
+.tb-byok-progress {
+  margin: var(--tb-space-3) 0 var(--tb-space-1);
+  font-family: var(--tb-font-mono);
+  font-size: 13px;
+  text-transform: uppercase;
+  color: var(--tb-muted);
+}
+
+.tb-byok-status {
+  margin: 0;
+  padding: var(--tb-space-1) var(--tb-space-2);
+  border: var(--tb-border-width) solid var(--tb-ink);
+  font-family: var(--tb-font-mono);
+  font-size: 14px;
+  text-transform: uppercase;
+  max-width: 90ch;
+}
+
+.tb-byok-status--idle {
+  color: var(--tb-muted);
+  border-color: var(--tb-muted);
+}
+
+.tb-byok-status--running {
+  border-color: var(--tb-accent);
+}
+
+.tb-byok-status--done {
+  background: var(--tb-accent);
+  color: var(--tb-bg);
+  box-shadow: var(--tb-shadow);
+}
+
+/*
+ * Ground ink on a warn fill, never warn text on the ground: that pair measures
+ * 4.26:1 and misses the floor. Same treatment the failed-hash chip gets, for
+ * the same reason -- see docs/DESIGN.md.
+ */
+.tb-byok-status--failed {
+  background: var(--tb-warn);
+  color: var(--tb-bg);
+  box-shadow: var(--tb-shadow-warn);
+  font-weight: 800;
+}
+
+/* The BYOK badge on a Match run in this tab. Says why it will never be ranked. */
+.tb-chip--byok {
+  border-color: var(--tb-accent);
+  color: var(--tb-accent);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .tb-button,
+  .tb-byok-input,
   .tb-fighter-target {
     transition: none;
   }

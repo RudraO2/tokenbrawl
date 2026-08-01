@@ -1,4 +1,6 @@
 import type { CommandLog } from '@tokenbrawl/contracts';
+import { mountByokPanel, type ByokHost, type ByokPanel } from './byok/panel';
+import type { KeyStorage } from './byok/keys';
 import { escapeHtml, renderApp, type HostView, type MountPoint, type MountedApp } from './main';
 import { validateReasoningSidecar } from './replay/sidecar';
 import { createSpriteArtist, type FighterArtist } from './render/artist';
@@ -76,16 +78,38 @@ interface FetchResponse {
 }
 
 export interface BrowserGlobals {
-  readonly document?: { querySelector(selectors: string): MountPoint | null };
+  readonly document?: {
+    querySelector(selectors: string): MountPoint | null;
+  };
   readonly window?: HostView;
   readonly fetch?: (url: string) => Promise<FetchResponse>;
   readonly Image?: new () => LoadedImage;
+  /**
+   * The visitor's own storage, for Story 4.6's opt-in key persistence. Absent
+   * in a tab with storage blocked, and absent under test -- the panel treats
+   * both as "there is nowhere to remember a key", which is the safe reading.
+   */
+  readonly localStorage?: KeyStorage;
 }
 
 export interface StartupResult {
   readonly mounted: MountedApp;
   /** Settles once every decoration has arrived or failed. Never awaited on the page. */
   readonly dressed: Promise<void>;
+  /**
+   * The BYOK panel, or `null` when the page has no `#byok` host (Story 4.6).
+   * Exposed so a test can drive a whole Match through the real wiring.
+   */
+  readonly byok: ByokPanel | null;
+  /** The player currently on screen. Changes when a BYOK Match replaces the demo. */
+  readonly current: () => MountedApp;
+  /**
+   * Re-mounts the player on another log. This is the callback the BYOK panel is
+   * wired to, exposed so the re-mount can be asserted without a network: the
+   * panel's own path is covered in `byok/panel.test.ts`, and what is worth
+   * testing here is what happens to the *player* when a second log arrives.
+   */
+  readonly showLog: (log: CommandLog) => MountedApp;
 }
 
 /**
@@ -207,15 +231,70 @@ async function loadSidecar(
   logUrl: string,
   sidecarPath: string,
   matchId: string,
+  /**
+   * Whether the player this sidecar belongs to is still the one on screen.
+   *
+   * Story 4.6 makes that a real question: a BYOK Match replaces the player, and
+   * its log is a different Match with its own inline reasoning. Adopting the
+   * demo's sidecar into it would put one Match's thinking under another
+   * Match's fight. The window is small -- the sidecar lands in milliseconds and
+   * a BYOK run needs a human -- which is exactly the kind of race that is never
+   * reproduced and never fixed once it ships.
+   */
+  isCurrent: () => boolean,
 ): Promise<void> {
   try {
     const url = resolveSidecarUrl(logUrl, sidecarPath);
-    mounted.reasoning.adopt(validateReasoningSidecar(await fetchJson(globals, url), matchId));
+    const sidecar = validateReasoningSidecar(await fetchJson(globals, url), matchId);
+    if (!isCurrent()) {
+      return;
+    }
+    mounted.reasoning.adopt(sidecar);
   } catch (error) {
     warn('Reasoning sidecar unavailable', error);
+    if (!isCurrent()) {
+      return;
+    }
     mounted.reasoning.markUnavailable(error instanceof Error ? error.message : String(error));
   }
   mounted.refresh();
+}
+
+/**
+ * Mounts the BYOK panel, or returns `null` when this page has no host for it.
+ *
+ * Wrapped, and the failure is a warning rather than a throw, for the same
+ * reason the sprite packs are: the replay is the page's claim and the panel is
+ * an offer. A visitor whose browser choked on the panel should still get a
+ * fight whose hash verifies.
+ *
+ * The cast is the one `main.ts` already makes for the canvas, for the same
+ * reason: `tsconfig.base.json` has no DOM lib, so every host object here is
+ * described structurally, and one lookup cannot be typed as two different
+ * structural shapes at once. The real `Element` satisfies both.
+ */
+function mountByok(
+  globals: BrowserGlobals,
+  mount: (log: CommandLog) => MountedApp,
+): ByokPanel | null {
+  const host = globals.document?.querySelector('#byok');
+  if (host == null) {
+    return null;
+  }
+  try {
+    return mountByokPanel(host as unknown as ByokHost, {
+      // Absent in a tab with storage blocked and under test alike. The panel
+      // treats that as "there is nowhere to remember a key", which is the safe
+      // reading of an absent storage rather than a reason to fail.
+      storage: globals.localStorage,
+      onLog: (log) => {
+        mount(log);
+      },
+    });
+  } catch (error) {
+    warn('BYOK panel unavailable', error);
+    return null;
+  }
 }
 
 /**
@@ -260,33 +339,87 @@ export async function startup(globals: BrowserGlobals): Promise<StartupResult | 
     // other field and guards every field it then uses (AD-3). Running Ajv here
     // would drag the validator into the bundle for no additional safety.
     const log = (await fetchJson(globals, DEMO_REPLAY_URL)) as CommandLog;
-    const mounted = renderApp(root, log, view);
 
-    const upgrades: Promise<void>[] = SPRITE_LAYOUT_URLS.map(async (url, agentIndex) => {
+    /**
+     * The dressing, held outside any one mount (Story 4.6).
+     *
+     * A BYOK Match re-mounts the player with a different log, and the sprite
+     * packs and backdrop it already decoded belong to the *page*, not to the
+     * Match that happened to be on screen when they arrived. Keeping them here
+     * means a visitor's own fight is drawn with sprites immediately instead of
+     * dropping back to blocks, and means an asset that lands *after* a
+     * re-mount reaches the player that is actually on screen.
+     *
+     * Every slot is filled explicitly rather than left sparse: `drawFrame`
+     * falls back from a missing index to index 0, so a half-filled array
+     * dresses both fighters in pack one -- a constraint Story 4.2 recorded and
+     * 4.4 restated.
+     */
+    const dressing: {
+      artists: (FighterArtist | undefined)[];
+      backdrop: Backdrop | undefined;
+    } = { artists: [undefined, undefined], backdrop: undefined };
+    const player: { mounted: MountedApp } = { mounted: renderApp(root, log, view) };
+
+    /** Re-mounts the player on a new log, stopping the old clock first. */
+    const mount = (nextLog: CommandLog): MountedApp => {
+      // Without this the previous clock keeps its `requestAnimationFrame` loop
+      // alive, painting a canvas that is no longer in the document -- two
+      // fights running at once, one of them invisible.
+      player.mounted.clock.stop();
+      const mounted = renderApp(root, nextLog, view);
+      for (const agentIndex of [0, 1] as const) {
+        const artist = dressing.artists[agentIndex];
+        if (artist !== undefined) {
+          mounted.setArtist(agentIndex, artist);
+        }
+      }
+      if (dressing.backdrop !== undefined) {
+        mounted.setBackdrop(dressing.backdrop);
+      }
+      player.mounted = mounted;
+      return mounted;
+    };
+
+    const upgrades: Promise<void>[] = SPRITE_LAYOUT_URLS.map(async (url, index) => {
       const artist = await loadArtist(globals, url);
       if (artist !== undefined) {
-        mounted.setArtist(agentIndex as 0 | 1, artist);
+        const agentIndex = index as 0 | 1;
+        dressing.artists[agentIndex] = artist;
+        player.mounted.setArtist(agentIndex, artist);
       }
     });
     upgrades.push(
       (async (): Promise<void> => {
         const backdrop = await loadBackdrop(globals);
         if (backdrop !== undefined) {
-          mounted.setBackdrop(backdrop);
+          dressing.backdrop = backdrop;
+          player.mounted.setBackdrop(backdrop);
         }
       })(),
     );
+    const demoPlayer = player.mounted;
     if (typeof log.reasoningSidecar === 'string' && log.reasoningSidecar.length > 0) {
       upgrades.push(
-        loadSidecar(globals, mounted, DEMO_REPLAY_URL, log.reasoningSidecar, log.matchId),
+        loadSidecar(
+          globals,
+          demoPlayer,
+          DEMO_REPLAY_URL,
+          log.reasoningSidecar,
+          log.matchId,
+          () => player.mounted === demoPlayer,
+        ),
       );
     }
 
     return {
-      mounted,
+      mounted: demoPlayer,
       // `then(() => undefined)` rather than the array: callers await completion,
       // not results, and every upgrade already handles its own failure.
       dressed: Promise.all(upgrades).then(() => undefined),
+      byok: mountByok(globals, mount),
+      current: (): MountedApp => player.mounted,
+      showLog: mount,
     };
   } catch (error) {
     renderFailure(root, error);

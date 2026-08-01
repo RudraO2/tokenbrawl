@@ -91,6 +91,15 @@ describe('shipped player source discipline', () => {
         'replay/sidecar.ts',
         'render/renderer.ts',
         'player/clock.ts',
+        // Story 4.6. The BYOK path is the one place in this app that holds a
+        // credential and makes a cross-origin request, so it is the last place
+        // that should sit outside the sweeps.
+        'byok/client.ts',
+        'byok/run.ts',
+        'byok/panel.ts',
+        'byok/log.ts',
+        'byok/keys.ts',
+        'byok/catalogue.ts',
       ]),
     );
     expect(paths.every((path) => !path.endsWith('.test.ts'))).toBe(true);
@@ -189,6 +198,28 @@ describe('shipped player source discipline', () => {
     expect(offendingLines(/(^|[^A-Za-z0-9_$.])(process|Buffer|__dirname|__filename)\s*[.(]/)).toStrictEqual(
       [],
     );
+  });
+
+  it('assembles no prompt of its own, per Deployment or otherwise (INV-7)', () => {
+    // The gap Story 3.1 recorded and handed to 4.6. Both INV-7 sweeps -- the
+    // one in `scripts/audit-invariants.sh` and `scaffold-discipline.test.ts`'s
+    // in-suite equivalent -- scanned `packages/` only, and 4.6 is the story
+    // that gives a *browser* the ability to run a Deployment. A per-Deployment
+    // prompt tweak added here would have escaped both.
+    //
+    // It cannot happen by construction either: the BYOK path builds its Agents
+    // with `createDeployment`, whose `observe` *is* `assemblePrompt`, and the
+    // `ProviderRequest` an adapter receives carries no material a prompt could
+    // be rebuilt from (AD-7). This is the check that keeps that true.
+    const overrides =
+      /(promptOverride|systemPromptFor|scaffoldFor|perModelPrompt|modelSpecificPrompt)/;
+    expect(offendingLines(overrides)).toStrictEqual([]);
+
+    // The other half: no shipped file here may build a system prompt at all.
+    // `assemblePrompt` and the two Scaffolds live in core and are the only
+    // source of one.
+    const assembles = /\b(system|systemPrompt)\s*:\s*['"`]/;
+    expect(offendingLines(assembles)).toStrictEqual([]);
   });
 
   it('adds no runtime dependency to the app', () => {

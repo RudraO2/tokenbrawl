@@ -1,4 +1,8 @@
 import type { CommandLog } from '@tokenbrawl/contracts';
+import {
+  ratingEligibility,
+  type RatableLog,
+} from '../../../packages/core/src/rating-eligibility';
 import { DEFAULT_FIGHTER_CONFIG } from '../../../packages/env-fighter/src/config';
 import { createFighterEnvironment } from '../../../packages/env-fighter/src/environment';
 import { createPlaybackClock, type PlaybackClock } from './player/clock';
@@ -271,6 +275,22 @@ export function hashChip(film: ReplayFilm): { readonly label: string; readonly m
 /** Decision-Point count for the readout: transitions, not states. */
 export function decisionPointCount(film: ReplayFilm): number {
   return Math.max(0, film.states.length - 1);
+}
+
+/**
+ * The chip that says this Match will never be ranked, or `null` for one that
+ * can be (Story 4.6, AD-11).
+ *
+ * The verdict comes from `packages/core`'s `ratingEligibility` rather than from
+ * a check on `provider === 'byok'` written here. Story 7.2 computes the ratings
+ * and must reach the same answer; two implementations of "is this ratable" is
+ * one too many, and the one that would drift is the copy in the page nobody
+ * runs against a leaderboard.
+ */
+export function exclusionChip(log: RatableLog): PanelChip | null {
+  return ratingEligibility(log).eligible
+    ? null
+    : { label: 'BYOK · not rated', modifier: 'tb-chip--byok' };
 }
 
 export interface PanelChip {
@@ -627,8 +647,14 @@ export function renderApp(root: MountPoint, log: CommandLog, view: HostView): Mo
   const reasoning = createReasoningSource(log);
   const chip = hashChip(mounted.film);
 
+  // Story 4.6: a Match run on a visitor's own key says so, beside its hash. A
+  // page that showed a BYOK result identically to a tournament one would be
+  // publishing an unverifiable Match with the authority of a verified one.
+  const exclusion = exclusionChip(log);
+
   readout.innerHTML = `
     <span class="tb-chip ${chip.modifier}">${chip.label}</span>
+    ${exclusion === null ? '' : `<span class="tb-chip ${exclusion.modifier}">${escapeHtml(exclusion.label)}</span>`}
     <span class="tb-chip">${String(decisionPointCount(mounted.film))} decision points</span>
     <span class="tb-chip">${mounted.film.result.outcome.toUpperCase()} &middot; ${mounted.film.result.endReason.toUpperCase()}</span>
     <span class="tb-chip tb-hash">${mounted.film.finalStateHash}</span>

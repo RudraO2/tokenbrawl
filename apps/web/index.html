@@ -52,6 +52,13 @@
   </head>
   <body>
     <div id="app"></div>
+    <!--
+      Story 4.6's BYOK panel, deliberately outside #app. `renderApp` rewrites
+      #app's innerHTML wholesale, and a completed BYOK Match re-mounts the
+      player through exactly that call -- a panel inside #app would delete
+      itself at the moment it succeeded.
+    -->
+    <section class="tb-byok" id="byok"></section>
     <script type="module" src="/src/boot.ts"></script>
   </body>
 </html>
