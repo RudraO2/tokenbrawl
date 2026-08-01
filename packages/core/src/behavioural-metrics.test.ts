@@ -396,6 +396,10 @@ describe('unreportedBehaviour', () => {
     expect(row.tokensPerMatch).toBeNull();
     expect(row.reasoningShareBasisPoints).toBeNull();
     expect(row.bankExhaustionRateBasisPoints).toBeNull();
+    // Including the parse-failure rate: no Decision Point was observed, so
+    // there is nothing to have a rate of. A zero here would read as "this
+    // entrant never fumbled", which nothing measured.
+    expect(row.parseFailureRateBasisPoints).toBeNull();
     expect(row.matches).toBe(0);
     expect(row.parseFailures).toBe(0);
   });

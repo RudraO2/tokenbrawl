@@ -1,4 +1,5 @@
-import type { AgentIdentity } from '@tokenbrawl/contracts';
+import type { AgentIdentity, CommandLog } from '@tokenbrawl/contracts';
+import { computeBehaviouralMetrics } from '../../core/src/behavioural-metrics';
 import { validateCommandLog } from '../../core/src/command-log';
 import { computeLeaderboard, type LeaderboardMatch, type RatingTrack } from '../../core/src/ratings';
 import {
@@ -44,6 +45,15 @@ export const LEADERBOARD_BOOTSTRAP_RESAMPLES = 2000;
 
 export interface LoadedCorpus {
   readonly matches: readonly LeaderboardMatch[];
+  /**
+   * The logs `matches` was projected from, in the same order.
+   *
+   * Kept rather than discarded because a rating needs only the outcome while
+   * Story 7-3's behavioural metrics need the Decisions -- and reading the
+   * directory twice would let the two halves of one published row describe two
+   * different sets of files.
+   */
+  readonly logs: readonly CommandLog[];
   readonly identities: readonly AgentIdentity[];
   /** Files that were not a readable, valid Command Log. Reported, never fatal. */
   readonly unreadable: readonly string[];
@@ -74,6 +84,7 @@ export async function loadCorpus(io: CliIo, logDir: string): Promise<LoadedCorpu
   const names = [...(await io.listFiles(logDir))].filter((name) => name.endsWith(LOG_SUFFIX)).sort();
 
   const matches: LeaderboardMatch[] = [];
+  const logs: CommandLog[] = [];
   const identities: AgentIdentity[] = [];
   const unreadable: string[] = [];
   const staleConfig: string[] = [];
@@ -108,11 +119,13 @@ export async function loadCorpus(io: CliIo, logDir: string): Promise<LoadedCorpu
       agents: [log.agents[0], log.agents[1]],
       outcome: log.result.outcome,
     });
+    logs.push(log);
     identities.push(log.agents[0], log.agents[1]);
   }
 
   return {
     matches: Object.freeze(matches),
+    logs: Object.freeze(logs),
     identities: Object.freeze(identities),
     unreadable: Object.freeze(unreadable),
     staleConfig: Object.freeze(staleConfig),
@@ -213,14 +226,28 @@ export async function generateLeaderboard(
     seed: LEADERBOARD_BOOTSTRAP_SEED,
   });
 
-  const report = buildLeaderboardReport(leaderboard, {
-    story: '7-2-ratings-with-confidence-intervals',
-    title: 'Tokenbrawl leaderboard',
-    generatedBy: 'tokenbrawl leaderboard --config configs/tournament.config.json',
-    corpus: corpusSentence(corpus, logDir),
-    environment: { id: CLI_ENVIRONMENT_ID, version: CLI_ENVIRONMENT_VERSION },
-    configHash: cliConfigHash(),
-  });
+  // Behaviour over the *rated* Matches only, so every figure in the "how the
+  // tokens were spent" table describes the same Matches as the rating printed
+  // beside it. It also inherits AD-11 without a second check: a BYOK Match is
+  // never rated, so it never reaches these numbers either, and a visitor
+  // cannot move a published parse-failure rate from their own browser.
+  const rated = new Set(leaderboard.ratedMatchIds);
+  const behaviour = computeBehaviouralMetrics(
+    corpus.logs.filter((log) => rated.has(log.matchId)),
+  );
+
+  const report = buildLeaderboardReport(
+    leaderboard,
+    {
+      story: '7-3-behavioural-metrics',
+      title: 'Tokenbrawl leaderboard',
+      generatedBy: 'tokenbrawl leaderboard --config configs/tournament.config.json',
+      corpus: corpusSentence(corpus, logDir),
+      environment: { id: CLI_ENVIRONMENT_ID, version: CLI_ENVIRONMENT_VERSION },
+      configHash: cliConfigHash(),
+    },
+    behaviour,
+  );
 
   const jsonPath = joinPath(reportDir, LEADERBOARD_REPORT_NAME);
   const markdownPath = joinPath(reportDir, LEADERBOARD_REPORT_MARKDOWN_NAME);

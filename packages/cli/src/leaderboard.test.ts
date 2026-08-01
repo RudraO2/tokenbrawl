@@ -360,3 +360,167 @@ describe('the leaderboard command', () => {
     );
   });
 });
+
+/**
+ * Story 7-3: the behavioural metrics published beside the ratings.
+ *
+ * The arithmetic is `packages/core/src/behavioural-metrics.test.ts`'s subject.
+ * What is tested here is the wiring that decides *which Matches* the numbers
+ * describe -- which is the half a unit test on the pure function cannot reach.
+ */
+describe('behavioural metrics are computed over the rated Matches (7-3, AC1)', () => {
+  const metered = deployment('groq:metered');
+  const other = deployment('groq:other');
+  const visitor: AgentIdentity = {
+    id: 'byok:visitor',
+    kind: 'deployment',
+    deployment: { provider: 'byok', endpoint: 'https://example.invalid/v1', model: 'visitor' },
+  };
+
+  /** Two Decision Points for side 0: one clean, one Parse Failure, both metered. */
+  function spentDecisions(tokens: number): CommandLog['decisions'] {
+    return [
+      {
+        tick: 0,
+        agentIndex: 0,
+        action: 'attack',
+        tokensSpent: tokens,
+        reasoningTokens: Math.floor(tokens / 4),
+        bankRemaining: 500,
+        reflexMode: false,
+      },
+      {
+        tick: 1,
+        agentIndex: 0,
+        action: 'stand',
+        tokensSpent: tokens,
+        reasoningTokens: Math.floor(tokens / 4),
+        bankRemaining: 0,
+        reflexMode: false,
+        parseFailure: true,
+        rawResponse: 'I will attack, I think.',
+      },
+    ];
+  }
+
+  /** The same pairing as `clonePairing`, but with Decisions written onto every log. */
+  function meteredPairing(
+    io: MemoryIo,
+    template: CommandLog,
+    first: AgentIdentity,
+    second: AgentIdentity,
+    seedBase: number,
+    tokens: number,
+  ): void {
+    clonePairing(io, template, first, second, seedBase);
+    for (const path of logPaths(io)) {
+      const log = readLog(io, path);
+      if (log.seed < seedBase || log.seed >= seedBase + SEED_COUNT) {
+        continue;
+      }
+      if (log.agents[0].id !== first.id && log.agents[0].id !== second.id) {
+        continue;
+      }
+      if (log.agents[1].id !== first.id && log.agents[1].id !== second.id) {
+        continue;
+      }
+      io.files.set(path, JSON.stringify({ ...log, decisions: spentDecisions(tokens) }));
+    }
+  }
+
+  async function generated(): Promise<{ io: MemoryIo; report: string }> {
+    const io = await playedCorpus();
+    const template = readLog(io, logPaths(io)[0]);
+    meteredPairing(io, template, metered, other, 9000, 200);
+    // Three Matches on one side: below both of 7.1's floors, so the pairing is
+    // provisional and never rated -- and its 4000-token Decisions must not
+    // reach the published table.
+    const provisional = deployment('groq:provisional');
+    for (let offset = 0; offset < 3; offset += 1) {
+      const matchId = `groq-metered-groq-provisional-${String(8000 + offset)}-a`;
+      io.files.set(
+        `replays/${matchId}.command-log.json`,
+        JSON.stringify({
+          ...template,
+          matchId,
+          seed: 8000 + offset,
+          agents: [metered, provisional],
+          decisions: spentDecisions(4000),
+        }),
+      );
+    }
+    expect(await main(['leaderboard', '--config', 'run.json'], io)).toBe(EXIT_OK);
+    return { io, report: io.files.get('docs/reports/leaderboard.json') ?? '' };
+  }
+
+  it('publishes one behaviour row per rated Agent', async () => {
+    const { report } = await generated();
+    const parsed = JSON.parse(report) as {
+      behaviour: readonly { agent: string; tokensPerMatch: number | null }[];
+      mainLeaderboard: readonly { agent: string }[];
+      reflexTrack: readonly { agent: string }[];
+    };
+
+    expect(parsed.behaviour.map((row) => row.agent)).toStrictEqual([
+      ...parsed.mainLeaderboard.map((row) => row.agent),
+      ...parsed.reflexTrack.map((row) => row.agent),
+    ]);
+  });
+
+  it('counts only the Matches that were rated', async () => {
+    const { report } = await generated();
+    const parsed = JSON.parse(report) as {
+      behaviour: readonly { agent: string; matches: number; tokensPerMatch: number | null }[];
+    };
+    const row = parsed.behaviour.find((entry) => entry.agent === metered.id);
+
+    // 15 seeds x 2 sides against `groq:other`, and nothing from the
+    // provisional pairing, whose Decisions were ten times as expensive.
+    expect(row?.matches).toBe(SEED_COUNT * 2);
+    expect(row?.tokensPerMatch).toBe(400);
+  });
+
+  it('shows a Baseline Bot as not-reported rather than as spending zero (AC3)', async () => {
+    const { report } = await generated();
+    const parsed = JSON.parse(report) as {
+      behaviour: readonly {
+        agent: string;
+        tokensPerMatch: number | null;
+        reasoningShareBasisPoints: number | null;
+        bankExhaustionRateBasisPoints: number | null;
+      }[];
+    };
+    const row = parsed.behaviour.find((entry) => entry.agent === 'bot:spacing');
+
+    expect(row?.tokensPerMatch).toBeNull();
+    expect(row?.reasoningShareBasisPoints).toBeNull();
+    expect(row?.bankExhaustionRateBasisPoints).toBeNull();
+  });
+
+  it('never lets a BYOK Match reach a published metric (AD-11)', async () => {
+    const io = await playedCorpus();
+    const template = readLog(io, logPaths(io)[0]);
+    meteredPairing(io, template, metered, other, 9000, 200);
+    // A visitor playing the same Deployment, expensively, from their browser.
+    meteredPairing(io, template, metered, visitor, 7000, 9000);
+
+    expect(await main(['leaderboard', '--config', 'run.json'], io)).toBe(EXIT_OK);
+    const parsed = JSON.parse(io.files.get('docs/reports/leaderboard.json') ?? '') as {
+      behaviour: readonly { agent: string; matches: number; tokensPerMatch: number | null }[];
+    };
+    const row = parsed.behaviour.find((entry) => entry.agent === metered.id);
+
+    expect(row?.matches).toBe(SEED_COUNT * 2);
+    expect(row?.tokensPerMatch).toBe(400);
+    expect(parsed.behaviour.some((entry) => entry.agent === visitor.id)).toBe(false);
+  });
+
+  it('renders the section into the Markdown artefact', async () => {
+    const { io } = await generated();
+    const markdown = io.files.get('docs/reports/leaderboard.md') ?? '';
+
+    expect(markdown).toContain('## How the tokens were spent');
+    expect(markdown).toContain('| Entrant | Kind | Track | Tokens / Match |');
+    expect(markdown).toContain('not reported');
+  });
+});

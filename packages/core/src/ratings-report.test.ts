@@ -362,7 +362,11 @@ describe('behavioural metrics ride beside the ratings (7-3, AC1)', () => {
     expect(row?.bankExhaustionRateBasisPoints).toBeNull();
 
     const line = behaviourRow(aggressive.id);
-    expect(line.split('|').filter((cell) => cell.trim() === 'not reported')).toHaveLength(3);
+    expect(row?.parseFailureRateBasisPoints).toBeNull();
+    // Five silent cells: tokens, reasoning share, parse failures, rate limits,
+    // bank exhaustion. Nothing about this entrant was measured, and the row
+    // says so five times rather than printing five zeroes.
+    expect(line.split('|').filter((cell) => cell.trim() === 'not reported')).toHaveLength(5);
   });
 
   it('never writes a not-reported quantity as a bare zero anywhere in the section', () => {
@@ -382,7 +386,7 @@ describe('behavioural metrics ride beside the ratings (7-3, AC1)', () => {
     const line = behaviourRow(unprobed.id);
     expect(line).toContain('(1 of 2)');
     // Nothing was rate-limited, and that is a measured zero, not a silence.
-    expect(line).toContain('0.0000 (0)');
+    expect(line).toContain('0.0000 (0 of 2)');
   });
 });
 

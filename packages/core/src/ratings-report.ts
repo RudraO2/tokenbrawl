@@ -291,6 +291,19 @@ function countCell(value: number | null): string {
   return value === null ? NOT_REPORTED : String(value);
 }
 
+/**
+ * A failure rate with the counts it came from in brackets, so a reader never
+ * has to take a rate on trust -- `0.5000 (1 of 2)` is checkable and `0.5000`
+ * alone is not. A corpus that observed no Decision Point at all has no rate to
+ * publish and says so rather than printing a flattering zero.
+ */
+function failureCell(basisPoints: number | null, failures: number, decisions: number): string {
+  if (basisPoints === null) {
+    return NOT_REPORTED;
+  }
+  return `${formatBasisPoints(basisPoints)} (${String(failures)} of ${String(decisions)})`;
+}
+
 const BEHAVIOUR_HEADER =
   // `Entrant`, not `Agent`, for the same reason the "Not rated" table below
   // uses it: a rating table in this repo is identified by its `| Agent | Kind |`
@@ -362,7 +375,7 @@ function pushBehaviour(lines: string[], report: LeaderboardReport): void {
   lines.push(BEHAVIOUR_RULE);
   for (const row of report.behaviour) {
     lines.push(
-      `| ${row.agent} | ${row.kind} | ${row.track} | ${countCell(row.tokensPerMatch)} | ${rateCell(row.reasoningShareBasisPoints)} | ${formatBasisPoints(row.parseFailureRateBasisPoints)} (${String(row.parseFailures)} of ${String(row.decisions)}) | ${formatBasisPoints(row.rateLimitedRateBasisPoints)} (${String(row.rateLimited)}) | ${rateCell(row.bankExhaustionRateBasisPoints)} |`,
+      `| ${row.agent} | ${row.kind} | ${row.track} | ${countCell(row.tokensPerMatch)} | ${rateCell(row.reasoningShareBasisPoints)} | ${failureCell(row.parseFailureRateBasisPoints, row.parseFailures, row.decisions)} | ${failureCell(row.rateLimitedRateBasisPoints, row.rateLimited, row.decisions)} | ${rateCell(row.bankExhaustionRateBasisPoints)} |`,
     );
   }
   lines.push('');

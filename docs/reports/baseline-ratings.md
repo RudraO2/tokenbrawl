@@ -29,6 +29,27 @@ Bank cannot be debited honestly — its Matches are still played and still publi
 
 _No Reflex-Track entry in this corpus._
 
+## How the tokens were spent
+
+Behaviour, not skill. These figures come from the same Matches as the ratings above and
+say how each entrant played rather than how often it won — a benchmark that published only a
+win rate would be hiding most of what it measured.
+
+- **Parse failures** count every Decision Point that fell back to `stand`. This is a *measurement* of how
+  a model behaves under a strict, published Action grammar that is identical for every entrant. It is
+  not a fault to be driven down, and no entrant is penalised, filtered or footnoted for having one.
+- **Rate-limited** is the part of that column the provider refused rather than the model fumbled,
+  recognised from the refusal body the log kept verbatim. The two are published side by side because a
+  Command Log cannot tell them apart on its own, and reporting only the total would overstate the model.
+- **not reported** means exactly that: the provider never reported the quantity. It is never written as a
+  zero, because "did not say" and "said none" are different findings and INV-5 turns on the difference.
+
+| Entrant | Kind | Track | Tokens / Match | Reasoning share | Parse failures | Rate-limited | Bank exhausted |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| spacing-aware | bot | main | not reported | not reported | not reported | not reported | not reported |
+| aggressive | bot | main | not reported | not reported | not reported | not reported | not reported |
+| random | bot | main | not reported | not reported | not reported | not reported | not reported |
+
 ## Pairing coverage
 
 A pairing is rated only once it has been played enough, from both sides; below either floor it

@@ -1,5 +1,5 @@
 {
-  "story": "7-2-ratings-with-confidence-intervals",
+  "story": "7-3-behavioural-metrics",
   "title": "Tokenbrawl leaderboard",
   "generatedBy": "tokenbrawl leaderboard --config configs/tournament.config.json",
   "corpus": "1 committed Command Log from `apps/web/public/replays`",
@@ -61,5 +61,7 @@
         "insufficient-mirrored-seeds"
       ]
     }
-  ]
+  ],
+  "behaviour": [],
+  "headline": null
 }

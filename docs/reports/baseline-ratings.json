@@ -128,5 +128,71 @@
       "provisional": false,
       "exclusions": []
     }
-  ]
+  ],
+  "behaviour": [
+    {
+      "agent": "spacing-aware",
+      "kind": "bot",
+      "matches": 0,
+      "decisions": 0,
+      "tokensSpent": null,
+      "matchesReportingUsage": 0,
+      "tokensPerMatch": null,
+      "reasoningTokens": null,
+      "reasoningShareBasisPoints": null,
+      "parseFailures": 0,
+      "rateLimited": 0,
+      "grammarFailures": 0,
+      "parseFailureRateBasisPoints": null,
+      "grammarFailureRateBasisPoints": null,
+      "rateLimitedRateBasisPoints": null,
+      "matchesReportingBank": 0,
+      "bankExhaustedMatches": 0,
+      "bankExhaustionRateBasisPoints": null,
+      "track": "main"
+    },
+    {
+      "agent": "aggressive",
+      "kind": "bot",
+      "matches": 0,
+      "decisions": 0,
+      "tokensSpent": null,
+      "matchesReportingUsage": 0,
+      "tokensPerMatch": null,
+      "reasoningTokens": null,
+      "reasoningShareBasisPoints": null,
+      "parseFailures": 0,
+      "rateLimited": 0,
+      "grammarFailures": 0,
+      "parseFailureRateBasisPoints": null,
+      "grammarFailureRateBasisPoints": null,
+      "rateLimitedRateBasisPoints": null,
+      "matchesReportingBank": 0,
+      "bankExhaustedMatches": 0,
+      "bankExhaustionRateBasisPoints": null,
+      "track": "main"
+    },
+    {
+      "agent": "random",
+      "kind": "bot",
+      "matches": 0,
+      "decisions": 0,
+      "tokensSpent": null,
+      "matchesReportingUsage": 0,
+      "tokensPerMatch": null,
+      "reasoningTokens": null,
+      "reasoningShareBasisPoints": null,
+      "parseFailures": 0,
+      "rateLimited": 0,
+      "grammarFailures": 0,
+      "parseFailureRateBasisPoints": null,
+      "grammarFailureRateBasisPoints": null,
+      "rateLimitedRateBasisPoints": null,
+      "matchesReportingBank": 0,
+      "bankExhaustedMatches": 0,
+      "bankExhaustionRateBasisPoints": null,
+      "track": "main"
+    }
+  ],
+  "headline": null
 }

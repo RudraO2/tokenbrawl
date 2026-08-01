@@ -68,9 +68,16 @@ export interface AgentBehaviour {
   readonly rateLimited: number;
   /** The rest: text the Action grammar could not read. */
   readonly grammarFailures: number;
-  readonly parseFailureRateBasisPoints: number;
-  readonly grammarFailureRateBasisPoints: number;
-  readonly rateLimitedRateBasisPoints: number;
+  /**
+   * `null` only when no Decision Point was observed at all -- never merely
+   * because a provider stayed silent. Whether a Decision parsed is observable
+   * without the provider's cooperation, so a Deployment that was polled has a
+   * rate whatever its adapter reported; a corpus that recorded no Decisions has
+   * measured nothing, and saying so beats printing a zero.
+   */
+  readonly parseFailureRateBasisPoints: number | null;
+  readonly grammarFailureRateBasisPoints: number | null;
+  readonly rateLimitedRateBasisPoints: number | null;
 
   /** Matches in which any Decision carried Token Bank state. */
   readonly matchesReportingBank: number;
@@ -261,9 +268,9 @@ export function unreportedBehaviour(agent: string, kind: 'deployment' | 'bot'): 
     parseFailures: 0,
     rateLimited: 0,
     grammarFailures: 0,
-    parseFailureRateBasisPoints: 0,
-    grammarFailureRateBasisPoints: 0,
-    rateLimitedRateBasisPoints: 0,
+    parseFailureRateBasisPoints: null,
+    grammarFailureRateBasisPoints: null,
+    rateLimitedRateBasisPoints: null,
     matchesReportingBank: 0,
     bankExhaustedMatches: 0,
     bankExhaustionRateBasisPoints: null,
@@ -424,9 +431,12 @@ export function computeBehaviouralMetrics(
           parseFailures: entry.parseFailures,
           rateLimited: entry.rateLimited,
           grammarFailures,
-          parseFailureRateBasisPoints: rateBasisPoints(entry.parseFailures, entry.decisions),
-          grammarFailureRateBasisPoints: rateBasisPoints(grammarFailures, entry.decisions),
-          rateLimitedRateBasisPoints: rateBasisPoints(entry.rateLimited, entry.decisions),
+          parseFailureRateBasisPoints:
+            entry.decisions === 0 ? null : rateBasisPoints(entry.parseFailures, entry.decisions),
+          grammarFailureRateBasisPoints:
+            entry.decisions === 0 ? null : rateBasisPoints(grammarFailures, entry.decisions),
+          rateLimitedRateBasisPoints:
+            entry.decisions === 0 ? null : rateBasisPoints(entry.rateLimited, entry.decisions),
           matchesReportingBank: entry.matchesReportingBank,
           bankExhaustedMatches: entry.bankExhaustedMatches,
           bankExhaustionRateBasisPoints:

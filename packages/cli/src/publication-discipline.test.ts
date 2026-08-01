@@ -97,6 +97,17 @@ describe('the committed reports are real tables', () => {
     expect(files).toContain('skill-separation-gate.md');
     expect(tables.length).toBeGreaterThan(3);
   });
+
+  it('finds a behavioural table to check, so the not-reported sweep is not vacuous', () => {
+    // Story 7-3's check below inspects `Reasoning share` cells. If no committed
+    // report has that column, the check passes while testing nothing -- which
+    // is the failure mode this whole file exists to avoid.
+    const behavioural = tables.filter((table) =>
+      cells(table.header).some((cell) => cell.toLowerCase() === 'reasoning share'),
+    );
+    expect(behavioural.length).toBeGreaterThan(0);
+    expect(behavioural.some((table) => table.rows.length > 0)).toBe(true);
+  });
 });
 
 describe('no raw win table is published without confidence intervals (AC1)', () => {
@@ -136,6 +147,64 @@ describe('no raw win table is published without confidence intervals (AC1)', () 
         }
       }
     }
+    expect(offences).toStrictEqual([]);
+  });
+
+  it('never publishes a not-reported quantity as a zero (Story 7-3, AC3, INV-5)', () => {
+    // The one distinction the behavioural metrics exist to hold: a provider
+    // that never reported a quantity and one that reported zero of it are
+    // different findings. A type keeps them apart up to the renderer; only a
+    // sweep of the committed bytes keeps them apart in what a reader sees.
+    //
+    // Every column below is nullable at source. A cell in one is either a rate
+    // rendered to four places, an integer count, or the words -- and never a
+    // bare `0`, which is what a `?? 0` slipped into the renderer would produce.
+    // Rate-shaped columns are the ones that matter most: `0` and `0.0000` look
+    // alike to a skim-reader, so a rate cell may only ever be four decimal
+    // places or the words. A count column legitimately prints `0`.
+    const nullableRates: readonly string[] = ['reasoning share', 'bank exhausted'];
+    const nullableCounts: readonly string[] = ['tokens / match'];
+    /** A rate carrying the counts it came from, e.g. `0.5000 (1 of 2)`. */
+    const nullableCountedRates: readonly string[] = ['parse failures', 'rate-limited'];
+    const offences: string[] = [];
+
+    for (const table of tables) {
+      const rates: number[] = [];
+      const counts: number[] = [];
+      const countedRates: number[] = [];
+      cells(table.header).forEach((cell, index) => {
+        const normalised = cell.toLowerCase();
+        if (nullableRates.includes(normalised)) {
+          rates.push(index);
+        }
+        if (nullableCounts.includes(normalised)) {
+          counts.push(index);
+        }
+        if (nullableCountedRates.includes(normalised)) {
+          countedRates.push(index);
+        }
+      });
+
+      const check = (column: number, pattern: RegExp, kind: string): void => {
+        for (const row of table.rows) {
+          const value = (cells(row)[column] ?? '').trim();
+          if (value !== 'not reported' && !pattern.test(value)) {
+            offences.push(`${table.file}: ${kind} "${value}" in ${row}`);
+          }
+        }
+      };
+
+      for (const column of rates) {
+        check(column, /^\d+\.\d{4}$/, 'rate');
+      }
+      for (const column of counts) {
+        check(column, /^\d+$/, 'count');
+      }
+      for (const column of countedRates) {
+        check(column, /^\d+\.\d{4} \(\d+ of \d+\)$/, 'counted rate');
+      }
+    }
+
     expect(offences).toStrictEqual([]);
   });
 
