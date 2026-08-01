@@ -241,3 +241,47 @@ describe('degenerate documents', () => {
     expect(Object.isFrozen(readout.at(0, 0))).toBe(true);
   });
 });
+
+describe('across every position of a real Match', () => {
+  it('never refills: the level a viewer watches only ever goes down', async () => {
+    // The property a visitor actually perceives, and the one a subtle bug in
+    // the walk-back breaks. A resolver that failed to carry the level through
+    // unpolled Decision Points falls back to the start value, so the meter
+    // jumps back to full between polls -- which reads as a bank that refills
+    // and destroys the whole point of the HUD. Neither the per-Decision-Point
+    // assertions above nor the end-to-end draw tests catch that on their own.
+    const base = await buildDemoLog();
+    let level = 25_000;
+    const metered = {
+      ...base,
+      tokenBankStart: 25_000,
+      decisions: base.decisions.map((entry) => {
+        if (entry.agentIndex !== 0) {
+          return entry;
+        }
+        level = Math.max(0, level - 900);
+        return { ...entry, bankRemaining: level };
+      }),
+    };
+
+    const readout = createBankReadout(metered, TICKS);
+    const lastDecisionPoint = Math.floor(
+      Math.max(...metered.decisions.map((entry) => entry.tick)) / TICKS,
+    );
+
+    let previous = Number.POSITIVE_INFINITY;
+    let distinct = 0;
+    for (let decisionPoint = 0; decisionPoint <= lastDecisionPoint; decisionPoint += 1) {
+      const remaining = readout.at(decisionPoint, 0)?.remaining ?? 0;
+      expect(remaining).toBeLessThanOrEqual(previous);
+      if (remaining !== previous) {
+        distinct += 1;
+      }
+      previous = remaining;
+    }
+
+    // And it really did drain, rather than sitting on one value the whole way.
+    expect(distinct).toBeGreaterThan(3);
+    expect(previous).toBeLessThan(25_000);
+  });
+});

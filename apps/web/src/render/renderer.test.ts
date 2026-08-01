@@ -193,7 +193,13 @@ describe('drawing a frame', () => {
 
   it('uses only theme colours -- no hex is invented at draw time', () => {
     const allowed = new Set([THEME.bg, THEME.ink, THEME.accent, THEME.warn, THEME.muted, '']);
-    const ctx = draw(
+    const ctx = createRecordingCanvas();
+    // Every branch that draws, in one frame: both Commitment Windows open, both
+    // HUD stacks populated, one Token Bank draining and one exhausted. Drawing
+    // the plain frame here would have left Story 4.4's two new colour paths
+    // outside the sweep entirely.
+    drawFrame(
+      ctx,
       frameWith(
         stateWith({
           committedAction: [COMMITTED_ATTACK, COMMITTED_SPECIAL],
@@ -203,6 +209,14 @@ describe('drawing a frame', () => {
         }),
         stateWith(),
       ),
+      {
+        config: DEFAULT_FIGHTER_CONFIG,
+        viewport: VIEWPORT,
+        banks: [
+          { remaining: 9_000, start: 25_000, filledBasisPoints: 3_600, exhausted: false },
+          { remaining: 0, start: 25_000, filledBasisPoints: 0, exhausted: true },
+        ],
+      },
     );
 
     for (const call of ctx.calls()) {

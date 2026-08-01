@@ -72,8 +72,13 @@ const HUD_LABEL_BASELINE = HUD_TOP + HUD_BAR_HEIGHT + METER_GAP + METER_HEIGHT +
  * Story 4.4. The Token Bank sits at the bottom of the same stack, under health,
  * meter and their readout -- the two resources a fighter spends, then the one
  * it thinks with, in one column beside each fighter.
+ *
+ * Given the same height as the health bar deliberately: the story asks a
+ * visitor with no context to *notice* this meter, and a resource drawn thinner
+ * than the two beside it reads as a footnote to them rather than as a third
+ * thing being spent.
  */
-const BANK_HEIGHT = 16;
+const BANK_HEIGHT = HUD_BAR_HEIGHT;
 const BANK_TOP = HUD_LABEL_BASELINE + METER_GAP;
 
 /**
