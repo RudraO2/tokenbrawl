@@ -1,0 +1,65 @@
+{
+  "story": "7-2-ratings-with-confidence-intervals",
+  "title": "Tokenbrawl leaderboard",
+  "generatedBy": "tokenbrawl leaderboard --config configs/tournament.config.json",
+  "corpus": "1 committed Command Log from `apps/web/public/replays`",
+  "environment": {
+    "id": "fighter-1v1",
+    "version": "1.0.0"
+  },
+  "configHash": "891e524089af5b88da76fcfb9149be945cb0d33738d2eda472498475180b48a2",
+  "matches": 1,
+  "ratedMatches": 0,
+  "excludedMatches": 1,
+  "exclusionTotals": [
+    {
+      "exclusion": "insufficient-matches",
+      "matches": 1
+    },
+    {
+      "exclusion": "insufficient-mirrored-seeds",
+      "matches": 1
+    }
+  ],
+  "bootstrap": {
+    "method": "percentile",
+    "resamples": 2000,
+    "seed": 20260802,
+    "confidenceBasisPoints": 9500
+  },
+  "mainLeaderboard": [],
+  "reflexTrack": [],
+  "unrated": [
+    {
+      "agent": "bot:aggressive",
+      "kind": "bot",
+      "track": "main",
+      "reason": "No rated Match: every Match this Agent played was excluded (BYOK, or a pairing below the coverage floor)."
+    },
+    {
+      "agent": "bot:spacing",
+      "kind": "bot",
+      "track": "main",
+      "reason": "No rated Match: every Match this Agent played was excluded (BYOK, or a pairing below the coverage floor)."
+    }
+  ],
+  "coverage": [
+    {
+      "pairing": [
+        "bot:aggressive",
+        "bot:spacing"
+      ],
+      "matches": 1,
+      "matchesBySide": [
+        1,
+        0
+      ],
+      "mirroredSeeds": 0,
+      "provisional": true,
+      "exclusions": [
+        "insufficient-matches",
+        "insufficient-mirrored-seeds"
+      ]
+    }
+  ]
+}

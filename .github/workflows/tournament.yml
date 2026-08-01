@@ -130,6 +130,30 @@ jobs:
               tournament --config "$CONFIG_PATH"
           fi
 
+      # Story 7.2. `docs/reports` has been in COMMIT_PATHS since 5.3, which
+      # makes a leaderboard committable; it does not make one exist. This step
+      # is what generates it, and without it the published board would be
+      # whatever was last written by hand.
+      #
+      # `if: always()`, and deliberately no secret bound: the command reads the
+      # Command Logs already on disk, plays no Match and resolves no API key, so
+      # it republishes correctly after a segment that died partway -- including
+      # one that died because a key was missing. Its own failure is allowed to
+      # fail the job: a board that silently stopped being regenerated looks
+      # exactly like a board nobody has looked at.
+      #
+      # It runs on a dry run too. The commit step is skipped there, so the files
+      # are written into a workspace that is thrown away -- and rehearsing the
+      # generator is the point of a rehearsal. A dry run still spends no quota:
+      # this step issues no provider call at all.
+      - name: Generate leaderboard
+        if: always()
+        run: |
+          set -uo pipefail
+          node --experimental-strip-types --no-warnings \
+            --import ./packages/cli/bin/register.mjs packages/cli/src/cli.ts \
+            leaderboard --config "$CONFIG_PATH"
+
       # Runs before the commit step and gates it. The CLI already refuses to
       # write a document containing a key; this is the check that does not
       # trust it (AC5, mechanism 4).

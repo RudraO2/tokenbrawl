@@ -146,8 +146,9 @@ export function tracksFor(identities: readonly AgentIdentity[]): ReadonlyMap<str
 }
 
 function corpusSentence(corpus: LoadedCorpus, logDir: string): string {
+  const logs = corpus.matches.length;
   const parts = [
-    `${String(corpus.matches.length)} committed Command Logs from \`${logDir}\``,
+    `${String(logs)} committed Command Log${logs === 1 ? '' : 's'} from \`${logDir}\``,
   ];
   if (corpus.staleConfig.length > 0) {
     parts.push(

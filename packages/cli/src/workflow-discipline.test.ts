@@ -209,6 +209,40 @@ describe('AC2: results are committed back, and the commit is path-based', () => 
   it('commits nothing when the segment produced nothing', () => {
     expect(tournamentSource()).toMatch(/git diff --cached --quiet/);
   });
+
+  it('regenerates the leaderboard before it commits, on every outcome', () => {
+    // Story 7.2. `docs/reports` being staged makes a leaderboard committable;
+    // it does not make one exist. Deleting this step is a one-line, invisible
+    // edit that leaves a stale board published for as long as nobody looks --
+    // and every run stays green, because nothing else in the workflow depends
+    // on it.
+    const source = tournamentSource();
+    expect(source).toMatch(/^\s+- name: Generate leaderboard$/m);
+    expect(source).toMatch(/packages\/cli\/src\/cli\.ts \\\n\s+leaderboard --config "\$CONFIG_PATH"/);
+
+    const generateAt = source.indexOf('- name: Generate leaderboard');
+    const commitAt = source.indexOf('git add -- $COMMIT_PATHS');
+    expect(generateAt).toBeGreaterThan(-1);
+    // A board generated after the commit is a board committed one segment late,
+    // every segment, forever.
+    expect(generateAt).toBeLessThan(commitAt);
+
+    // `if: always()` on the step, so a segment that died partway still
+    // republishes from the logs it did commit.
+    const step = source.slice(generateAt, source.indexOf('- name:', generateAt + 10));
+    expect(step).toMatch(/if: always\(\)/);
+  });
+
+  it('binds no provider secret to the leaderboard step', () => {
+    // It reads committed files and issues no provider call. A secret bound
+    // here would widen the blast radius of the one step that provably has no
+    // use for one -- and the step has to keep working on a run whose segment
+    // failed because a key was missing.
+    const source = tournamentSource();
+    const generateAt = source.indexOf('- name: Generate leaderboard');
+    const step = source.slice(generateAt, source.indexOf('- name:', generateAt + 10));
+    expect(step).not.toMatch(/secrets\./);
+  });
 });
 
 describe('AC3: the commit is the deploy, and there is no deploy hook', () => {
