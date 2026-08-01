@@ -435,6 +435,34 @@ describe('seeking (4.5)', () => {
 
     expect(afterSeek - beforeScrub).toBe(1);
     expect(seen.length - afterSeek).toBe(7);
+
+    // Counting callbacks is not enough, and a mutation proved it: a clock that
+    // skipped a frame after seeking still emitted one index per callback, so a
+    // count-only assertion stayed green while playback ran at double speed.
+    // What AC4 actually claims is that the frames are *consecutive*.
+    expect(seen.slice(afterSeek - 1)).toStrictEqual([40, 41, 42, 43, 44, 45, 46, 47]);
+  });
+
+  it('emits consecutive frames before and after a scrub alike (AC4)', () => {
+    const driver = createDriver();
+    const seen: number[] = [];
+    const clock = createPlaybackClock({
+      frameCount: 90,
+      onFrame: (index) => seen.push(index),
+      requestFrame: driver.requestFrame,
+    });
+
+    clock.start();
+    driver.pump(9);
+    clock.seek(50);
+    driver.pump(9);
+    clock.seek(4);
+    driver.pump(9);
+
+    // Every step is exactly +1 except at the two seeks, which are the only
+    // discontinuities a scrub is allowed to introduce.
+    const jumps = seen.slice(1).map((index, position) => index - seen[position]);
+    expect(jumps.filter((delta) => delta !== 1)).toHaveLength(2);
   });
 
   it('clamps rather than emitting a frame outside the film', () => {

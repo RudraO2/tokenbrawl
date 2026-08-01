@@ -867,6 +867,38 @@ describe('the timeline scrub (4.5)', () => {
     expect(html.match(/tb-reasoning-card/g)?.length).toBeGreaterThanOrEqual(2);
   });
 
+  it('moves both cards to the Decision Point that was seeked to (AC1, AC2)', async () => {
+    // The gap a mutation found: every other case here seeks to a position whose
+    // panel content already matched what the initial render produced, so
+    // deleting the panel refresh from the paint path passed all 245 tests while
+    // leaving the reasoning frozen at frame zero for the whole Match.
+    const { log, sidecar } = await buildDemoBundle();
+    const harness = createHarness(log, {
+      spritesResolve: true,
+      sidecar: {
+        ...sidecar,
+        entries: sidecar.entries.map((entry) => ({
+          ...entry,
+          reasoning: `agent-${String(entry.agentIndex)}-tick-${String(entry.tick)}`,
+        })),
+      },
+    });
+
+    const result = await startup(harness.globals);
+    await result?.dressed;
+
+    seekTo(harness, 0);
+    const atStart = harness.root.html();
+    expect(atStart).toContain('agent-0-tick-0');
+
+    seekTo(harness, 150);
+    const atMiddle = harness.root.html();
+
+    expect(atMiddle).not.toBe(atStart);
+    expect(atMiddle).not.toContain('agent-0-tick-0');
+    expect(atMiddle).toContain('Tick 360');
+  });
+
   it('gives each card its own Agent Decision Point, never the other one', async () => {
     const { log, sidecar } = await buildDemoBundle();
     const harness = createHarness(log, {

@@ -83,7 +83,14 @@ body {
 .tb-arena {
   display: flex;
   flex-wrap: wrap;
-  align-items: stretch;
+  /*
+   * `flex-start`, not `stretch`. Story 4.5 put two reasoning cards in the
+   * panel, which made it much taller than the stage -- and a stretched stage
+   * keeps its canvas at its own aspect ratio, so the extra height became a
+   * large empty black box under the fight. Each column now takes the height it
+   * needs.
+   */
+  align-items: flex-start;
   gap: var(--tb-space-4);
   margin-bottom: var(--tb-space-4);
 }
@@ -179,9 +186,16 @@ body {
  * is possible without moving the pointer. Two columns while there is room, one
  * below the other when there is not.
  */
+/*
+ * The minimum is 200px rather than 240px so that two cards fit *inside the
+ * panel column* at ordinary desktop widths -- at 240 they wrapped to one on
+ * top of the other, and AC2 asks for side by side. Below about 430px of panel
+ * they stack, which is the right answer on a phone and the reason this is
+ * `auto-fit` rather than a hard two-column rule.
+ */
 .tb-reasoning-pair {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
   gap: var(--tb-space-2);
 }
 

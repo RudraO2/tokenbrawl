@@ -745,8 +745,11 @@ export function renderApp(root: MountPoint, log: CommandLog, view: HostView): Mo
    * let go.
    */
   timeline.addEventListener('input', () => {
+    // `seek` emits the frame, which reaches `paint` and therefore `onPaint`,
+    // which redraws the panel and the readout. Only the announcement needs
+    // asking for here: it is deliberately not on the paint path, because a
+    // live region that fired once per frame would be worse than silence.
     mounted.clock.seek(Number.parseInt(timelineNode.value ?? '0', 10));
-    renderPanel();
     announceSelection();
   });
 
