@@ -25,13 +25,16 @@ import type { HttpFetch, Sleep } from '../../providers/src/http';
 
 export const USAGE = `tokenbrawl -- run Tokenbrawl Matches from the command line
 
-  match      --config <path> --seed <n> --agents <idA>,<idB> [--out <dir>]
-  tournament --config <path> [--out <dir>]
+  match      --config <path> --seed <n> --agents <idA>,<idB> [--out <dir>] [--dry-run]
+  tournament --config <path> [--out <dir>] [--dry-run]
 
   --config   path to a JSON run config (required)
   --seed     the seed for a single Match (match only)
   --agents   two comma-separated agent ids from the config (match only)
   --out      output directory override (default: the config's outputDir, else replays/)
+  --dry-run  report what would run and stop. Loads the config, resolves every
+             key and computes the outstanding set, but issues no provider call
+             and writes no log. Spends no quota.
 
 Provider keys are read from the environment only, via each Deployment's
 "apiKeyEnv" name. They are never read from the config file, never written to
@@ -66,6 +69,20 @@ class UsageError extends Error {}
 /** `--help` and `-h` are commands wearing a flag's clothes, and they are what people type. */
 const HELP_TOKENS: readonly string[] = ['help', '--help', '-h'];
 
+/**
+ * Options that are present-or-absent rather than `--flag value`.
+ *
+ * A closed literal set rather than a general rule, because "any flag may omit
+ * its value" would turn a mistyped `--config` into a silent empty string
+ * instead of the refusal `parseArgs` exists to give. A flag named here never
+ * consumes the following token, so `--dry-run --config x` parses as both
+ * options rather than as `--dry-run` swallowing `--config`.
+ *
+ * `assertKnownOptions` still applies: `--dry-run` on a command whose allow-list
+ * omits it is an error, not a no-op.
+ */
+export const BOOLEAN_FLAGS: readonly string[] = ['dry-run'];
+
 export function parseArgs(argv: readonly string[]): ParsedArgs {
   if (argv.length === 0) {
     throw new UsageError('No command given.');
@@ -94,6 +111,10 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
     }
     if (name in options) {
       throw new UsageError(`Option --${name} was given twice.`);
+    }
+    if (BOOLEAN_FLAGS.includes(name)) {
+      options[name] = 'true';
+      continue;
     }
     const value = rest[index + 1];
     if (value === undefined || value.startsWith('--')) {
@@ -187,7 +208,11 @@ async function runCommand(
   adoptReporter: (guarded: CliIo) => void,
 ): Promise<number> {
   const isTournament = parsed.command === 'tournament';
-  assertKnownOptions(parsed.options, isTournament ? ['config', 'out'] : ['config', 'out', 'seed', 'agents']);
+  assertKnownOptions(
+    parsed.options,
+    isTournament ? ['config', 'out', 'dry-run'] : ['config', 'out', 'seed', 'agents', 'dry-run'],
+  );
+  const isDryRun = parsed.options['dry-run'] !== undefined;
 
   const loaded = await loadRunConfig(io, requireOption(parsed.options, 'config'));
   const config = withOutputOverride(loaded, parsed.options['out']);
@@ -235,6 +260,26 @@ async function runCommand(
   // the same question a tournament asks about each of its Matches, and
   // answering it differently for a plan of one would mean two resume rules.
   const outstanding = await outstandingMatches(planned, guarded, config.outputDir);
+
+  // The dry run stops exactly here: everything above -- config, keys, guard,
+  // warnings, plan, resume -- has already happened, and the only thing skipped
+  // is the provider call. That is what makes it a rehearsal of the schedule
+  // rather than a cheaper thing wearing the same name (D2). A missing key or a
+  // config that no longer parses has failed the run before this line.
+  if (isDryRun) {
+    for (const match of outstanding) {
+      guarded.out(`would run  ${match.matchId}  seed ${String(match.seed)}  ${match.agentIds.join(' vs ')}`);
+    }
+    summarise(guarded, `${parsed.command} (dry run)`, {
+      planned: planned.length,
+      skipped: planned.length - outstanding.length,
+      completed: 0,
+      written: Object.freeze([]),
+      parked: Object.freeze([]),
+    });
+    return EXIT_OK;
+  }
+
   const summary = await runPlannedMatches(outstanding, config, agentDeps, planned.length - outstanding.length);
 
   summarise(guarded, parsed.command, summary);

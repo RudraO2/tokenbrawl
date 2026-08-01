@@ -1,0 +1,151 @@
+name: Tournament
+
+# Story 5.3 / FR-20. One SEGMENT of the tournament per weekday; one tournament
+# per week. The five-day spread is not computed here and there is no scheduler
+# in this file -- it is what happens when the same resumable command runs five
+# times against the same output directory. Segment N+1 learns what segment N
+# finished by listing the Command Logs segment N committed (AD-9).
+#
+# Nothing in this workflow may assume it completes the tournament. A segment
+# ends when the outstanding set is empty, when every provider's daily quota is
+# spent and its Deployments are parked, or when the job times out -- and the
+# next segment cannot tell which of the three happened.
+
+on:
+  schedule:
+    # 03:00 UTC, Monday through Friday. Five segments, because ~4,500 calls per
+    # Deployment against a 1,000-RPD ceiling is 4.5 days.
+    - cron: '0 3 * * 1-5'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Rehearse the schedule without spending quota'
+        type: boolean
+        default: true
+      config:
+        description: 'Path to the run config'
+        type: string
+        default: configs/tournament.config.json
+
+# The commit back to the default branch is the whole point (AC2), and it is
+# what triggers the static redeploy (AC3).
+permissions:
+  contents: write
+
+# Load-bearing, not tidiness. Two segments running at once would double-spend
+# the daily quota this schedule exists to conserve, and would race each other's
+# push -- the loser failing on a non-fast-forward *after* having spent its
+# quota. Queue, never cancel: a cancelled segment loses the Matches it has run
+# but not yet committed.
+concurrency:
+  group: tournament
+  cancel-in-progress: false
+
+jobs:
+  tournament:
+    runs-on: ubuntu-latest
+    # 5.5h, inside GitHub's 6h job cap with margin. The timeout is an ordinary
+    # end to a segment, not a failure.
+    timeout-minutes: 330
+
+    env:
+      DRY_RUN: ${{ inputs.dry_run == true }}
+      CONFIG_PATH: ${{ inputs.config || 'configs/tournament.config.json' }}
+      # Both paths are staged by the commit step. `docs/reports` is listed
+      # deliberately though nothing writes a leaderboard there yet: Story 7.2
+      # owns rating computation and leaderboard generation, and a generator it
+      # lands in either path is committed by this workflow with no edit here.
+      COMMIT_PATHS: apps/web/public/replays docs/reports
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm ci
+
+      # `continue-on-error` so that a segment which dies partway still reaches
+      # the commit step: the logs it already wrote are completed Matches, and
+      # discarding them would throw away real provider quota. The job is failed
+      # explicitly by the last step instead.
+      - name: Run tournament segment
+        id: tournament
+        continue-on-error: true
+        env:
+          # The only place a secret appears. Bound to the process environment,
+          # never interpolated into the script below -- an `echo`, a `set -x`,
+          # or a failing command's own error text would otherwise print it
+          # (AC5, mechanism 1).
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          CEREBRAS_API_KEY: ${{ secrets.CEREBRAS_API_KEY }}
+          GOOGLE_AI_STUDIO_API_KEY: ${{ secrets.GOOGLE_AI_STUDIO_API_KEY }}
+        run: |
+          set -uo pipefail
+          if [ "$DRY_RUN" = "true" ]; then
+            npm run tokenbrawl -w packages/cli -- tournament --config "$CONFIG_PATH" --dry-run
+          else
+            npm run tokenbrawl -w packages/cli -- tournament --config "$CONFIG_PATH"
+          fi
+
+      # Runs before the commit step and gates it. The CLI already refuses to
+      # write a document containing a key; this is the check that does not
+      # trust it (AC5, mechanism 4).
+      - name: Assert no secret leaked into the tree
+        id: leak
+        if: always()
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          CEREBRAS_API_KEY: ${{ secrets.CEREBRAS_API_KEY }}
+          GOOGLE_AI_STUDIO_API_KEY: ${{ secrets.GOOGLE_AI_STUDIO_API_KEY }}
+        run: |
+          bash scripts/assert-no-secret-leak.sh \
+            GROQ_API_KEY CEREBRAS_API_KEY GOOGLE_AI_STUDIO_API_KEY
+
+      # Path-based rather than artifact-based, so Story 7.2's leaderboard is
+      # picked up without an edit here. No deploy step: a commit on the default
+      # branch triggers the Vercel redeploy through Vercel's own git
+      # integration (docs/ARCHITECTURE.md), which is exactly what AC3 means by
+      # "no separate deploy hook is needed".
+      - name: Commit results
+        if: >-
+          always()
+          && steps.leak.outcome == 'success'
+          && env.DRY_RUN != 'true'
+          && github.ref == 'refs/heads/main'
+        run: |
+          set -euo pipefail
+          git config user.name  'tokenbrawl-tournament[bot]'
+          git config user.email 'tokenbrawl-tournament@users.noreply.github.com'
+
+          git add -- $COMMIT_PATHS
+
+          if git diff --cached --quiet; then
+            echo 'No new Command Logs this segment; nothing to commit.'
+            exit 0
+          fi
+
+          git commit -m "tournament: results from segment $(date -u +%Y-%m-%d)"
+
+          # The concurrency group makes a racing segment impossible, but a
+          # human push during a 5-hour segment is not. Rebase rather than
+          # merge: these commits are append-only artifacts with no conflicts
+          # to resolve, and a merge commit here would be noise on the default
+          # branch forever.
+          git pull --rebase origin "${GITHUB_REF_NAME}"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
+
+      # `continue-on-error` above swallowed the segment's exit code so the
+      # commit could happen. Surface it here, or a permanently broken
+      # tournament would report five green runs a week.
+      - name: Fail if the segment errored
+        if: always() && steps.tournament.outcome == 'failure'
+        run: |
+          echo 'The tournament segment exited non-zero. Any Matches it completed' >&2
+          echo 'were still committed above; the outstanding set is unchanged for' >&2
+          echo 'the next segment.' >&2
+          exit 1

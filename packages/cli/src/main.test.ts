@@ -554,3 +554,84 @@ describe('AC3 (Story 5.2): parking a Deployment past its daily quota', () => {
     expect(memory.stdout.at(-1)).toContain('1 run, 2 already committed, 3 planned');
   });
 });
+
+describe('Story 5.3, AC1/AC4: --dry-run rehearses the schedule without spending quota', () => {
+  it('parses as a valueless flag and does not swallow the next option', () => {
+    // The whole risk of teaching the parser a boolean flag: a flag that still
+    // consumed a token would eat `--config` and then fail on a missing one.
+    expect(parseArgs(['tournament', '--dry-run', '--config', 'run.json'])).toStrictEqual({
+      command: 'tournament',
+      options: { 'dry-run': 'true', config: 'run.json' },
+    });
+    expect(parseArgs(['tournament', '--config', 'run.json', '--dry-run'])).toStrictEqual({
+      command: 'tournament',
+      options: { config: 'run.json', 'dry-run': 'true' },
+    });
+  });
+
+  it('is still subject to the repeated-option and unknown-option rules', () => {
+    expect(() => parseArgs(['tournament', '--dry-run', '--dry-run'])).toThrow(/given twice/);
+  });
+
+  it('reports the whole outstanding plan and writes nothing', async () => {
+    const memory = io();
+    const code = await main(['tournament', '--config', 'run.json', '--dry-run'], memory);
+
+    expect(code).toBe(EXIT_OK);
+    // 3 agents round-robin = 3 pairings, over 3 seeds = 9 Matches.
+    expect(memory.stdout.filter((line) => line.startsWith('would run'))).toHaveLength(9);
+    expect(memory.stdout.at(-1)).toContain('tournament (dry run): 0 run, 0 already committed, 9 planned');
+    expect(logsIn(memory)).toStrictEqual([]);
+  });
+
+  it('issues no provider call at all', async () => {
+    const memory = createMemoryIo({ files: { 'run.json': DEPLOYMENT_CONFIG }, env: { GROQ_API_KEY: KEY } });
+    const explode: HttpFetch = () => {
+      throw new Error('a dry run must not reach a provider');
+    };
+
+    const code = await main(['tournament', '--config', 'run.json', '--dry-run'], memory, { fetch: explode });
+
+    expect(code).toBe(EXIT_OK);
+    expect(logsIn(memory)).toStrictEqual([]);
+  });
+
+  it('resolves every key first, so a missing secret fails the rehearsal (D2)', async () => {
+    // The reason a dry run is worth running in CI at all: a repository whose
+    // secret was never added fails here, at second zero, rather than at 03:00
+    // the next morning one day of quota later.
+    const memory = createMemoryIo({ files: { 'run.json': DEPLOYMENT_CONFIG } });
+
+    const code = await main(['tournament', '--config', 'run.json', '--dry-run'], memory);
+
+    expect(code).not.toBe(EXIT_OK);
+    expect(memory.stderr.join('\n')).toContain('GROQ_API_KEY');
+  });
+
+  it('sees what previous segments committed, and reports nothing left to run', async () => {
+    const memory = io();
+    await main(['tournament', '--config', 'run.json'], memory);
+    expect(logsIn(memory)).toHaveLength(9);
+    memory.stdout.length = 0;
+
+    // This is a segment starting the morning after a segment that finished:
+    // the resumable state is the committed logs and nothing else.
+    const code = await main(['tournament', '--config', 'run.json', '--dry-run'], memory);
+
+    expect(code).toBe(EXIT_OK);
+    expect(memory.stdout.filter((line) => line.startsWith('would run'))).toStrictEqual([]);
+    expect(memory.stdout.at(-1)).toContain('tournament (dry run): 0 run, 9 already committed, 9 planned');
+  });
+
+  it('rehearses a single match too', async () => {
+    const memory = io();
+    const code = await main(
+      ['match', '--config', 'run.json', '--seed', '4101', '--agents', 'bot:aggressive,bot:spacing', '--dry-run'],
+      memory,
+    );
+
+    expect(code).toBe(EXIT_OK);
+    expect(memory.stdout.filter((line) => line.startsWith('would run'))).toHaveLength(1);
+    expect(logsIn(memory)).toStrictEqual([]);
+  });
+});

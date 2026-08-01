@@ -1,0 +1,73 @@
+{
+  "_comment": [
+    "The scheduled tournament roster (Story 5.3, FR-20).",
+    "",
+    "Shape is FR-20's arithmetic, not taste: 3 Deployments + 3 Baseline Bots = 6 Agents,",
+    "round-robin = 15 pairings per seed, over 30 seeds = 450 Matches, of which each",
+    "Deployment plays 150. At ~30 Decision Points per Match that is ~4,500 calls per",
+    "Deployment per tournament -- the number FR-20 states -- against the 1,000-RPD",
+    "ceiling that makes the run span up to five days.",
+    "",
+    "One RANKED Deployment per provider. Two would contend for a single daily quota,",
+    "and `validateTournamentConfig` warns about exactly that; `main.ts` prints the",
+    "warning to stderr rather than swallowing it.",
+    "",
+    "Models are the highest-RPD row in each provider's block of",
+    "`packages/providers/src/free-tier.config.json`. Read that file before editing a",
+    "model name here: an endpoint absent from its allowlist fails configuration",
+    "validation (INV-8), and Google bakes the model into the URL path, so each Google",
+    "model is its own allowlist entry.",
+    "",
+    "`seedBase` MUST NOT change between segments of a running tournament. The plan is a",
+    "pure function of this config, so editing it re-plans 450 different matchIds and the",
+    "resume would never converge -- every segment would start from zero forever.",
+    "",
+    "`apiKeyEnv` names an environment variable. It is never a key, and there is no field",
+    "here that could hold one. In CI these names are bound from Actions secrets by",
+    "`.github/workflows/tournament.yml`."
+  ],
+  "seedBase": 4101,
+  "seedCount": 30,
+  "outputDir": "apps/web/public/replays",
+  "agents": [
+    {
+      "id": "groq-llama-3.3-70b",
+      "kind": "deployment",
+      "provider": "groq",
+      "model": "llama-3.3-70b-versatile",
+      "apiKeyEnv": "GROQ_API_KEY",
+      "ranked": true
+    },
+    {
+      "id": "cerebras-zai-glm-4.7",
+      "kind": "deployment",
+      "provider": "cerebras",
+      "model": "zai-glm-4.7",
+      "apiKeyEnv": "CEREBRAS_API_KEY",
+      "ranked": true
+    },
+    {
+      "id": "google-gemma-4-31b",
+      "kind": "deployment",
+      "provider": "google-ai-studio",
+      "model": "gemma-4-31b",
+      "apiKeyEnv": "GOOGLE_AI_STUDIO_API_KEY",
+      "ranked": true
+    },
+    {
+      "id": "bot-random",
+      "kind": "bot",
+      "bot": "random"
+    },
+    {
+      "id": "bot-aggressive",
+      "kind": "bot",
+      "bot": "aggressive"
+    },
+    {
+      "id": "bot-spacing",
+      "kind": "bot",
+      "bot": "spacing"
+    }
+  ]
+}
