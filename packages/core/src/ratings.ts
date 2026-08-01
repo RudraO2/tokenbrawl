@@ -132,6 +132,25 @@ export interface Leaderboard {
   readonly coverage: readonly PairingCoverage[];
   readonly matches: number;
   readonly ratedMatches: number;
+  /**
+   * The `matchId` of every Match that contributed to a rating, sorted.
+   * `length === ratedMatches`, asserted by the tests.
+   *
+   * Sorted rather than left in corpus order, and that is not cosmetic: AD-9
+   * makes the resumable state *the set of committed logs*, with no canonical
+   * sequence, so a field carrying listing order would make this whole object --
+   * and the artefact built from it -- depend on a directory listing. Every
+   * other ordering decision in this file is made the same way and for the same
+   * reason.
+   *
+   * Story 7-3 needs it: a behavioural metric printed beside a rating has to
+   * describe the same Matches the rating came from, or the row is two answers
+   * to two different questions side by side. Naming them here rather than
+   * leaving the caller to subtract `excludedMatches` also inherits AD-11 for
+   * free -- a BYOK Match is excluded from the rating, so it is excluded from
+   * the metrics.
+   */
+  readonly ratedMatchIds: readonly string[];
   readonly excludedMatches: readonly MatchExclusion[];
   readonly bootstrap: {
     readonly resamples: number;
@@ -337,7 +356,7 @@ export function computeLeaderboard(params: LeaderboardParams): Leaderboard {
   );
 
   // --- Pass 3: score every rated Match from both Agents' points of view. ---
-  let ratedMatches = 0;
+  const ratedMatchIds: string[] = [];
 
   for (const match of eligible) {
     const first = remember(match.agents[0]);
@@ -365,7 +384,7 @@ export function computeLeaderboard(params: LeaderboardParams): Leaderboard {
       continue;
     }
 
-    ratedMatches += 1;
+    ratedMatchIds.push(match.matchId);
 
     const side0 = side0Score(match.outcome);
     const scores: readonly [number, number] = [side0, WIN_BASIS_POINTS - side0];
@@ -439,7 +458,8 @@ export function computeLeaderboard(params: LeaderboardParams): Leaderboard {
     unrated: Object.freeze(unrated) as readonly UnratedAgent[],
     coverage,
     matches: matches.length,
-    ratedMatches,
+    ratedMatches: ratedMatchIds.length,
+    ratedMatchIds: Object.freeze([...ratedMatchIds].sort(compareIds)) as readonly string[],
     excludedMatches: Object.freeze(excluded) as readonly MatchExclusion[],
     bootstrap: Object.freeze({
       resamples,

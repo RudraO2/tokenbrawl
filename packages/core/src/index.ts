@@ -147,12 +147,25 @@ export type {
   UnratedAgent,
 } from './ratings';
 
-export { buildLeaderboardReport, renderLeaderboardMarkdown } from './ratings-report';
+export { NOT_REPORTED, buildLeaderboardReport, renderLeaderboardMarkdown } from './ratings-report';
 export type {
   LeaderboardReport,
   LeaderboardReportMeta,
+  ReportBehaviourRow,
   ReportRatingRow,
 } from './ratings-report';
+
+// ---------------------------------------------------------------------------
+// Story 7.3: behavioural metrics -- how a Deployment spent its thinking, with
+// "not reported" kept distinct from zero all the way to the reader (INV-5).
+// ---------------------------------------------------------------------------
+
+export {
+  computeBehaviouralMetrics,
+  isRateLimitedResponse,
+  unreportedBehaviour,
+} from './behavioural-metrics';
+export type { AgentBehaviour } from './behavioural-metrics';
 
 export {
   BASIS_POINTS_SCALE,

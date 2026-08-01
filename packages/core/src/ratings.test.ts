@@ -541,6 +541,24 @@ describe('nothing falls out of the accounting', () => {
     expect(leaderboard.ratedMatches + leaderboard.excludedMatches.length).toBe(matches.length);
   });
 
+  it('names every rated Match, and no excluded one (Story 7-3 reads this)', () => {
+    // The behavioural metrics published beside a rating are computed over
+    // exactly these Matches, so a `matchId` leaking in from the excluded side
+    // would put a BYOK Match's token counts under a tournament row.
+    const rated = new Set(leaderboard.ratedMatchIds);
+    expect(rated.size).toBe(leaderboard.ratedMatchIds.length);
+    expect(leaderboard.ratedMatchIds.length).toBe(leaderboard.ratedMatches);
+    for (const excluded of leaderboard.excludedMatches) {
+      expect(rated.has(excluded.matchId)).toBe(false);
+    }
+    for (const match of matches) {
+      expect(
+        rated.has(match.matchId) ||
+          leaderboard.excludedMatches.some((entry) => entry.matchId === match.matchId),
+      ).toBe(true);
+    }
+  });
+
   it('gives every excluded Match a stated reason', () => {
     for (const excluded of leaderboard.excludedMatches) {
       expect(excluded.exclusions.length).toBeGreaterThan(0);

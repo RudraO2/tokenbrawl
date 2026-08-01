@@ -1,5 +1,6 @@
 import type { AgentIdentity } from '@tokenbrawl/contracts';
 import { describe, expect, it } from 'vitest';
+import { computeBehaviouralMetrics } from './behavioural-metrics';
 import { computeLeaderboard, type LeaderboardMatch, type RatingTrack } from './ratings';
 import {
   buildLeaderboardReport,
@@ -258,5 +259,228 @@ describe('the JSON artefact', () => {
 
   it('round-trips through JSON unchanged, so the committed bytes are the object', () => {
     expect(JSON.parse(JSON.stringify(report))).toStrictEqual(report);
+  });
+});
+
+/**
+ * Story 7-3: behaviour beside skill.
+ *
+ * AC2 and AC4 are claims about what the published document says, so they are
+ * tested against the rendered Markdown rather than against the JSON. AC3's
+ * `null`-versus-zero rule is `behavioural-metrics.test.ts`'s subject at the
+ * arithmetic level; what is pinned here is that the renderer prints the words.
+ */
+
+describe('behavioural metrics ride beside the ratings (7-3, AC1)', () => {
+  const behaviour = computeBehaviouralMetrics([
+    {
+      schemaVersion: '1.0.0',
+      matchId: 'spacing-aware-unprobed-0-a',
+      environment: { id: 'fighter-1v1', version: '1.0.0' },
+      seed: 0,
+      configHash: 'abc123',
+      agents: [spacing, unprobed],
+      decisions: [
+        { tick: 0, agentIndex: 0, action: 'advance' },
+        {
+          tick: 0,
+          agentIndex: 1,
+          action: 'attack',
+          tokensSpent: 300,
+          reasoningTokens: 90,
+          bankRemaining: 40,
+          reflexMode: false,
+        },
+        {
+          tick: 1,
+          agentIndex: 1,
+          action: 'stand',
+          tokensSpent: 100,
+          reasoningTokens: 10,
+          bankRemaining: 0,
+          reflexMode: false,
+          parseFailure: true,
+          rawResponse: 'I would like to attack.',
+        },
+      ],
+      result: { outcome: 'p1', endTick: 2, endReason: 'ko', healthRemaining: [10, 0] },
+      finalStateHash: 'final',
+    },
+  ]);
+
+  const withBehaviour = buildLeaderboardReport(leaderboard, META, behaviour);
+  const rendered = renderLeaderboardMarkdown(withBehaviour);
+
+  /**
+   * The behavioural section only. A rating row and a behaviour row both begin
+   * `| <agent> | <kind> |`, so a document-wide search finds the wrong one --
+   * which is itself worth knowing, and is why the behaviour header says
+   * `Entrant` rather than `Agent`.
+   */
+  const behaviourSection = rendered.slice(rendered.indexOf('## How the tokens were spent'));
+
+  function behaviourRow(agent: string): string {
+    const line = behaviourSection
+      .split('\n')
+      .find((entry) => entry.startsWith(`| ${agent} |`));
+    if (line === undefined) {
+      throw new Error(`no behaviour row rendered for ${agent}`);
+    }
+    return line;
+  }
+
+  it('emits one behaviour row per rated Agent, in table order', () => {
+    expect(withBehaviour.behaviour.map((row) => row.agent)).toStrictEqual([
+      ...leaderboard.main.map((row) => row.agent),
+      ...leaderboard.reflex.map((row) => row.agent),
+    ]);
+  });
+
+  it('carries the measured figures through for the Agent the corpus covers', () => {
+    const row = withBehaviour.behaviour.find((entry) => entry.agent === unprobed.id);
+    expect(row?.tokensPerMatch).toBe(400);
+    expect(row?.reasoningShareBasisPoints).toBe(2500);
+    expect(row?.parseFailureRateBasisPoints).toBe(5000);
+    expect(row?.bankExhaustionRateBasisPoints).toBe(10000);
+    expect(row?.track).toBe('reflex');
+  });
+
+  it('renders every one of the four metrics as its own column', () => {
+    const header = rendered
+      .split('\n')
+      .find((line) => line.startsWith('| Entrant | Kind | Track |'));
+    expect(header).toContain('Tokens / Match');
+    expect(header).toContain('Reasoning share');
+    expect(header).toContain('Parse failures');
+    expect(header).toContain('Bank exhausted');
+  });
+
+  it('gives an Agent no log covers a not-reported row rather than a row of zeroes (AC3)', () => {
+    const row = withBehaviour.behaviour.find((entry) => entry.agent === aggressive.id);
+    expect(row?.tokensPerMatch).toBeNull();
+    expect(row?.reasoningShareBasisPoints).toBeNull();
+    expect(row?.bankExhaustionRateBasisPoints).toBeNull();
+
+    const line = behaviourRow(aggressive.id);
+    expect(line.split('|').filter((cell) => cell.trim() === 'not reported')).toHaveLength(3);
+  });
+
+  it('never writes a not-reported quantity as a bare zero anywhere in the section', () => {
+    // The mutation this guards: swapping `null` for `0` in the renderer would
+    // publish an unmeasured entrant as a frugal one, and every other assertion
+    // in this file would still pass.
+    expect(behaviourRow(aggressive.id)).not.toMatch(/\|\s*0\s*\|/);
+  });
+
+  it('keeps the behaviour table out of the rating-table shape, so it needs no CI column', () => {
+    // `| Agent | Kind |` is how every check in this repo recognises a table
+    // that owes the reader an interval. This one is not that table.
+    expect(rendered).not.toContain('| Agent | Kind | Track |');
+  });
+
+  it('states the denominator behind the rate, and reports a measured zero as zero', () => {
+    const line = behaviourRow(unprobed.id);
+    expect(line).toContain('(1 of 2)');
+    // Nothing was rate-limited, and that is a measured zero, not a silence.
+    expect(line).toContain('0.0000 (0)');
+  });
+});
+
+describe('a Deployment beaten by a Baseline Bot is the headline (7-3, AC2)', () => {
+  const loser = deployment('groq:loser');
+  const beaten = computeLeaderboard({
+    matches: [
+      ...pairing(spacing, aggressive, 15, firstWins),
+      ...pairing(spacing, loser, 15, firstWins),
+      ...pairing(aggressive, loser, 15, firstWins),
+    ],
+    tracks: tracksFor([
+      [spacing, 'main'],
+      [aggressive, 'main'],
+      [loser, 'main'],
+    ]),
+    resamples: RESAMPLES,
+    seed: SEED,
+  });
+  const beatenReport = buildLeaderboardReport(beaten, META);
+  const beatenMarkdown = renderLeaderboardMarkdown(beatenReport);
+
+  it('names the bot and how many Deployments it outranks', () => {
+    expect(beatenReport.headline).toContain('spacing-aware');
+    expect(beatenReport.headline).toContain('1 of 1 Deployment');
+  });
+
+  it('prints it above both tables, not as a footnote', () => {
+    const headlineAt = beatenMarkdown.indexOf('outranks');
+    const mainAt = beatenMarkdown.indexOf('## Main leaderboard');
+    expect(headlineAt).toBeGreaterThan(-1);
+    expect(headlineAt).toBeLessThan(mainAt);
+  });
+
+  it('still publishes the beaten Deployment as an ordinary row (not hidden, not filtered)', () => {
+    const row = beatenMarkdown
+      .split('\n')
+      .find((line) => line.startsWith(`| ${loser.id} | deployment |`));
+    expect(row).toBeDefined();
+    // With its interval, like every other rating in this repo.
+    expect(row).toMatch(/\d+\.\d{4} – \d+\.\d{4}/);
+    expect(beaten.main.map((entry) => entry.agent)).toContain(loser.id);
+  });
+
+  it('is null, and renders nothing, when no bot outranks a Deployment', () => {
+    // The default corpus has no Deployment on the main board at all, so there
+    // is nothing for a bot to outrank and no sentence to invent.
+    expect(report.headline).toBeNull();
+    expect(markdown).not.toContain('outranks');
+  });
+
+  it('never compares across tracks, which would be the claim INV-5 forbids', () => {
+    const crossTrack = computeLeaderboard({
+      matches: [
+        ...pairing(spacing, aggressive, 15, firstWins),
+        ...pairing(spacing, unprobed, 15, firstWins),
+        ...pairing(aggressive, unprobed, 15, firstWins),
+      ],
+      tracks: tracksFor([
+        [spacing, 'main'],
+        [aggressive, 'main'],
+        [unprobed, 'reflex'],
+      ]),
+      resamples: RESAMPLES,
+      seed: SEED,
+    });
+    // Both bots sit on the main board with no Deployment beside them; the only
+    // Deployment is Reflex Track with no bot beside it.
+    expect(buildLeaderboardReport(crossTrack, META).headline).toBeNull();
+  });
+});
+
+describe('the parse-failure rate is framed as a measurement (7-3, AC4)', () => {
+  const framed = renderLeaderboardMarkdown(buildLeaderboardReport(leaderboard, META));
+
+  it('says what the number is, and what it is not', () => {
+    expect(framed).toContain('is a *measurement*');
+    expect(framed).toContain('not a fault to be driven down');
+  });
+
+  it('uses no defect vocabulary anywhere in the document', () => {
+    // A later story that turns this into a KPI goes red here rather than
+    // shipping a benchmark that punishes a model for being measured.
+    for (const word of [
+      'target',
+      'acceptable',
+      'should be reduced',
+      'budget',
+      'regression',
+      'sla',
+      'threshold',
+      'tolerance',
+    ]) {
+      expect(framed.toLowerCase()).not.toContain(word);
+    }
+  });
+
+  it('publishes the rate-limited share separately, so the total never overstates the model', () => {
+    expect(framed).toContain('the provider refused rather than the model fumbled');
   });
 });
