@@ -256,6 +256,29 @@ describe('the committed tournament config is the one FR-20 describes', () => {
     expect(config.outputDir).toBe('apps/web/public/replays');
   });
 
+  it('writes into a directory the commit step actually stages', () => {
+    // The degenerate configuration this closes is silent and total: an
+    // `outputDir` outside COMMIT_PATHS runs a full segment, spends a real
+    // day of provider quota, writes every log -- and then stages none of
+    // them. The next segment finds nothing committed, plans the identical
+    // set, and does it again. Forever, green every time.
+    //
+    // Asserted as a relationship rather than as two matching literals,
+    // because the literal version passes the moment someone edits one side.
+    const match = /COMMIT_PATHS:\s*(.+)/.exec(tournamentSource());
+    expect(match).not.toBeNull();
+    const staged = (match as RegExpExecArray)[1].trim().split(/\s+/);
+    expect(staged.some((path) => config.outputDir === path || config.outputDir.startsWith(`${path}/`))).toBe(true);
+  });
+
+  it('is the config the workflow actually defaults to running', () => {
+    // Every assertion in this block validates the file at TOURNAMENT_CONFIG_PATH.
+    // If the workflow's default input pointed somewhere else, all of them
+    // would be checking a document nothing runs.
+    expect(tournamentSource()).toMatch(/default: configs\/tournament\.config\.json$/m);
+    expect(tournamentSource()).toMatch(/CONFIG_PATH:.*'configs\/tournament\.config\.json'/);
+  });
+
   it('has every apiKeyEnv it names bound from an Actions secret by the workflow', () => {
     // The check that ties config, workflow and secrets together. Adding a
     // fourth Deployment without adding its secret binding is otherwise a
