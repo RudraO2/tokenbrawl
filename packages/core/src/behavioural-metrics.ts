@@ -21,9 +21,10 @@
  * A Baseline Bot is three-quarters not-reported by construction: it consumes
  * nothing, so `match-runner.ts` omits all four banking fields rather than
  * writing zeroes, and "cannot consume" stays distinguishable from "consumed
- * nothing". The parse-failure rate is the one metric that is never `null` --
- * a Decision Point either yielded a legal Action or it did not, and that is
- * observable without the provider's cooperation.
+ * nothing". The parse-failure rate is the metric a silent provider cannot
+ * suppress -- a Decision Point either yielded a legal Action or it did not,
+ * which is observable without the provider's cooperation -- so it is `null`
+ * only when the corpus recorded no Decision Point for that Agent at all.
  *
  * ## Integer arithmetic only
  *
@@ -93,10 +94,10 @@ export interface AgentBehaviour {
  * Read off the bodies this repo has actually recorded: Groq and Cerebras send
  * OpenAI-shaped `error.code: "rate_limit_exceeded"`, Google sends
  * `error.status: "RESOURCE_EXHAUSTED"`, and an HTTP status echoed into the body
- * is `429`. `packages/providers/src/behavioural-metrics.test.ts` runs its own
- * recorded fixtures through the recogniser below, so a provider vocabulary this
- * list does not know about fails there rather than silently inflating a
- * grammar-failure rate here.
+ * is `429`. `packages/providers/src/rate-limit-recognition.test.ts` runs each
+ * adapter's own recorded refusal through the recogniser below, so a provider
+ * vocabulary this list does not know about fails there rather than silently
+ * inflating a grammar-failure rate here.
  */
 const RATE_LIMIT_CODES: readonly string[] = [
   'rate_limit_exceeded',
@@ -293,6 +294,23 @@ export function computeBehaviouralMetrics(
   logs: readonly CommandLog[],
 ): readonly AgentBehaviour[] {
   const accumulators = new Map<string, Accumulator>();
+
+  // One Match, one contribution, for the reason `computeLeaderboard` refuses a
+  // duplicate `matchId`: AD-8 derives that id from (environment, seed,
+  // configHash, agent ids), so two documents carrying one is the same Match
+  // twice. Here it would double a token total and halve a Match-denominated
+  // rate. The two functions are called together today, but this one is exported
+  // on its own, and a guard that lives only in the caller is a guard the next
+  // caller does not get.
+  const identifiers = new Set<string>();
+  for (const log of logs) {
+    if (identifiers.has(log.matchId)) {
+      throw new Error(
+        `computeBehaviouralMetrics: matchId "${log.matchId}" appears twice. One Match may contribute to a metric once.`,
+      );
+    }
+    identifiers.add(log.matchId);
+  }
 
   for (const log of logs) {
     // Per-Match state, so "how many Matches exhausted the bank" is a count of

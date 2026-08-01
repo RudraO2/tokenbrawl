@@ -362,6 +362,11 @@ describe('the corpus as a whole', () => {
     expect(() => computeBehaviouralMetrics(logs)).toThrow(/One id is one entrant/);
   });
 
+  it('refuses the same matchId twice, which would double every count', () => {
+    const one = log('m1', [deployment('d1'), bot('b1')], [spend(0, 0)]);
+    expect(() => computeBehaviouralMetrics([one, { ...one }])).toThrow(/appears twice/);
+  });
+
   it('refuses a Match that pairs an Agent with itself', () => {
     const logs = [log('m1', [deployment('d1'), deployment('d1')], [spend(0, 0)])];
 

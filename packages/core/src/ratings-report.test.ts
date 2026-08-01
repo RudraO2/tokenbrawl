@@ -369,11 +369,19 @@ describe('behavioural metrics ride beside the ratings (7-3, AC1)', () => {
     expect(line.split('|').filter((cell) => cell.trim() === 'not reported')).toHaveLength(5);
   });
 
-  it('never writes a not-reported quantity as a bare zero anywhere in the section', () => {
-    // The mutation this guards: swapping `null` for `0` in the renderer would
-    // publish an unmeasured entrant as a frugal one, and every other assertion
-    // in this file would still pass.
-    expect(behaviourRow(aggressive.id)).not.toMatch(/\|\s*0\s*\|/);
+  it('never writes a not-reported quantity as a number of any shape', () => {
+    // The mutation this guards: a `?? 0` anywhere in the renderer would publish
+    // an unmeasured entrant as a frugal one. Checked as "this row carries no
+    // number at all" rather than as "no bare zero", because `0.0000` and `0`
+    // are the same lie in two typefaces -- an earlier version of this test
+    // caught only the second, and the mutation that proved it fails two cases
+    // now rather than one.
+    const values = behaviourRow(aggressive.id)
+      .split('|')
+      .slice(4, -1)
+      .map((cell) => cell.trim());
+    expect(values).toStrictEqual(Array.from({ length: 5 }, () => 'not reported'));
+    expect(values.join(' ')).not.toMatch(/\d/);
   });
 
   it('keeps the behaviour table out of the rating-table shape, so it needs no CI column', () => {
