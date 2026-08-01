@@ -5,6 +5,7 @@ import { createFighterEnvironment } from '../../../../packages/env-fighter/src/e
 import { buildReplayFilm } from '../replay/film';
 import { chatCompletionBody, createFakeTransport } from '../testing/byok-transport';
 import { ByokKeyError } from './client';
+import { createWaitBudget } from './pacing';
 import { runByokMatch } from './run';
 
 /**
@@ -469,5 +470,231 @@ describe('an unknown model produces no Match at all (4.7, AC7)', () => {
     expect((outcome.error as ByokKeyError).model).toBe('gpt-oss-120b');
     // Distinct from a generic provider error, which is the whole of AC7.
     expect((outcome.error as ByokKeyError).message).toMatch(/does not serve that model/);
+  });
+});
+
+/**
+ * Story 4.8: the same Match, paused.
+ *
+ * Everything here compares a *paced* Match against an *unpaused* one, which is
+ * the only form in which AC3 can be stated at all. Two things had to be true of
+ * the fake transport before that comparison meant anything, and both are
+ * recorded in `byok-transport.ts`: a reply is indexed by answers rather than by
+ * requests, so injecting a 429 does not shift the ones after it; and a reply may
+ * be keyed on the request itself, so it does not change when a wait makes the
+ * two fighters interleave the other way round. Neither is a real provider
+ * behaviour -- both were artefacts of the fake that would have made a
+ * byte-identity test measure the harness instead of the runner.
+ */
+
+/** A reply derived from the prompt, so arrival order cannot change a Match. */
+function actionForPrompt(prompt: string): string {
+  const total = { sum: 0 };
+  for (const character of prompt) {
+    total.sum = (total.sum * 31 + character.charCodeAt(0)) % 1_000_003;
+  }
+  return ACTIONS[total.sum % ACTIONS.length];
+}
+
+function contentTransport(overrides: Parameters<typeof createFakeTransport>[0] = {}) {
+  return createFakeTransport({
+    body: (_call, sent) => chatCompletionBody(`ACTION: ${actionForPrompt(sent)}`),
+    ...overrides,
+  });
+}
+
+/** Records what was waited for instead of waiting, so a paced Match runs instantly. */
+function sleepLog() {
+  const waits: number[] = [];
+  return {
+    waits,
+    sleep: (milliseconds: number): Promise<void> => {
+      waits.push(milliseconds);
+      return Promise.resolve();
+    },
+  };
+}
+
+describe('a paused Match is the same Match (4.8, AC3)', () => {
+  it('produces a byte-identical Command Log to one that never paused', async () => {
+    const clean = await runByokMatch({
+      fighters: fighters(),
+      seed: SEED,
+      fetch: contentTransport().fetch,
+    });
+
+    const timer = sleepLog();
+    const paced = await runByokMatch({
+      fighters: fighters(),
+      seed: SEED,
+      // Both mechanics at once: four refusals scattered through the Match, and
+      // a token bucket that runs dry on every fourth response so pacing fires
+      // between them.
+      fetch: contentTransport({
+        rateLimitAt: [3, 4, 11, 26],
+        headersFor: (call): Readonly<Record<string, string>> =>
+          call % 4 === 0
+            ? {
+                'retry-after': '2',
+                'x-ratelimit-remaining-tokens': '30',
+                'x-ratelimit-reset-tokens': '3s',
+              }
+            : { 'retry-after': '2', 'x-ratelimit-remaining-tokens': '50000' },
+      }).fetch,
+      sleep: timer.sleep,
+    });
+
+    // The test is worthless if nothing actually paused, so that is asserted
+    // before the comparison rather than assumed by it.
+    expect(timer.waits.filter((wait) => wait === 2000)).toHaveLength(4);
+    expect(timer.waits.filter((wait) => wait === 3000).length).toBeGreaterThan(0);
+
+    // INV-2 and INV-1 in one line: nothing about a pause may reach the record.
+    expect(JSON.stringify(paced)).toBe(JSON.stringify(clean));
+  });
+
+  it('re-decides nothing: the Decision Points are the same ones', async () => {
+    const clean = await runByokMatch({
+      fighters: fighters(),
+      seed: SEED,
+      fetch: contentTransport().fetch,
+    });
+    const timer = sleepLog();
+    const paced = await runByokMatch({
+      fighters: fighters(),
+      seed: SEED,
+      fetch: contentTransport({ rateLimitAt: [0, 1, 2] }).fetch,
+      sleep: timer.sleep,
+    });
+
+    expect(paced.decisions).toStrictEqual(clean.decisions);
+    expect(paced.finalStateHash).toBe(clean.finalStateHash);
+    // Not one Parse Failure: a 429 became a wait, never a Fallback Action.
+    expect(paced.decisions.some((decision) => decision.parseFailure === true)).toBe(false);
+  });
+
+  it('costs exactly one request per completed call when nothing is refused (AC4)', async () => {
+    const transport = contentTransport();
+    const counted: number[] = [];
+    await runByokMatch({
+      fighters: fighters(),
+      seed: SEED,
+      fetch: transport.fetch,
+      onCall: (calls) => counted.push(calls),
+    });
+    // Every request produced the answer that was counted. A loop that re-issued
+    // a call which had already answered would show up here immediately, and it
+    // is the mutation the story asks to be pinned.
+    expect(transport.calls()).toHaveLength(counted.length);
+    expect(counted[counted.length - 1]).toBe(counted.length);
+  });
+
+  it('costs exactly one extra request per refusal, and no more (AC4)', async () => {
+    const baseline = contentTransport();
+    await runByokMatch({ fighters: fighters(), seed: SEED, fetch: baseline.fetch });
+
+    const timer = sleepLog();
+    const transport = contentTransport({ rateLimitAt: [2, 5, 9] });
+    await runByokMatch({
+      fighters: fighters(),
+      seed: SEED,
+      fetch: transport.fetch,
+      sleep: timer.sleep,
+    });
+
+    expect(transport.calls()).toHaveLength(baseline.calls().length + 3);
+  });
+});
+
+describe('what a waiting visitor is told (4.8, AC5)', () => {
+  it('reports completed calls at the moment of each wait, and nothing else', async () => {
+    const timer = sleepLog();
+    const announced: number[] = [];
+    await runByokMatch({
+      fighters: fighters(),
+      seed: SEED,
+      fetch: contentTransport({ rateLimitAt: [4, 12] }).fetch,
+      sleep: timer.sleep,
+      onWait: (calls) => announced.push(calls),
+    });
+
+    expect(announced).toHaveLength(2);
+    // A count of calls already made -- the visitor's real question, which is
+    // whether the work so far is about to be thrown away. Never a duration, an
+    // estimate or a countdown (INV-3).
+    for (const calls of announced) {
+      expect(Number.isInteger(calls)).toBe(true);
+      expect(calls).toBeGreaterThanOrEqual(0);
+    }
+    expect(announced[1]).toBeGreaterThan(announced[0]);
+  });
+
+  it('says nothing at all when nothing waits', async () => {
+    const announced: number[] = [];
+    await runByokMatch({
+      fighters: fighters(),
+      seed: SEED,
+      fetch: contentTransport().fetch,
+      onWait: (calls) => announced.push(calls),
+    });
+    expect(announced).toStrictEqual([]);
+  });
+});
+
+describe('the wait bound belongs to the Match (4.8, AC7)', () => {
+  it('abandons with an attributed message and no log', async () => {
+    const timer = sleepLog();
+    const outcome = await runByokMatch({
+      fighters: fighters(),
+      seed: SEED,
+      fetch: createFakeTransport({
+        statuses: [429],
+        responseHeaders: { 'retry-after': '1' },
+      }).fetch,
+      sleep: timer.sleep,
+      budget: createWaitBudget(4),
+    }).then(
+      (log) => ({ log, error: null as unknown }),
+      (error: unknown) => ({ log: null, error }),
+    );
+
+    expect(outcome.log).toBeNull();
+    expect(outcome.error).toBeInstanceOf(ByokKeyError);
+    expect((outcome.error as ByokKeyError).failure).toBe('rate-limited');
+    expect((outcome.error as ByokKeyError).message).toMatch(/Fighter [12]/);
+    expect(timer.waits).toHaveLength(4);
+  });
+
+  it('is one allowance shared by both fighters, not one each', async () => {
+    // Two keys each stalling twice is the same amount of nothing happening as
+    // one key stalling four times, and the bound is a statement about that.
+    const budget = createWaitBudget(2);
+    const timer = sleepLog();
+    await runByokMatch({
+      fighters: fighters(),
+      seed: SEED,
+      // The first Decision Point polls both fighters, so both refusals land
+      // before either fighter could have spent a private budget of its own.
+      fetch: createFakeTransport({
+        rateLimitAt: [0, 1, 2, 3],
+        responseHeaders: { 'retry-after': '1' },
+      }).fetch,
+      sleep: timer.sleep,
+      budget,
+    }).catch(() => undefined);
+
+    expect(budget.taken()).toBe(2);
+    expect(timer.waits).toStrictEqual([1000, 1000]);
+  });
+
+  it('spends nothing from the budget on a Match that never stalls', async () => {
+    const budget = createWaitBudget(4);
+    await runByokMatch({
+      fighters: fighters(),
+      seed: SEED,
+      fetch: contentTransport().fetch,
+      budget,
+    });
+    expect(budget.taken()).toBe(0);
   });
 });

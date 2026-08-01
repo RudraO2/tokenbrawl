@@ -100,6 +100,11 @@ describe('shipped player source discipline', () => {
         'byok/log.ts',
         'byok/keys.ts',
         'byok/catalogue.ts',
+        // Story 4.8. The one file in this app that converts a provider header
+        // into a number of milliseconds, which is the closest anything here
+        // comes to a clock -- so it is the last file that should sit outside
+        // the sweep that forbids one.
+        'byok/pacing.ts',
       ]),
     );
     expect(paths.every((path) => !path.endsWith('.test.ts'))).toBe(true);

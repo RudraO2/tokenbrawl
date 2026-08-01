@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { CommandLog } from '@tokenbrawl/contracts';
 import { createFakeTransport, chatCompletionBody } from '../testing/byok-transport';
+import { buildDemoLog } from '../testing/demo-log';
 import { byokCatalogue } from './catalogue';
 import { ByokKeyError } from './client';
 import type { KeyStorage } from './keys';
@@ -387,6 +388,99 @@ describe('the panel refuses what would fail at request time', () => {
     // and is asserted there -- this test is about the panel not editing either.
     expect(host.node('[data-status]').innerHTML).toContain('quota exhausted');
     expect(panel.state()).toBe('failed');
+  });
+});
+
+describe('what the panel says while a Match is paused (4.8, AC5)', () => {
+  // One real log, built once and awaited per case: these cases are about the
+  // panel's states, and re-simulating a Match for each would be slower and no
+  // stronger. `describe` cannot await, so the promise is the shared value.
+  const finished = buildDemoLog();
+
+  /**
+   * A run the test drives by hand: it announces a wait, then a completed call,
+   * then resolves. Nothing else can reproduce the *transition*, which is the
+   * only part of AC5 that is not already covered at the runner.
+   */
+  function pausingPanel(finished: CommandLog) {
+    const host = createHost();
+    const gate: { release: (() => void) | null } = { release: null };
+
+    const panel = mountByokPanel(host, {
+      onLog: (): void => undefined,
+      run: (config: ByokRunConfig) =>
+        new Promise<CommandLog>((resolve) => {
+          config.onCall?.(4);
+          config.onWait?.(4);
+          gate.release = (): void => {
+            config.onCall?.(5);
+            resolve(finished);
+          };
+        }),
+    });
+    host.node('[data-key="0"]').value = 'gsk_p1_key_do_not_use_000001';
+    host.node('[data-key="1"]').value = 'gsk_p2_key_do_not_use_000002';
+    return { host, panel, gate };
+  }
+
+  it('enters a waiting state carrying a count of completed calls', async () => {
+    const { host, panel, gate } = pausingPanel(await finished);
+    const running = panel.submit();
+
+    expect(panel.state()).toBe('waiting');
+    const said = host.node('[data-status]').innerHTML;
+    expect(said).toContain('4 calls made so far');
+    expect(said).toMatch(/resumes at the same Decision Point/);
+
+    gate.release?.();
+    await running;
+  });
+
+  it('names no duration, no estimate and no provider (INV-3)', async () => {
+    const { host, panel, gate } = pausingPanel(await finished);
+    const running = panel.submit();
+    const said = host.node('[data-status]').innerHTML;
+
+    // A number followed by a time unit is the shape of every banned form --
+    // "12s", "waiting 47 seconds", "about 2 minutes". The call count is a bare
+    // integer and survives this.
+    expect(said).not.toMatch(/\d+\s*(ms|s\b|sec|second|minute|hour)/i);
+    expect(said).not.toMatch(/Groq|Cerebras|Gemini|Google|retry|remaining/i);
+    expect(said).not.toContain('%');
+
+    gate.release?.();
+    await running;
+  });
+
+  it('returns to running as soon as a call completes', async () => {
+    const { panel, gate } = pausingPanel(await finished);
+    const running = panel.submit();
+    expect(panel.state()).toBe('waiting');
+
+    gate.release?.();
+    await running;
+    // The last thing announced before `done` was the resume, not the pause: a
+    // visitor who looked away must not come back to a stale pause message.
+    expect(panel.state()).toBe('done');
+  });
+
+  it('counts a paused Match as in flight, so nothing else spends the quota', async () => {
+    // Only the run button is disabled during a Match. A pause that read as idle
+    // would re-open both `Fetch my models` and a second submit -- against the
+    // very quota the Match is waiting on.
+    const { host, panel, gate } = pausingPanel(await finished);
+    const running = panel.submit();
+    expect(panel.state()).toBe('waiting');
+
+    await panel.discover(0);
+    expect(panel.state()).toBe('waiting');
+    expect(host.node('[data-status]').innerHTML).toContain('calls made so far');
+
+    await panel.submit();
+    expect(panel.state()).toBe('waiting');
+
+    gate.release?.();
+    await running;
   });
 });
 

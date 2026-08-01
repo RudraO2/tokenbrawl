@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
+import type { FreeTierConfig } from '../../../../packages/providers/src/free-tier';
+import { loadFreeTierConfig } from '../../../../packages/providers/src/free-tier';
 import { createFakeTransport, chatCompletionBody } from '../testing/byok-transport';
 import { byokEndpoint } from './catalogue';
 import { ByokKeyError, createByokClient, failureSentence } from './client';
+import { createWaitBudget } from './pacing';
 
 /**
  * Story 4.6 AC1 and AC3, at the one boundary where a key becomes a request.
@@ -463,5 +466,279 @@ describe('an endpoint the visitor supplied (4.7, AC5, AC6)', () => {
     expect((error as ByokKeyError).detail).toContain('bad key');
     expect((error as ByokKeyError).detail).not.toContain(secret);
     expect((error as ByokKeyError).message).not.toContain(secret);
+  });
+});
+
+/**
+ * Groq's own config with one extra row capped below what a Match costs.
+ *
+ * The workhorse row stays runnable on purpose. 4.7's `byokProvider` already
+ * refuses a provider with *no* usable model at all, so starving every row would
+ * test that older guard instead of this one -- and it would miss the case that
+ * actually exists, which is a single bad model reachable only by typing or by
+ * discovery, on a provider that is otherwise fine.
+ */
+const CAPPED_MODEL = 'a-capped-model';
+
+function starvedFreeTier(): FreeTierConfig {
+  const config = loadFreeTierConfig();
+  return loadFreeTierConfig({
+    verifiedOn: config.verifiedOn,
+    providers: {
+      groq: {
+        ...(JSON.parse(JSON.stringify(config.providers.groq)) as object),
+        models: {
+          'llama-3.1-8b-instant': {
+            requestsPerMinute: 30,
+            requestsPerDay: 14_400,
+            tokensPerMinute: 6000,
+          },
+          // 20 requests a day against up to 60 calls: gemini-2.5-flash's shape,
+          // on a provider that puts the model in the request body so nothing
+          // else refuses it first.
+          [CAPPED_MODEL]: { requestsPerMinute: 30, requestsPerDay: 20, tokensPerMinute: 6000 },
+        },
+      },
+    },
+  });
+}
+
+describe('a rate limit is a pause, not the end of a Match (4.8)', () => {
+  it('waits out a 429 and repeats that same call (AC2)', async () => {
+    const transport = createFakeTransport({
+      rateLimitAt: [0],
+      responseHeaders: { 'retry-after': '2' },
+    });
+    const { client, waits } = groqClient({ fetch: transport.fetch });
+
+    const response = await client.complete(REQUEST);
+
+    // The Decision Point is decided by the model, not by the Fallback Action.
+    expect(response.text).toContain('ACTION: attack');
+    expect(transport.calls()).toHaveLength(2);
+    // *That same call*, byte for byte. A re-asked decision would carry a
+    // different prompt; this carries the same one, which is the whole of the
+    // INV-1 distinction the story draws.
+    expect(transport.calls()[1].body).toBe(transport.calls()[0].body);
+    expect(transport.calls()[1].url).toBe(transport.calls()[0].url);
+    expect(waits).toStrictEqual([2000]);
+  });
+
+  it('never issues a call that produced an answer a second time (AC4)', async () => {
+    // The guard is one `return` in `complete`. Every 200 here must cost exactly
+    // one request; mutate that `return` into anything that loops and this goes
+    // red on the very first call.
+    const transport = createFakeTransport();
+    const { client } = groqClient({ fetch: transport.fetch });
+    for (const _ignored of [0, 1, 2, 3, 4]) {
+      await client.complete(REQUEST);
+    }
+    expect(transport.calls()).toHaveLength(5);
+  });
+
+  it('paces before the limit when the quota headers say to (AC1)', async () => {
+    // No 429 occurs anywhere in this test. That is the point: the limit is seen
+    // coming from the headers that ride on a *successful* response.
+    const transport = createFakeTransport({
+      headersFor: (call) =>
+        call === 0
+          ? { 'x-ratelimit-remaining-tokens': '120', 'x-ratelimit-reset-tokens': '7.66s' }
+          : { 'x-ratelimit-remaining-tokens': '50000', 'x-ratelimit-reset-tokens': '7.66s' },
+    });
+    const { client, waits } = groqClient({ fetch: transport.fetch });
+
+    await client.complete(REQUEST);
+    expect(waits).toStrictEqual([]);
+    await client.complete(REQUEST);
+
+    expect(waits).toStrictEqual([7660]);
+    expect(transport.calls()).toHaveLength(2);
+  });
+
+  it('does not pace twice on one exhausted reading', async () => {
+    // The wait was sized to refill exactly that bucket, so carrying the reading
+    // past it would double every wait. Every response here reports an empty
+    // bucket, so a client that failed to forget would wait before every call
+    // rather than before every other one.
+    const transport = createFakeTransport({
+      responseHeaders: { 'x-ratelimit-remaining-tokens': '0', 'x-ratelimit-reset-tokens': '5s' },
+    });
+    const { client, waits } = groqClient({ fetch: transport.fetch });
+    await client.complete(REQUEST);
+    await client.complete(REQUEST);
+    await client.complete(REQUEST);
+    expect(waits).toStrictEqual([5000, 5000]);
+  });
+
+  it('does not pace at all when the provider reports nothing', async () => {
+    // Cerebras and Google publish no such headers. Reactive waiting is the
+    // floor for them; proactive pacing must not invent a wait from silence.
+    const transport = createFakeTransport();
+    const { client, waits } = groqClient({ fetch: transport.fetch });
+    await client.complete(REQUEST);
+    await client.complete(REQUEST);
+    expect(waits).toStrictEqual([]);
+  });
+
+  it('stops immediately on a 401 rather than waiting (AC6)', async () => {
+    const transport = createFakeTransport({ statuses: [401], body: () => 'Invalid API Key' });
+    const { client, waits } = groqClient({ fetch: transport.fetch });
+    await expect(client.complete(REQUEST)).rejects.toMatchObject({ failure: 'invalid-key' });
+    // A wait cannot fix a revoked key, and a tab that pauses for a minute before
+    // saying so is worse than one that says so at once.
+    expect(waits).toStrictEqual([]);
+    expect(transport.calls()).toHaveLength(1);
+  });
+
+  it('stops immediately on a 403 rather than waiting (AC6)', async () => {
+    const transport = createFakeTransport({ statuses: [403], body: () => 'Forbidden' });
+    const { client, waits } = groqClient({ fetch: transport.fetch });
+    await expect(client.complete(REQUEST)).rejects.toMatchObject({ failure: 'invalid-key' });
+    expect(waits).toStrictEqual([]);
+  });
+
+  it('calls a wait measured in hours a daily quota and refuses it (AC6)', async () => {
+    const transport = createFakeTransport({
+      rateLimitAt: [0],
+      responseHeaders: { 'retry-after': '21600' },
+    });
+    const { client, waits } = groqClient({ fetch: transport.fetch });
+    const error = await client.complete(REQUEST).catch((caught: unknown) => caught);
+    expect((error as ByokKeyError).failure).toBe('daily-quota');
+    expect(waits).toStrictEqual([]);
+    expect(transport.calls()).toHaveLength(1);
+  });
+
+  it('reads a daily cap off the pacing headers before spending a request (AC6)', async () => {
+    const transport = createFakeTransport({
+      responseHeaders: {
+        'x-ratelimit-remaining-requests': '0',
+        'x-ratelimit-reset-requests': '6h',
+      },
+    });
+    const { client, waits } = groqClient({ fetch: transport.fetch });
+    await client.complete(REQUEST);
+    const error = await client.complete(REQUEST).catch((caught: unknown) => caught);
+    expect((error as ByokKeyError).failure).toBe('daily-quota');
+    expect(waits).toStrictEqual([]);
+    // The second call was never made: being told beats being refused.
+    expect(transport.calls()).toHaveLength(1);
+  });
+
+  it('abandons the Match once the wait bound is spent (AC7)', async () => {
+    // A provider that refuses forever. Without the bound this is an infinite
+    // loop; with it, the Match ends attributed and nothing is recorded.
+    const transport = createFakeTransport({
+      statuses: [429],
+      responseHeaders: { 'retry-after': '1' },
+    });
+    const budget = createWaitBudget(3);
+    const { client, waits } = groqClient({ fetch: transport.fetch, budget });
+
+    const error = await client.complete(REQUEST).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(ByokKeyError);
+    expect((error as ByokKeyError).failure).toBe('rate-limited');
+    expect(waits).toStrictEqual([1000, 1000, 1000]);
+    // Three waits, four requests: the bound counts waits, and the call that
+    // finds the budget spent has already been made.
+    expect(transport.calls()).toHaveLength(4);
+    expect(budget.taken()).toBe(3);
+  });
+
+  it('draws on the budget it was given rather than one of its own (AC7)', async () => {
+    // `run.ts` hands both fighters one budget. A client that quietly built its
+    // own would let a two-sided stall run twice as long as a one-sided one.
+    const budget = createWaitBudget(2);
+    const first = groqClient({
+      fetch: createFakeTransport({ statuses: [429], responseHeaders: { 'retry-after': '1' } })
+        .fetch,
+      budget,
+    });
+    await first.client.complete(REQUEST).catch(() => undefined);
+    expect(budget.taken()).toBe(2);
+
+    const second = groqClient({
+      fetch: createFakeTransport({ rateLimitAt: [0], responseHeaders: { 'retry-after': '1' } })
+        .fetch,
+      budget,
+    });
+    await expect(second.client.complete(REQUEST)).rejects.toMatchObject({
+      failure: 'rate-limited',
+    });
+    expect(second.waits).toStrictEqual([]);
+  });
+
+  it('announces a wait only when one happens, and carries nothing (INV-3)', async () => {
+    const announced = { count: 0 };
+    const transport = createFakeTransport({
+      rateLimitAt: [1],
+      responseHeaders: { 'retry-after': '2' },
+    });
+    const { client } = groqClient({
+      fetch: transport.fetch,
+      onWait: () => {
+        announced.count += 1;
+      },
+    });
+
+    await client.complete(REQUEST);
+    expect(announced.count).toBe(0);
+    await client.complete(REQUEST);
+    expect(announced.count).toBe(1);
+  });
+
+  it('refuses a model whose daily cap cannot cover a Match, before any request (AC8)', () => {
+    // The shape 4.6 shipped and 4.7 filtered out of the picker. A *typed* or
+    // discovered model can still land on a provider default this small, which
+    // is the hole a picker filter cannot close.
+    const transport = createFakeTransport();
+    expect(() =>
+      createByokClient({
+        agentIndex: 0,
+        provider: 'groq',
+        model: CAPPED_MODEL,
+        apiKey: KEY,
+        fetch: transport.fetch,
+        freeTier: starvedFreeTier(),
+      }),
+    ).toThrow(/Cannot finish one Match/);
+    expect(transport.calls()).toHaveLength(0);
+  });
+
+  it('attributes that refusal to a fighter, like every other failure (AC8)', () => {
+    const error = ((): unknown => {
+      try {
+        createByokClient({
+          agentIndex: 1,
+          provider: 'groq',
+          model: CAPPED_MODEL,
+          apiKey: KEY,
+          fetch: createFakeTransport().fetch,
+          freeTier: starvedFreeTier(),
+        });
+        return null;
+      } catch (caught: unknown) {
+        return caught;
+      }
+    })();
+    expect(error).toBeInstanceOf(ByokKeyError);
+    expect((error as ByokKeyError).failure).toBe('cannot-finish');
+    expect((error as ByokKeyError).message).toContain('Fighter 2');
+  });
+
+  it('does not second-guess a visitor endpoint, which publishes no quota (AC8)', () => {
+    // Inventing a quota for an endpoint this build has never heard of, purely to
+    // refuse the visitor by it, would be worse than letting the Match tell them.
+    expect(() =>
+      createByokClient({
+        agentIndex: 0,
+        provider: 'groq',
+        model: 'anything',
+        apiKey: KEY,
+        baseUrl: 'https://gw.example/v1',
+        fetch: createFakeTransport().fetch,
+        freeTier: starvedFreeTier(),
+      }),
+    ).not.toThrow();
   });
 });
