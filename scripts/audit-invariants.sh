@@ -468,16 +468,90 @@ else
   grep -qE '"http://' "$free_tier_config" \
     && allowlist_broken="$allowlist_broken config-contains-a-plaintext-endpoint"
 
+  # --- The one exemption, and what replaces it -----------------------------
+  #
+  # Story 4.7 added a BYOK-only factory for an endpoint the visitor supplies
+  # themselves. It cannot consult the allowlist -- being reachable when the
+  # allowlist does not name it IS the feature -- and the reading that permits it
+  # is written at the top of the file itself:
+  #
+  #   INV-8 is "zero recurring cost", meaning THIS PROJECT's cost. Tournament
+  #   play runs on this project's keys and is the only place a recurring cost
+  #   could appear, so the allowlist governs it absolutely and unchanged. A BYOK
+  #   Match runs on the visitor's key and costs this project nothing.
+  #
+  # So the exemption is by exact path, not by pattern -- a second file cannot
+  # inherit it by being named something similar -- and the single check waived
+  # is replaced by three that are together stronger:
+  #
+  #   1. it validates the visitor's URL (https-only, origin resolved for display)
+  #   2. `index.ts` does not re-export it, so the package's public surface
+  #      cannot reach it and no tournament-path file can
+  #   3. exactly one file in the repo imports it, and it is the BYOK client
+  #
+  # If a future story needs a second such factory, add it to BYOK_ONLY_FACTORIES
+  # *and* to the importer allowlist, and write down why here. Do not widen the
+  # pattern, and do not rename a function to slip past the grep above.
+  BYOK_ONLY_FACTORIES="packages/providers/src/byok-direct.ts"
+  BYOK_ONLY_IMPORTERS="apps/web/src/byok/client.ts"
+
   client_factories=$(grep -lE '^export function create[A-Za-z0-9]*Client' \
     packages/providers/src/*.ts 2>/dev/null | grep -v '\.test\.ts')
   if [ -z "$client_factories" ]; then
     allowlist_broken="$allowlist_broken no-provider-client-factory-found"
   else
     for adapter in $client_factories; do
-      grep -q 'assertFreeTierEndpoint' "$adapter" \
-        || allowlist_broken="$allowlist_broken ${adapter}-does-not-validate-its-endpoint"
+      exempt=0
+      for byok_only in $BYOK_ONLY_FACTORIES; do
+        [ "$adapter" = "$byok_only" ] && exempt=1
+      done
+
+      if [ "$exempt" -eq 0 ]; then
+        grep -q 'assertFreeTierEndpoint' "$adapter" \
+          || allowlist_broken="$allowlist_broken ${adapter}-does-not-validate-its-endpoint"
+        continue
+      fi
+
+      # (1) It validates the visitor's URL instead.
+      grep -q 'assertVisitorSuppliedEndpoint' "$adapter" \
+        || allowlist_broken="$allowlist_broken ${adapter}-does-not-validate-the-visitor-supplied-endpoint"
+      # Belt and braces on the https-only rule, which is an acceptance
+      # criterion: a key on a plaintext URL travels in clear.
+      grep -q "protocol !== 'https:'" "$adapter" \
+        || allowlist_broken="$allowlist_broken ${adapter}-does-not-refuse-a-plaintext-endpoint"
     done
   fi
+
+  # (2) The package must not export it. `export ... from './byok-direct'` in
+  # index.ts would put an allowlist-free client one import away from every
+  # tournament consumer of this package.
+  for byok_only in $BYOK_ONLY_FACTORIES; do
+    if [ -f "$byok_only" ]; then
+      base=$(basename "$byok_only" .ts)
+      grep -qE "from '\./${base}'" packages/providers/src/index.ts 2>/dev/null \
+        && allowlist_broken="$allowlist_broken ${byok_only}-is-re-exported-from-the-package-index"
+    else
+      allowlist_broken="$allowlist_broken missing-byok-only-factory:${byok_only}"
+    fi
+  done
+
+  # (3) And exactly the sanctioned importer, no other.
+  for byok_only in $BYOK_ONLY_FACTORIES; do
+    base=$(basename "$byok_only" .ts)
+    importers=$(grep -rlE "from '[^']*/${base}'" \
+      --include='*.ts' --include='*.tsx' --include='*.mts' --include='*.cts' \
+      --exclude='*.test.ts' --exclude='*.test.tsx' \
+      --exclude-dir=node_modules --exclude-dir=dist --exclude-dir=build \
+      packages apps 2>/dev/null)
+    for importer in $importers; do
+      allowed=0
+      for sanctioned in $BYOK_ONLY_IMPORTERS; do
+        [ "$importer" = "$sanctioned" ] && allowed=1
+      done
+      [ "$allowed" -eq 1 ] \
+        || allowlist_broken="$allowlist_broken ${importer}-imports-an-allowlist-free-client"
+    done
+  done
 
   if [ -n "$allowlist_broken" ]; then
     fail "free-tier endpoint validation weakened:$allowlist_broken"

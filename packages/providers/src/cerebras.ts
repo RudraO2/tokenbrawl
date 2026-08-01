@@ -9,6 +9,7 @@ import {
 } from './free-tier';
 import type { HttpFetch, Sleep } from './http';
 import { defaultHttpFetch, defaultSleep } from './http';
+import { excerpt, mapOpenAiResponse, openAiRequestBody } from './openai-wire';
 import type { RateLimitSink } from './rate-limit';
 import { RATE_LIMIT_STATUS, buildRateLimitSignal } from './rate-limit';
 
@@ -26,9 +27,6 @@ import { RATE_LIMIT_STATUS, buildRateLimitSignal } from './rate-limit';
  */
 
 export const CEREBRAS_PROVIDER_ID: ProviderId = 'cerebras';
-
-/** Enough of a failing body to diagnose it, never enough to flood a log. */
-const BODY_EXCERPT_LIMIT = 256;
 
 export interface CerebrasClientConfig {
   readonly apiKey: string;
@@ -51,70 +49,22 @@ export interface CerebrasClient extends ProviderClient {
   readonly limits: FreeTierLimits;
 }
 
-interface CerebrasUsage {
-  readonly completion_tokens?: unknown;
-  readonly completion_tokens_details?: { readonly reasoning_tokens?: unknown } | null;
-  readonly prompt_tokens_details?: { readonly cached_tokens?: unknown } | null;
-}
-
-interface CerebrasMessage {
-  readonly content?: string | null;
-  readonly reasoning?: string | null;
-}
-
-interface CerebrasBody {
-  readonly choices?: readonly { readonly message?: CerebrasMessage | null }[];
-  readonly usage?: CerebrasUsage | null;
-}
-
 function assertNonBlank(value: string, field: string): void {
   if (typeof value !== 'string' || value.trim().length === 0) {
     throw new Error(`createCerebrasClient: ${field} must be a non-empty string.`);
   }
 }
 
-function excerpt(bodyText: string): string {
-  return bodyText.length > BODY_EXCERPT_LIMIT
-    ? `${bodyText.slice(0, BODY_EXCERPT_LIMIT)}...`
-    : bodyText;
-}
-
-/**
- * A reported count, or `null` when the provider did not report a usable one
- * (INV-5). A present-but-malformed value is treated the same way, rather than
- * passed on to `debitTokenBank`, which would throw and take the Match with it.
- */
-function reportedCount(value: unknown): number | null {
-  return Number.isSafeInteger(value) && (value as number) >= 0 ? (value as number) : null;
-}
-
 /**
  * The exact JSON sent on the wire. `max_tokens` appears only in Reflex Mode
  * (INV-4): no effort, thinking, budget or temperature key of any kind.
+ *
+ * Story 4.7 moved the body to `openai-wire.ts`, which this file and `groq.ts`
+ * now share with the visitor-supplied endpoint. The wrapper stays so the thrown
+ * sentence still names this builder.
  */
 export function cerebrasRequestBody(model: string, request: ProviderRequest): string {
-  if (
-    request.maxTokens !== undefined &&
-    !(Number.isSafeInteger(request.maxTokens) && request.maxTokens > 0)
-  ) {
-    throw new Error(
-      `cerebrasRequestBody: maxTokens must be a positive safe integer when set, got ${String(request.maxTokens)}`,
-    );
-  }
-
-  const body: Record<string, unknown> = {
-    model,
-    messages: [
-      { role: 'system', content: request.system },
-      { role: 'user', content: request.user },
-    ],
-  };
-
-  if (request.maxTokens !== undefined) {
-    body.max_tokens = request.maxTokens;
-  }
-
-  return JSON.stringify(body);
+  return openAiRequestBody(model, request, 'cerebrasRequestBody');
 }
 
 /**
@@ -122,39 +72,7 @@ export function cerebrasRequestBody(model: string, request: ProviderRequest): st
  * testable from a recorded fixture with no network.
  */
 export function mapCerebrasResponse(bodyText: string): ProviderResponse {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(bodyText);
-  } catch {
-    throw new Error(`Cerebras returned a body that is not JSON: ${excerpt(bodyText)}`);
-  }
-
-  if (typeof parsed !== 'object' || parsed === null) {
-    throw new Error(`Cerebras returned a body that is not an object: ${excerpt(bodyText)}`);
-  }
-
-  const body = parsed as CerebrasBody;
-  const choice = body.choices?.[0];
-  if (choice === undefined) {
-    throw new Error(`Cerebras returned no choices: ${excerpt(bodyText)}`);
-  }
-
-  const message = choice.message ?? null;
-  const content = message?.content;
-  const details = body.usage?.completion_tokens_details ?? null;
-  const promptDetails = body.usage?.prompt_tokens_details ?? null;
-  const separateReasoning = message?.reasoning;
-
-  return {
-    text: typeof content === 'string' ? content : '',
-    usage: {
-      tokensSpent: reportedCount(body.usage?.completion_tokens),
-      reasoningTokens: reportedCount(details?.reasoning_tokens),
-      // Story 3.5: same OpenAI-compatible shape as Groq's, mapped the same way.
-      cachedTokens: reportedCount(promptDetails?.cached_tokens),
-    },
-    reasoning: typeof separateReasoning === 'string' ? separateReasoning : null,
-  };
+  return mapOpenAiResponse(bodyText, 'Cerebras');
 }
 
 /**

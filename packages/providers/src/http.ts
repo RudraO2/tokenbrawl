@@ -26,13 +26,41 @@ export interface HttpResponse {
   text(): Promise<string>;
 }
 
-export interface HttpRequest {
+export interface HttpPostRequest {
   readonly method: 'POST';
   readonly headers: Readonly<Record<string, string>>;
   readonly body: string;
 }
 
+/**
+ * Story 4.7: model discovery is a `GET .../models`, which is the only reason
+ * this union exists.
+ *
+ * A discriminated union rather than `body?: string` on one shape, because
+ * `fetch` *throws* on a GET that carries a body -- "Request with GET/HEAD
+ * method cannot have body". Making that a type error is strictly better than
+ * making it a runtime one, and it costs callers nothing: every existing adapter
+ * already writes `method: 'POST'` as a literal, so each narrows itself.
+ */
+export interface HttpGetRequest {
+  readonly method: 'GET';
+  readonly headers: Readonly<Record<string, string>>;
+}
+
+export type HttpRequest = HttpPostRequest | HttpGetRequest;
+
 export type HttpFetch = (url: string, request: HttpRequest) => Promise<HttpResponse>;
+
+/**
+ * The body a POST carried, or `''` for a GET.
+ *
+ * For the callers -- almost all of them tests -- that hold an `HttpRequest` they
+ * know is a POST and want its body. Narrowing at each of those sites would be
+ * four lines of ceremony asserting something the surrounding code already knows.
+ */
+export function requestBody(request: HttpRequest): string {
+  return request.method === 'POST' ? request.body : '';
+}
 
 /** Milliseconds, integer. The adapter's only use of wall-clock, and it cannot affect a Match's outcome (INV-1). */
 export type Sleep = (milliseconds: number) => Promise<void>;

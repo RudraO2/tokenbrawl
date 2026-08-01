@@ -3,7 +3,12 @@
     "Free-tier quotas and the endpoint allowlist, as data rather than as constants in code.",
     "Story 3.2 AC5: these are configuration. INV-8: an endpoint absent from `endpoints` fails",
     "configuration validation, which is what keeps a paid endpoint from ever being configured.",
-    "These numbers move. Re-verify at the start of each epic and update `verifiedOn`.",
+    "",
+    "Story 4.7 rewrote every number below from `docs/reports/byok-provider-limits.md`, which is",
+    "a capture of the project owner's own provider dashboards rather than documentation or a",
+    "blog. Read that file before editing this one; each provider block below cites the table it",
+    "came from. Two models were removed rather than corrected -- see the google-ai-studio note.",
+    "",
     "`fallbackBackoffMs` is used only when a 429 carries no timing header at all.",
     "`maxBackoffMs` bounds how long one call may block the Harness. A daily quota",
     "legitimately resets hours away, and sleeping that inside complete() would hang",
@@ -13,12 +18,26 @@
   "verifiedOn": "2026-08-01",
   "providers": {
     "groq": {
+      "_comment": [
+        "docs/reports/byok-provider-limits.md, the Groq table. TPM is the binding",
+        "constraint on every row -- the 30 RPM ceiling is never reached by a Match.",
+        "`defaults` are the tightest published numbers on the provider (250 RPD from",
+        "`groq/compound`, 6K TPM from the 8B row) because a model with no row here is",
+        "a model nobody measured, and pacing it against the workhorse's allowance is",
+        "how a tournament burns a day's quota in an hour. Story 4.7's model discovery",
+        "makes that case ordinary rather than exceptional.",
+        "",
+        "No Gemma on Groq: an earlier web search suggested `gemma2-9b-it`, the owner's",
+        "dashboard does not list it, and it is treated as gone.",
+        "`openai/gpt-oss-*` are OpenAI's open-weight models, free, with no OpenAI",
+        "account -- this is how 'add OpenAI' is satisfied at zero cost."
+      ],
       "endpoints": ["https://api.groq.com/openai/v1/chat/completions"],
       "fallbackBackoffMs": 60000,
       "maxBackoffMs": 120000,
       "defaults": {
         "requestsPerMinute": 30,
-        "requestsPerDay": 1000,
+        "requestsPerDay": 250,
         "tokensPerMinute": 6000
       },
       "models": {
@@ -26,65 +45,125 @@
           "requestsPerMinute": 30,
           "requestsPerDay": 14400,
           "tokensPerMinute": 6000
+        },
+        "llama-3.3-70b-versatile": {
+          "requestsPerMinute": 30,
+          "requestsPerDay": 1000,
+          "tokensPerMinute": 12000
+        },
+        "openai/gpt-oss-120b": {
+          "requestsPerMinute": 30,
+          "requestsPerDay": 1000,
+          "tokensPerMinute": 8000
+        },
+        "openai/gpt-oss-20b": {
+          "requestsPerMinute": 30,
+          "requestsPerDay": 1000,
+          "tokensPerMinute": 8000
+        },
+        "qwen/qwen3.6-27b": {
+          "requestsPerMinute": 30,
+          "requestsPerDay": 1000,
+          "tokensPerMinute": 8000
         }
       }
     },
     "cerebras": {
       "_comment": [
-        "Story 3.3. Cerebras publishes rate limits per-account rather than a",
-        "static table (inference-docs.cerebras.ai/support/rate-limits, fetched",
-        "2026-08-01) -- 30 RPM / ~1,000 RPD / 60,000 TPM is the figure this",
-        "story measured against a real free-tier key. Re-verify at the start",
-        "of each epic; a materially different account would need this file",
-        "updated, not the adapter."
+        "docs/reports/byok-provider-limits.md, the Cerebras table, captured 2026-08-01.",
+        "",
+        "This block was WRONG before Story 4.7 and the correction is six-fold: it",
+        "recorded 30 RPM where the dashboard says 5, and it listed `llama3.1-8b`,",
+        "which the dashboard does not carry at all. At 5 RPM a ~60-call Match takes a",
+        "minimum of twelve minutes, which `match-feasibility.ts` computes and the",
+        "picker states before a visitor starts rather than after.",
+        "",
+        "`requestsPerDay` is the one DERIVED number in this file. Cerebras publishes a",
+        "token-per-day ceiling (1M TPD) and no request-per-day figure, so 1,000 is",
+        "1M TPD divided by the ~1K tokens a Match call costs. It is recorded as a",
+        "derivation in the report's 'Derived values' section rather than presented as",
+        "a measurement."
       ],
       "endpoints": ["https://api.cerebras.ai/v1/chat/completions"],
       "fallbackBackoffMs": 60000,
       "maxBackoffMs": 120000,
       "defaults": {
-        "requestsPerMinute": 30,
+        "requestsPerMinute": 5,
         "requestsPerDay": 1000,
-        "tokensPerMinute": 60000
+        "tokensPerMinute": 30000
       },
       "models": {
-        "llama3.1-8b": {
-          "requestsPerMinute": 30,
+        "gpt-oss-120b": {
+          "requestsPerMinute": 5,
           "requestsPerDay": 1000,
-          "tokensPerMinute": 60000
+          "tokensPerMinute": 30000
+        },
+        "zai-glm-4.7": {
+          "requestsPerMinute": 5,
+          "requestsPerDay": 1000,
+          "tokensPerMinute": 30000
+        },
+        "gemma-4-31b": {
+          "requestsPerMinute": 5,
+          "requestsPerDay": 1000,
+          "tokensPerMinute": 30000
         }
       }
     },
     "google-ai-studio": {
       "_comment": [
-        "Story 3.3. Google AI Studio's console is the authoritative source of",
-        "current numbers (ai.google.dev/gemini-api/docs/rate-limits points",
-        "there rather than publishing a static table). RPM/RPD below are as",
-        "measured 2026-07-30; TPM is a conservative estimate pending",
-        "re-verification against the console -- flagged in deferred-work.md.",
-        "Two models, two endpoints: the model is part of the URL path for",
-        "this provider, so each is its own allowlist entry (INV-8)."
+        "docs/reports/byok-provider-limits.md, the Google AI Studio table, captured",
+        "2026-08-01 from the owner's AI Studio rate-limit dashboard.",
+        "",
+        "`gemini-2.5-flash` and `gemini-2.5-pro` were REMOVED, not corrected. The",
+        "first has a 20-request DAILY cap against a ~60-call Match and can never",
+        "complete one; the second has no free quota on the measured account. Leaving",
+        "either allowlisted would keep it configurable for tournament play, where the",
+        "same arithmetic holds. The same finding is what put `match-feasibility.ts`",
+        "in the build: deleting two bad rows fixes today, and RPD / 60 fixes the",
+        "next two that go bad without anyone noticing.",
+        "",
+        "The two Gemma rows are the strongest free option anywhere in the report --",
+        "30 RPM and 14,400 RPD, matching Groq's best -- and were not offered at all",
+        "before this story.",
+        "",
+        "Google bakes the model into the URL path, so each model is its own",
+        "allowlist entry (INV-8), and a custom model name here needs a new entry",
+        "rather than just a different request body."
       ],
       "endpoints": [
-        "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
-        "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent"
+        "https://generativelanguage.googleapis.com/v1beta/models/gemma-4-31b:generateContent",
+        "https://generativelanguage.googleapis.com/v1beta/models/gemma-4-26b:generateContent",
+        "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent",
+        "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent"
       ],
       "fallbackBackoffMs": 60000,
       "maxBackoffMs": 120000,
       "defaults": {
-        "requestsPerMinute": 10,
-        "requestsPerDay": 1500,
-        "tokensPerMinute": 250000
+        "requestsPerMinute": 15,
+        "requestsPerDay": 500,
+        "tokensPerMinute": 16000
       },
       "models": {
-        "gemini-2.5-flash": {
-          "requestsPerMinute": 10,
-          "requestsPerDay": 1500,
+        "gemma-4-31b": {
+          "requestsPerMinute": 30,
+          "requestsPerDay": 14400,
+          "tokensPerMinute": 16000
+        },
+        "gemma-4-26b": {
+          "requestsPerMinute": 30,
+          "requestsPerDay": 14400,
+          "tokensPerMinute": 16000
+        },
+        "gemini-3.1-flash-lite": {
+          "requestsPerMinute": 15,
+          "requestsPerDay": 500,
           "tokensPerMinute": 250000
         },
-        "gemini-2.5-pro": {
-          "requestsPerMinute": 5,
-          "requestsPerDay": 50,
-          "tokensPerMinute": 100000
+        "gemini-3.5-flash-lite": {
+          "requestsPerMinute": 15,
+          "requestsPerDay": 500,
+          "tokensPerMinute": 250000
         }
       }
     }

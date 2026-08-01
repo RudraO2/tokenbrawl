@@ -99,19 +99,45 @@ describe('the free-tier config file (AC5)', () => {
   });
 });
 
-describe('the Story 3.3 providers (AC5)', () => {
-  it('carries the Cerebras and Google AI Studio numbers this story measured', () => {
-    expect(freeTierLimitsFor('cerebras', 'llama3.1-8b')).toStrictEqual({
-      requestsPerMinute: 30,
+describe('the Story 3.3 providers, as corrected by Story 4.7 (AC5)', () => {
+  it('carries the Cerebras numbers the dashboard actually shows', () => {
+    // Story 4.7's correction, and it is six-fold: 3.3 committed 30 RPM against
+    // a dashboard that says 5, and listed `llama3.1-8b`, which the dashboard
+    // does not carry at all. See docs/reports/byok-provider-limits.md.
+    expect(freeTierLimitsFor('cerebras', 'gpt-oss-120b')).toStrictEqual({
+      requestsPerMinute: 5,
       requestsPerDay: 1000,
-      tokensPerMinute: 60_000,
+      tokensPerMinute: 30_000,
     });
-    expect(freeTierLimitsFor('google-ai-studio', 'gemini-2.5-flash')).toStrictEqual({
-      requestsPerMinute: 10,
-      requestsPerDay: 1500,
-      tokensPerMinute: 250_000,
+    expect(freeTierLimitsFor('cerebras', 'zai-glm-4.7').requestsPerMinute).toBe(5);
+    expect(freeTierLimitsFor('cerebras', 'gemma-4-31b').requestsPerMinute).toBe(5);
+  });
+
+  it('carries the Google AI Studio numbers, Gemma first', () => {
+    // The two strongest free options anywhere in the report, and 4.6 offered
+    // neither of them.
+    expect(freeTierLimitsFor('google-ai-studio', 'gemma-4-31b')).toStrictEqual({
+      requestsPerMinute: 30,
+      requestsPerDay: 14_400,
+      tokensPerMinute: 16_000,
     });
-    expect(freeTierLimitsFor('google-ai-studio', 'gemini-2.5-pro').requestsPerDay).toBe(50);
+    expect(freeTierLimitsFor('google-ai-studio', 'gemma-4-26b').requestsPerDay).toBe(14_400);
+    expect(freeTierLimitsFor('google-ai-studio', 'gemini-3.1-flash-lite').requestsPerDay).toBe(500);
+  });
+
+  it('no longer allowlists the two models that cannot finish a Match (Story 4.7)', () => {
+    // `gemini-2.5-flash` has a 20-request DAILY cap against a ~60-call Match
+    // and `gemini-2.5-pro` has no free quota at all on the measured account.
+    // Removed rather than corrected: leaving either allowlisted would keep it
+    // configurable for tournament play, where the same arithmetic holds.
+    for (const model of ['gemini-2.5-flash', 'gemini-2.5-pro']) {
+      expect(() => {
+        assertFreeTierEndpoint(
+          'google-ai-studio',
+          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
+        );
+      }).toThrow(/not on the free-tier allowlist/);
+    }
   });
 });
 

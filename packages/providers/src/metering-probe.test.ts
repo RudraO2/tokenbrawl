@@ -1,6 +1,7 @@
 import type { ProviderId } from '@tokenbrawl/contracts';
 import { describe, expect, it } from 'vitest';
 import type { HttpFetch, HttpHeaders, HttpRequest } from './http';
+import { requestBody } from './http';
 import {
   PROBE_SYSTEM_PROMPT,
   PROBE_USER_PROMPT,
@@ -25,11 +26,11 @@ import {
 
 const GROQ_ENDPOINT = 'https://api.groq.com/openai/v1/chat/completions';
 const CEREBRAS_ENDPOINT = 'https://api.cerebras.ai/v1/chat/completions';
-const FLASH_ENDPOINT =
-  'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent';
+const GEMMA_ENDPOINT =
+  'https://generativelanguage.googleapis.com/v1beta/models/gemma-4-31b:generateContent';
 
 const GROQ_MODEL = 'llama-3.1-8b-instant';
-const GOOGLE_MODEL = 'gemini-2.5-flash';
+const GOOGLE_MODEL = 'gemma-4-31b';
 
 const STRUCTURED_COMPLETION = JSON.stringify({ workings: '100 - 51 + 12', answer: 61 });
 
@@ -111,7 +112,7 @@ function createDropsUnderStructuredOutputTransport(): Transport {
     calls: () => calls,
     fetch: (url: string, request: HttpRequest) => {
       calls.push({ url, request });
-      const asked = JSON.parse(request.body) as Record<string, unknown>;
+      const asked = JSON.parse(requestBody(request)) as Record<string, unknown>;
       const structured =
         asked.response_format !== undefined ||
         (asked.generationConfig as Record<string, unknown> | undefined)?.responseSchema !==
@@ -311,7 +312,7 @@ describe('running the probe', () => {
     const transport = createTransport([{ body: OPENAI_BODY_NO_USAGE }]);
     const outcome = await runMeteringProbe({
       provider: 'cerebras',
-      model: 'llama3.1-8b',
+      model: 'gpt-oss-120b',
       apiKey: 'test-key',
       fetch: transport.fetch,
     });
@@ -335,7 +336,7 @@ describe('running the probe', () => {
     expect(outcome.result).toBe('reports-completion-only');
     expect(outcome.usage).toStrictEqual({ tokensSpent: 260, reasoningTokens: null });
 
-    const sent = JSON.parse(transport.calls()[0].request.body) as Record<string, unknown>;
+    const sent = JSON.parse(requestBody(transport.calls()[0].request)) as Record<string, unknown>;
     expect(sent.response_format).toBeDefined();
   });
 
@@ -349,10 +350,10 @@ describe('running the probe', () => {
     });
 
     expect(outcome.result).toBe('reports-reasoning');
-    expect(outcome.endpoint).toBe(FLASH_ENDPOINT);
+    expect(outcome.endpoint).toBe(GEMMA_ENDPOINT);
 
     const call = transport.calls()[0];
-    const sent = JSON.parse(call.request.body) as Record<string, unknown>;
+    const sent = JSON.parse(requestBody(call.request)) as Record<string, unknown>;
     expect((sent.generationConfig as Record<string, unknown>).responseSchema).toBeDefined();
   });
 
@@ -502,7 +503,7 @@ describe('probing a set of Deployments (AC1)', () => {
 
     const outcomes = await probeDeployments([
       { provider: 'groq', model: GROQ_MODEL, apiKey: 'k', fetch: reporting.fetch },
-      { provider: 'cerebras', model: 'llama3.1-8b', apiKey: 'k', fetch: silent.fetch },
+      { provider: 'cerebras', model: 'gpt-oss-120b', apiKey: 'k', fetch: silent.fetch },
       { provider: 'google-ai-studio', model: GOOGLE_MODEL, apiKey: 'k', fetch: partial.fetch },
     ]);
 
@@ -534,7 +535,7 @@ describe('probing a set of Deployments (AC1)', () => {
       { provider: 'groq', model: GROQ_MODEL, apiKey: 'k', fetch: watch('a', OPENAI_BODY_BOTH) },
       {
         provider: 'cerebras',
-        model: 'llama3.1-8b',
+        model: 'gpt-oss-120b',
         apiKey: 'k',
         fetch: watch('b', OPENAI_BODY_BOTH),
       },

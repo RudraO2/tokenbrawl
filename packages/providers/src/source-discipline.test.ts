@@ -95,10 +95,46 @@ describe('shipped provider source discipline', () => {
     // word-boundary match on `14400`.
     const quotas = /\b(30|1000|6000|14400|60000)\b/;
     const offences = offendingLines(quotas, (text) =>
-      // A duration unit conversion is not a quota; nothing else may say 1000.
-      text.includes('MS_PER') ? '' : text.replace(/_/g, ''),
+      // Two named exemptions, both *per-unit conversion factors* rather than
+      // provider quotas -- the distinction this rule is actually about is
+      // "a number a provider's plan decides", and neither of these is one.
+      //
+      //   MS_PER_*        a duration unit conversion (Story 3.2)
+      //   *TOKENS_PER_CALL  how many tokens one Match call costs, which is a
+      //                     property of this game's prompt, not of anyone's
+      //                     free tier. Story 4.7 divides quotas *by* it to
+      //                     work out whether a model can finish a Match at
+      //                     all; putting it in free-tier.config.json would
+      //                     file game data under provider data.
+      //
+      // Exempted by what they are, not by which file they are in: a bare
+      // `1000` anywhere else still fails this.
+      text.includes('MS_PER') || text.includes('TOKENS_PER_CALL')
+        ? ''
+        : text.replace(/_/g, ''),
     );
     expect(offences).toStrictEqual([]);
+  });
+
+  it('keeps the allowlist-free BYOK client out of the package surface (INV-8, Story 4.7)', () => {
+    // The in-suite half of the exemption `scripts/audit-invariants.sh` grants
+    // `byok-direct.ts`. Every other discipline rule in this repo is checked
+    // twice, and this is the one whose failure mode is a tournament silently
+    // acquiring the ability to call a paid endpoint.
+    //
+    // Not exporting it is what makes the file unreachable: `packages/providers`
+    // is consumed through its index everywhere except `apps/web/src/byok/`,
+    // which reaches in by relative path.
+    const index = shippedFiles().find((file) => file.name === 'index.ts');
+    expect(index).toBeDefined();
+    expect(index?.source).not.toMatch(/from\s+'\.\/byok-direct'/);
+
+    // And the factory it holds must still validate what it was given, even
+    // though what it validates is not the allowlist.
+    const direct = shippedFiles().find((file) => file.name === 'byok-direct.ts');
+    expect(direct).toBeDefined();
+    expect(direct?.source).toContain('assertVisitorSuppliedEndpoint');
+    expect(direct?.source).toContain("protocol !== 'https:'");
   });
 
   it('declares no module-level mutable binding, which is where cross-call state hides (AC3)', () => {

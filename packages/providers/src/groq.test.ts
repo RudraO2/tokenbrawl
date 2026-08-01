@@ -13,6 +13,7 @@ import { createScriptedAgent } from '../../core/src/testing/mock-agent';
 import { createMockEnvironment } from '../../core/src/testing/mock-environment';
 import { createGroqClient, groqRequestBody, mapGroqResponse } from './groq';
 import type { HttpFetch, HttpHeaders, HttpRequest, Sleep } from './http';
+import { requestBody } from './http';
 import type { RateLimitSignal } from './rate-limit';
 
 /**
@@ -418,7 +419,7 @@ describe('the adapter holds no cross-call state (AC3, AD-9)', () => {
     await client.complete(PROMPT_REQUEST);
 
     const [first, second] = transport.calls();
-    expect(second.request.body).toBe(first.request.body);
+    expect(requestBody(second.request)).toBe(requestBody(first.request));
     expect(second.request.headers).toStrictEqual(first.request.headers);
   });
 });
@@ -438,7 +439,7 @@ describe('complete() over the transport', () => {
     expect(call.request.method).toBe('POST');
     expect(call.request.headers.Authorization).toBe('Bearer test-key');
     expect(call.request.headers['Content-Type']).toBe('application/json');
-    expect(call.request.body).toBe(groqRequestBody(MODEL, PROMPT_REQUEST));
+    expect(requestBody(call.request)).toBe(groqRequestBody(MODEL, PROMPT_REQUEST));
 
     expect(response.text).toBe('ACTION: attack');
     expect(transport.sleeps()).toStrictEqual([]);

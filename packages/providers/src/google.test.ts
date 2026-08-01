@@ -23,9 +23,18 @@ import type { RateLimitSignal } from './rate-limit';
  * config-driven quotas, a surfaced-not-thrown 429).
  */
 
-const FLASH_ENDPOINT =
-  'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent';
-const MODEL = 'gemini-2.5-flash';
+/*
+ * Story 4.7 replaced the two Gemini 2.5 models this file was written against:
+ * `gemini-2.5-flash` has a 20-request daily cap and can never finish a Match,
+ * and `gemini-2.5-pro` has no free quota at all. Gemma 4 31B and the 3.1 Flash
+ * Lite row stand in, and the path-addressed-model discipline under test is
+ * unchanged -- which is the point of the substitution being this small.
+ */
+const GEMMA_ENDPOINT =
+  'https://generativelanguage.googleapis.com/v1beta/models/gemma-4-31b:generateContent';
+const FLASH_LITE_ENDPOINT =
+  'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent';
+const MODEL = 'gemma-4-31b';
 
 const RECORDED_200 = JSON.stringify({
   candidates: [
@@ -212,32 +221,31 @@ describe('googleRequestBody (INV-4, INV-7)', () => {
 
 describe('createGoogleClient configuration (AC5, INV-8)', () => {
   it('defaults to the allowlisted per-model endpoint', () => {
-    expect(clientWith(createTransport([{ body: RECORDED_200 }])).endpoint).toBe(FLASH_ENDPOINT);
+    expect(clientWith(createTransport([{ body: RECORDED_200 }])).endpoint).toBe(GEMMA_ENDPOINT);
   });
 
   it('carries the free-tier limits for its model, read from the config file', () => {
     const client = clientWith(createTransport([{ body: RECORDED_200 }]));
     expect(client.limits).toStrictEqual({
-      requestsPerMinute: 10,
-      requestsPerDay: 1500,
-      tokensPerMinute: 250_000,
+      requestsPerMinute: 30,
+      requestsPerDay: 14_400,
+      tokensPerMinute: 16_000,
     });
   });
 
-  it('picks the pro endpoint for the pro model, with its own tighter quota', () => {
-    const client = clientWith(createTransport([{ body: RECORDED_200 }]), { model: 'gemini-2.5-pro' });
-    expect(client.endpoint).toBe(
-      'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent',
-    );
-    expect(client.limits.requestsPerDay).toBe(50);
+  it('picks each model its own endpoint, carrying its own quota', () => {
+    const client = clientWith(createTransport([{ body: RECORDED_200 }]), {
+      model: 'gemini-3.1-flash-lite',
+    });
+    expect(client.endpoint).toBe(FLASH_LITE_ENDPOINT);
+    expect(client.limits.requestsPerDay).toBe(500);
   });
 
   it('refuses an endpoint that names a different model than configured', () => {
     expect(() =>
       clientWith(createTransport([{ body: RECORDED_200 }]), {
-        model: 'gemini-2.5-flash',
-        endpoint:
-          'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent',
+        model: 'gemma-4-31b',
+        endpoint: FLASH_LITE_ENDPOINT,
       }),
     ).toThrow(/does not name model/);
   });
@@ -245,8 +253,9 @@ describe('createGoogleClient configuration (AC5, INV-8)', () => {
   it('refuses an endpoint that is not on the free-tier allowlist (INV-8)', () => {
     expect(() =>
       clientWith(createTransport([{ body: RECORDED_200 }]), {
-        model: 'gemini-2.5-flash',
-        endpoint: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:streamGenerateContent',
+        model: 'gemma-4-31b',
+        endpoint:
+          'https://generativelanguage.googleapis.com/v1beta/models/gemma-4-31b:streamGenerateContent',
       }),
     ).toThrow(/does not name model|not on the free-tier allowlist/);
   });
@@ -286,7 +295,7 @@ describe('complete() over the transport', () => {
 
     expect(transport.calls()).toHaveLength(1);
     const [call] = transport.calls();
-    expect(call.url).toBe(FLASH_ENDPOINT);
+    expect(call.url).toBe(GEMMA_ENDPOINT);
     expect(call.url).not.toContain('key=');
     expect(call.request.headers['x-goog-api-key']).toBe('test-key');
     expect(response.text).toBe('ACTION: attack');
@@ -307,7 +316,7 @@ describe('a rate-limit response (AC2)', () => {
     expect(transport.signals()[0]).toMatchObject({
       kind: 'rate-limit',
       provider: 'google-ai-studio',
-      endpoint: FLASH_ENDPOINT,
+      endpoint: GEMMA_ENDPOINT,
       retryAfterMs: 5000,
     });
     expect(transport.sleeps()).toStrictEqual([5000]);
@@ -346,7 +355,7 @@ describe('a Google AI Studio Deployment inside a real Match (AC1)', () => {
     expect(entries.length).toBeGreaterThan(1);
     for (const entry of entries) {
       expect(entry.provider).toBe('google-ai-studio');
-      expect(entry.endpoint).toBe(FLASH_ENDPOINT);
+      expect(entry.endpoint).toBe(GEMMA_ENDPOINT);
     }
 
     const log = buildCommandLog(match, {
@@ -357,7 +366,7 @@ describe('a Google AI Studio Deployment inside a real Match (AC1)', () => {
         {
           id: deployment.id,
           kind: 'deployment',
-          deployment: { provider: 'google-ai-studio', endpoint: FLASH_ENDPOINT, model: MODEL },
+          deployment: { provider: 'google-ai-studio', endpoint: GEMMA_ENDPOINT, model: MODEL },
         },
         { id: 'bot:blocker', kind: 'bot' },
       ],

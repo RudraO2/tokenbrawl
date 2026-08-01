@@ -1,4 +1,5 @@
 import type { HttpFetch, HttpRequest, HttpResponse } from '../../../../packages/providers/src/http';
+import { requestBody } from '../../../../packages/providers/src/http';
 
 /**
  * The transport fake every BYOK test runs against (Story 4.6).
@@ -84,7 +85,7 @@ export function createFakeTransport(config: FakeTransportConfig = {}): FakeTrans
   const statuses = config.statuses ?? [200];
 
   const fetch: HttpFetch = (url: string, request: HttpRequest): Promise<HttpResponse> => {
-    calls.push({ url, headers: request.headers, body: request.body });
+    calls.push({ url, headers: request.headers, body: requestBody(request) });
     if (config.rejectWith !== undefined) {
       return Promise.reject(config.rejectWith);
     }

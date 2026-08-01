@@ -11,7 +11,7 @@ import { createGoogleClient } from './google';
 
 const LIVE = process.env.TOKENBRAWL_LIVE_GOOGLE === '1';
 const API_KEY = process.env.GOOGLE_AI_STUDIO_API_KEY ?? '';
-const MODEL = process.env.TOKENBRAWL_LIVE_GOOGLE_MODEL ?? 'gemini-2.5-flash';
+const MODEL = process.env.TOKENBRAWL_LIVE_GOOGLE_MODEL ?? 'gemma-4-31b';
 
 const OBSERVATION: Observation = {
   state: 'separation=140 yourHealth=100 theirHealth=88 yourMeter=40 theirCommitmentRemaining=6',

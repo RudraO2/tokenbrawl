@@ -11,7 +11,7 @@ import { createCerebrasClient } from './cerebras';
 
 const LIVE = process.env.TOKENBRAWL_LIVE_CEREBRAS === '1';
 const API_KEY = process.env.CEREBRAS_API_KEY ?? '';
-const MODEL = process.env.TOKENBRAWL_LIVE_CEREBRAS_MODEL ?? 'llama3.1-8b';
+const MODEL = process.env.TOKENBRAWL_LIVE_CEREBRAS_MODEL ?? 'gpt-oss-120b';
 
 const OBSERVATION: Observation = {
   state: 'separation=140 yourHealth=100 theirHealth=88 yourMeter=40 theirCommitmentRemaining=6',

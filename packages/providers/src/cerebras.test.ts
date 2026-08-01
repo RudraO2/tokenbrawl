@@ -23,7 +23,7 @@ import type { RateLimitSignal } from './rate-limit';
  */
 
 const CEREBRAS_ENDPOINT = 'https://api.cerebras.ai/v1/chat/completions';
-const MODEL = 'llama3.1-8b';
+const MODEL = 'gpt-oss-120b';
 
 const RECORDED_200 = JSON.stringify({
   id: 'chatcmpl-cerebras-1',
@@ -195,9 +195,9 @@ describe('createCerebrasClient configuration (AC5, INV-8)', () => {
   it('carries the free-tier limits for its model, read from the config file', () => {
     const client = clientWith(createTransport([{ body: RECORDED_200 }]));
     expect(client.limits).toStrictEqual({
-      requestsPerMinute: 30,
+      requestsPerMinute: 5,
       requestsPerDay: 1000,
-      tokensPerMinute: 60_000,
+      tokensPerMinute: 30_000,
     });
   });
 

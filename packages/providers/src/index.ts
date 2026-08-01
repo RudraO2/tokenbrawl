@@ -22,8 +22,16 @@ export {
 } from './free-tier';
 export type { FreeTierConfig, FreeTierLimits, FreeTierProvider } from './free-tier';
 
-export { defaultHttpFetch, defaultSleep } from './http';
-export type { HttpFetch, HttpHeaders, HttpRequest, HttpResponse, Sleep } from './http';
+export { defaultHttpFetch, defaultSleep, requestBody } from './http';
+export type {
+  HttpFetch,
+  HttpGetRequest,
+  HttpHeaders,
+  HttpPostRequest,
+  HttpRequest,
+  HttpResponse,
+  Sleep,
+} from './http';
 
 export {
   RATE_LIMIT_STATUS,
@@ -93,3 +101,32 @@ export {
   withMeteringProbe,
 } from './track';
 export type { LeaderboardTrack, MeteringExclusion, TrackPartition } from './track';
+
+// ---------------------------------------------------------------------------
+// Story 4.7: whether a model can finish a Match at all, asking a provider which
+// models a key may use, and the shared OpenAI-compatible wire format.
+//
+// `byok-direct.ts` is deliberately ABSENT from this list, and the omission is
+// load-bearing rather than an oversight. It builds a client for a
+// visitor-supplied endpoint and therefore consults no free-tier allowlist; not
+// exporting it means the package's public surface cannot reach it, so no
+// tournament-path file can. `scripts/audit-invariants.sh` checks that this stays
+// true, and `source-discipline.test.ts` checks it a second time from inside the
+// suite. Read the header of `byok-direct.ts` before changing either.
+// ---------------------------------------------------------------------------
+
+export {
+  MATCH_TOKENS_PER_CALL,
+  MATCH_WORST_CASE_CALLS,
+  SLOW_MATCH_MINUTES,
+  feasibilityNotice,
+  matchFeasibility,
+} from './match-feasibility';
+export type { FeasibilityBound, MatchFeasibility } from './match-feasibility';
+
+export { discoverModels, mapModelList, modelListEndpointFor, originOf } from './discovery';
+export type { DiscoverModelsConfig, ModelListFamily } from './discovery';
+
+export { isUnknownModelResponse } from './model-errors';
+
+export { excerpt, mapOpenAiResponse, openAiRequestBody, reportedCount } from './openai-wire';
