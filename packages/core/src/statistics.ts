@@ -78,7 +78,8 @@ export interface BootstrapParams {
   readonly confidenceBasisPoints?: number;
 }
 
-const DEFAULT_CONFIDENCE_BASIS_POINTS = 9500;
+/** A 95% interval, and what every caller that names no coverage gets. */
+export const DEFAULT_CONFIDENCE_BASIS_POINTS = 9500;
 
 /**
  * Mean of a score sample, floored to an integer basis point.
@@ -95,6 +96,44 @@ export function meanBasisPoints(scoresBasisPoints: readonly number[]): number {
     total += score;
   }
   return Math.floor(total / scoresBasisPoints.length);
+}
+
+/**
+ * `6500` -> `"0.6500"`. Integer arithmetic only, so a published rate renders
+ * identically on every machine and a report diff is a real change rather than
+ * a formatting one.
+ *
+ * Lives here rather than beside a report builder because Story 7.2 gave the
+ * repo a second family of committed artefacts, and two copies of "how a rate is
+ * written down" is how two reports start disagreeing about the same number.
+ * `packages/env-fighter/src/testing/make-skill-gate-report.ts` re-exports this
+ * one; it does not keep its own.
+ *
+ * Unsigned by construction: flooring a negative value carries the sign into the
+ * fractional half and renders nonsense, so a caller with a signed figure splits
+ * the sign off first (`formatSignedBasisPoints`).
+ */
+export function formatBasisPoints(basisPoints: number): string {
+  const whole = Math.floor(basisPoints / BASIS_POINTS_SCALE);
+  const fraction = basisPoints - whole * BASIS_POINTS_SCALE;
+  return `${String(whole)}.${String(fraction).padStart(4, '0')}`;
+}
+
+/**
+ * The bootstrap seed for row `index`, derived from the caller's single seed.
+ *
+ * Each row gets its own resampling stream: reusing one seed across rows would
+ * resample every sample along the identical index sequence, correlating
+ * intervals that a reader compares as independent evidence. Derived rather than
+ * supplied so a whole report still reproduces from one number (AD-5).
+ *
+ * `skill-gate.ts` holds a private copy of this expression and keeps it: that
+ * module's output is a committed hard gate, and re-pointing it at a shared
+ * helper is churn on an artefact whose whole value is that it does not move.
+ * The two are asserted equal in `statistics.test.ts`.
+ */
+export function deriveSeed(seed: number, index: number): number {
+  return (Math.imul(seed, 31) + index) | 0;
 }
 
 function assertSample(scoresBasisPoints: readonly number[]): void {

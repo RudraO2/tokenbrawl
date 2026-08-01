@@ -5,6 +5,8 @@ import {
   LOSS_BASIS_POINTS,
   WIN_BASIS_POINTS,
   bootstrapMeanInterval,
+  deriveSeed,
+  formatBasisPoints,
   meanBasisPoints,
 } from './statistics';
 
@@ -213,5 +215,42 @@ describe('bootstrapMeanInterval (AD-5: seeded, or the gate does not reproduce)',
         bootstrapMeanInterval({ scoresBasisPoints, resamples: RESAMPLES, seed: 1.5 }),
       ).toThrow(/safe integer/);
     });
+  });
+});
+
+/**
+ * Story 7-2 moved these two out of `packages/env-fighter/src/testing/` so that
+ * both families of committed report render a rate and derive a per-row seed the
+ * same way. The cases below are the contract the move has to preserve.
+ */
+describe('formatBasisPoints', () => {
+  it('renders a rate by integer arithmetic, to four places, never rounding', () => {
+    expect(formatBasisPoints(WIN_BASIS_POINTS)).toBe('1.0000');
+    expect(formatBasisPoints(DRAW_BASIS_POINTS)).toBe('0.5000');
+    expect(formatBasisPoints(LOSS_BASIS_POINTS)).toBe('0.0000');
+    expect(formatBasisPoints(6500)).toBe('0.6500');
+    expect(formatBasisPoints(1)).toBe('0.0001');
+    expect(formatBasisPoints(9999)).toBe('0.9999');
+  });
+});
+
+describe('deriveSeed', () => {
+  it('gives each row index its own seed', () => {
+    expect(deriveSeed(20260802, 0)).not.toBe(deriveSeed(20260802, 1));
+    expect(deriveSeed(20260802, 1)).not.toBe(deriveSeed(20260803, 1));
+  });
+
+  it('is the expression skill-gate.ts holds privately, so the two cannot drift', () => {
+    for (const seed of [0, 1, 987654321, -5, 2147483647]) {
+      for (const index of [0, 1, 7, 199]) {
+        expect(deriveSeed(seed, index)).toBe((Math.imul(seed, 31) + index) | 0);
+      }
+    }
+  });
+
+  it('stays a safe integer, which bootstrapMeanInterval requires', () => {
+    for (const seed of [20260802, 2147483647, -2147483648]) {
+      expect(Number.isSafeInteger(deriveSeed(seed, 4))).toBe(true);
+    }
   });
 });

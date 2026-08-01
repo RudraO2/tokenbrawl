@@ -128,3 +128,38 @@ export type {
   SideAdvantageParams,
   SideAdvantageSummary,
 } from './side-advantage';
+
+// ---------------------------------------------------------------------------
+// Story 7.2: ratings with bootstrapped confidence intervals, and the one
+// renderer allowed to publish a rating table.
+// ---------------------------------------------------------------------------
+
+export { computeLeaderboard } from './ratings';
+export type {
+  Leaderboard,
+  LeaderboardMatch,
+  LeaderboardParams,
+  MatchExclusion,
+  MatchExclusionReason,
+  OpponentRecord,
+  RatingRow,
+  RatingTrack,
+  UnratedAgent,
+} from './ratings';
+
+export { buildLeaderboardReport, renderLeaderboardMarkdown } from './ratings-report';
+export type {
+  LeaderboardReport,
+  LeaderboardReportMeta,
+  ReportRatingRow,
+} from './ratings-report';
+
+export {
+  BASIS_POINTS_SCALE,
+  DEFAULT_CONFIDENCE_BASIS_POINTS,
+  bootstrapMeanInterval,
+  deriveSeed,
+  formatBasisPoints,
+  meanBasisPoints,
+} from './statistics';
+export type { BootstrapInterval, BootstrapParams } from './statistics';

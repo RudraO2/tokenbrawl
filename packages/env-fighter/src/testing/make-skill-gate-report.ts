@@ -14,7 +14,7 @@
  */
 
 import type { SkillGateVerdict } from '../../../core/src/skill-gate';
-import { BASIS_POINTS_SCALE } from '../../../core/src/statistics';
+import { formatBasisPoints } from '../../../core/src/statistics';
 import type { LadderRun } from './skill-ladder';
 import { LADDER_BOOTSTRAP_RESAMPLES, LADDER_BOOTSTRAP_SEED } from './skill-ladder';
 
@@ -131,12 +131,15 @@ export function buildSkillGateReport(run: LadderRun, verdict: SkillGateVerdict):
  * a float in the rendering path of a number the gate is judged on, and
  * `toFixed` rounds. Splitting the integer and fractional halves keeps the
  * rendered text exactly the value that was compared.
+ *
+ * The implementation moved to `packages/core/src/statistics.ts` in Story 7-2,
+ * which gave the repo a second family of committed reports: two copies of "how
+ * a rate is written down" is how two artefacts start rendering one number two
+ * ways. Re-exported rather than re-imported at every call site so this module's
+ * public surface is unchanged, and the byte-comparison tests over both
+ * committed reports prove the move changed no output.
  */
-export function formatBasisPoints(basisPoints: number): string {
-  const whole = Math.floor(basisPoints / BASIS_POINTS_SCALE);
-  const fraction = basisPoints - whole * BASIS_POINTS_SCALE;
-  return `${whole}.${String(fraction).padStart(4, '0')}`;
-}
+export { formatBasisPoints };
 
 export function renderSkillGateMarkdown(report: SkillGateReport): string {
   const lines: string[] = [];
