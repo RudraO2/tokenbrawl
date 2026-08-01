@@ -93,9 +93,14 @@ body {
   border: var(--tb-border-width) solid var(--tb-ink);
   box-shadow: var(--tb-shadow);
   background: var(--tb-bg);
-  /* 3:1 against the panel. Equal columns would read as a dashboard; the fight
-   * is the subject and the annotation hangs off it. */
-  flex: 3 1 640px;
+  /*
+   * 2:1 against the panel, not 3:1. Story 4.3 calls the reasoning the
+   * centrepiece and says to build the layout around it -- a panel narrow enough
+   * to be read as a caption would be bolting it on. Still deliberately unequal:
+   * the fight is what a visitor arrives for, the reasoning is what they stay
+   * for, and equal columns would read as a dashboard.
+   */
+  flex: 2 1 560px;
   max-width: 960px;
 }
 
@@ -160,26 +165,94 @@ body {
 /* --- Reasoning panel ---------------------------------------------------- */
 
 .tb-reasoning {
-  flex: 1 1 300px;
+  flex: 1 1 380px;
   border: var(--tb-border-width) solid var(--tb-ink);
   box-shadow: var(--tb-shadow);
   background: var(--tb-bg);
   padding: var(--tb-space-2);
-  min-height: 160px;
+  min-height: 200px;
+  overflow-wrap: break-word;
 }
 
 /* A model id is data, so it is set in the mono face. See docs/DESIGN.md. */
 .tb-reasoning-heading {
   margin: 0 0 var(--tb-space-2);
   font-family: var(--tb-font-mono);
+  font-size: 18px;
   text-transform: uppercase;
   border-bottom: var(--tb-border-width) solid var(--tb-ink);
   padding-bottom: var(--tb-space-1);
 }
 
+/* Tick, commitment, Reflex Mode, Parse Failure -- the facts about the call. */
+.tb-reasoning-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--tb-space-1);
+  font-family: var(--tb-font-mono);
+  margin-bottom: var(--tb-space-2);
+}
+
+/*
+ * A tick is simulation time and identical for a fast Match and a slow one, so
+ * showing it leaks nothing about how long a Deployment thought (INV-3). It is
+ * the only position label in the app that means anything.
+ */
+.tb-chip--tick {
+  color: var(--tb-muted);
+}
+
+/* A commitment still executing is a live fact about this frame, so it is lime. */
+.tb-chip--committed {
+  background: var(--tb-accent);
+  color: var(--tb-bg);
+}
+
+/*
+ * Reflex Mode is the Token Bank exhausted -- a degraded call, not a failed one.
+ * Warn ink on the ground would be red text at 4.26:1 and under the floor, so it
+ * is drawn as a red border on the ground instead: a border carries no text.
+ */
+.tb-chip--reflex {
+  border-color: var(--tb-warn);
+  color: var(--tb-ink);
+}
+
 .tb-reasoning-body {
   margin: 0;
   line-height: 1.4;
+  font-size: 17px;
+}
+
+/*
+ * The one place warn appears as a text colour is nowhere: this is --tb-bg ink
+ * on a --tb-warn fill, which is the same 4.26:1 pair the other way round and is
+ * legible because the block is solid. See docs/DESIGN.md.
+ */
+.tb-reasoning--warn {
+  background: var(--tb-warn);
+  color: var(--tb-bg);
+  padding: var(--tb-space-1);
+  font-weight: 800;
+}
+
+.tb-reasoning-label {
+  margin: var(--tb-space-2) 0 var(--tb-space-1);
+  font-family: var(--tb-font-mono);
+  font-size: 13px;
+  text-transform: uppercase;
+  color: var(--tb-muted);
+}
+
+/* Verbatim, and it must stay verbatim: Story 1.6 publishes failures to be audited. */
+.tb-reasoning-raw {
+  margin: 0;
+  padding: var(--tb-space-1);
+  border: var(--tb-border-width) solid var(--tb-ink);
+  font-family: var(--tb-font-mono);
+  font-size: 13px;
+  white-space: pre-wrap;
+  overflow-x: auto;
 }
 
 /*
@@ -194,6 +267,7 @@ body {
   color: var(--tb-muted);
   text-transform: uppercase;
   font-family: var(--tb-font-mono);
+  font-size: 14px;
 }
 
 /* --- Readout ----------------------------------------------------------- */

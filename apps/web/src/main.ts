@@ -3,6 +3,7 @@ import { DEFAULT_FIGHTER_CONFIG } from '../../../packages/env-fighter/src/config
 import { createFighterEnvironment } from '../../../packages/env-fighter/src/environment';
 import { createPlaybackClock, type PlaybackClock } from './player/clock';
 import { buildReplayFilm, type ReplayFilm } from './replay/film';
+import { resolveDecision, type ResolvedDecision } from './replay/decision-point';
 import {
   createReasoningSource,
   type ReasoningLookup,
@@ -80,9 +81,24 @@ export interface MountPoint {
   querySelector(selectors: string): MountPointChild | null;
 }
 
+/**
+ * The events the shell binds, and the one property of one of them it reads.
+ *
+ * `pointerType` is load-bearing rather than incidental. On a touch device
+ * `pointerleave` fires on lift, so treating it as "the visitor looked away"
+ * would make a tap show the panel and hide it in the same gesture -- AC4 asks
+ * for the opposite. A mouse leave really is looking away, so the two are told
+ * apart by the only thing that distinguishes them.
+ */
+export interface PointerLike {
+  readonly pointerType?: string;
+}
+
+export type ShellEvent = 'click' | 'pointerenter' | 'pointerleave' | 'focus' | 'blur';
+
 export interface MountPointChild {
   innerHTML: string;
-  addEventListener(type: 'click' | 'pointerenter' | 'focus', listener: () => void): void;
+  addEventListener(type: ShellEvent, listener: (event?: PointerLike) => void): void;
 }
 
 export interface MountedPlayer {
@@ -230,55 +246,118 @@ export function decisionPointCount(film: ReplayFilm): number {
   return Math.max(0, film.states.length - 1);
 }
 
+export interface PanelChip {
+  readonly label: string;
+  readonly modifier: string;
+}
+
+export interface ReasoningView {
+  readonly heading: string;
+  /** `TICK 120`, or empty when this Agent has not acted yet. */
+  readonly tickLabel: string;
+  readonly chips: readonly PanelChip[];
+  readonly body: string;
+  readonly bodyModifier: string;
+  /** Verbatim provider response. Shown whenever there is one, required when the call was a Parse Failure. */
+  readonly rawResponse: string | null;
+  /** The whole panel as one string, for the screen-reader announcement. */
+  readonly announcement: string;
+}
+
 /**
- * What the reasoning panel says, as a pure function of one lookup.
+ * What the reasoning panel says, as a pure function of one lookup and one
+ * resolved Decision Point.
  *
- * Story 4.2's AC4 lives here: a sidecar still in flight produces a *loading*
- * body, distinct both from "this Agent recorded no reasoning" and from "the
- * reasoning could not be fetched". Collapsing those three is how a slow network
- * gets reported to a viewer as a silent model.
+ * The three states this separates are three different facts about a Deployment
+ * and the story asks for all three by name:
  *
- * **The loading copy is a constant.** No elapsed value, no estimate, no
- * "taking longer than usual" -- INV-3 forbids the UI from hinting at how long
- * anything took, and a loading affordance is the obvious place to leak it.
+ * - **Reflex Mode (AC2)** -- the Token Bank was depleted and the call was
+ *   served at `max_tokens=8`. There is no reasoning because there was no budget
+ *   for any, and a blank panel would read as a model with nothing to say. It is
+ *   the Bank that ran out, and the panel says which.
+ * - **Parse Failure (AC3)** -- no valid Action could be extracted and the
+ *   Fallback Action was applied. The raw response is shown verbatim, because
+ *   Story 1.6's discipline is that a failure is published and auditable rather
+ *   than retried away, and a failure a visitor cannot read is not published.
+ * - **Nothing recorded** -- a Baseline Bot, or a provider that returned no
+ *   text. Ordinary, and neither of the above.
  *
- * Story 4.3 owns the full panel: Reflex Mode and Parse Failure presentation,
- * touch, and screen-reader exposure. What is here is the source-state half,
- * which is what 4.2's AC4 asks for.
+ * `resolved.polled === false` is the fourth state and it is the one AC1 turns
+ * on: this fighter was inside a Commitment Window and was never asked. What it
+ * is doing was decided earlier, and the panel names that Decision Point rather
+ * than either blanking or -- worse -- showing whichever entry happens to be
+ * nearest. See `replay/decision-point.ts`.
+ *
+ * **Nothing here reads or implies a duration** (INV-3). Ticks are simulation
+ * time: identical for a Match between two slow Deployments and one between two
+ * fast ones. The loading copy is a constant string with no estimate in it.
  */
-export function reasoningPanel(
+export function reasoningView(
   lookup: ReasoningLookup,
+  resolved: ResolvedDecision | null,
   agentId: string,
-): { readonly heading: string; readonly body: string; readonly modifier: string } {
-  if (lookup.status === 'loading') {
-    return {
+): ReasoningView {
+  const chips: PanelChip[] = [];
+  const tickLabel = resolved === null ? '' : `Tick ${String(resolved.tick)}`;
+
+  if (resolved !== null && !resolved.polled) {
+    chips.push({ label: 'Still committed', modifier: 'tb-chip--committed' });
+  }
+  if (lookup.reflexMode) {
+    chips.push({ label: 'Reflex mode', modifier: 'tb-chip--reflex' });
+  }
+  if (lookup.parseFailure) {
+    chips.push({ label: 'Parse failure', modifier: 'tb-chip--failed' });
+  }
+
+  const view = (body: string, bodyModifier: string, rawResponse: string | null): ReasoningView =>
+    Object.freeze({
       heading: agentId,
-      body: 'Fetching reasoning…',
-      modifier: 'tb-reasoning--loading',
-    };
+      tickLabel,
+      chips: Object.freeze(chips),
+      body,
+      bodyModifier,
+      rawResponse,
+      announcement: [agentId, tickLabel, ...chips.map((chip) => chip.label), body, rawResponse ?? '']
+        .filter((part) => part.length > 0)
+        .join('. '),
+    });
+
+  if (resolved === null) {
+    return view('This fighter has not acted yet.', 'tb-reasoning--absent', null);
+  }
+  if (lookup.status === 'loading') {
+    // 4.2's AC4, kept: a sidecar in flight is not a model that said nothing.
+    return view('Fetching reasoning…', 'tb-reasoning--loading', null);
   }
   if (lookup.status === 'unavailable') {
-    return {
-      heading: agentId,
-      body: 'Reasoning unavailable for this Match.',
-      modifier: 'tb-reasoning--absent',
-    };
+    return view('Reasoning unavailable for this Match.', 'tb-reasoning--absent', null);
   }
   if (!lookup.found) {
-    return {
-      heading: agentId,
-      body: 'This Agent was not polled at this Decision Point.',
-      modifier: 'tb-reasoning--absent',
-    };
+    // The resolver returned a tick, so the log should carry that entry. Reaching
+    // here means the sidecar and the log disagree about which Decision Points
+    // exist, which is worth saying plainly rather than rendering an empty box.
+    return view('No record for this Decision Point.', 'tb-reasoning--absent', null);
   }
-  if (lookup.reasoning === null || lookup.reasoning.length === 0) {
-    return {
-      heading: agentId,
-      body: 'No reasoning recorded for this Decision Point.',
-      modifier: 'tb-reasoning--absent',
-    };
+
+  if (lookup.parseFailure) {
+    return view(
+      'No valid Action could be read from this response, so the Fallback Action was applied. It was not retried.',
+      'tb-reasoning--warn',
+      lookup.rawResponse,
+    );
   }
-  return { heading: agentId, body: lookup.reasoning, modifier: 'tb-reasoning--text' };
+  if (lookup.reasoning !== null && lookup.reasoning.length > 0) {
+    return view(lookup.reasoning, 'tb-reasoning--text', lookup.rawResponse);
+  }
+  if (lookup.reflexMode) {
+    return view(
+      'Served in Reflex Mode: this Deployment had spent its Token Bank, so the call was capped at eight tokens. There was no budget to reason with.',
+      'tb-reasoning--absent',
+      lookup.rawResponse,
+    );
+  }
+  return view('No reasoning recorded for this Decision Point.', 'tb-reasoning--absent', lookup.rawResponse);
 }
 
 /**
@@ -303,6 +382,13 @@ export function escapeHtml(value: string): string {
  * every decision it displays computed by a pure function above.
  */
 export function renderApp(root: MountPoint, log: CommandLog, view: HostView): MountedApp {
+  // The panel carries `role="status"` and `aria-live="polite"`, so a screen
+  // reader announces it when it changes. That is only safe because hovering or
+  // focusing a fighter pauses playback: an unpaused panel changes five times a
+  // second, and a live region firing five times a second is worse for a
+  // screen-reader user than no announcement at all. Each target points at the
+  // panel with `aria-describedby`, so the reasoning is reachable from the
+  // control that reveals it (AC5).
   root.innerHTML = `
     <header class="tb-masthead">
       <h1 class="tb-wordmark">Tokenbrawl</h1>
@@ -311,10 +397,26 @@ export function renderApp(root: MountPoint, log: CommandLog, view: HostView): Mo
     <div class="tb-arena">
       <div class="tb-stage">
         <canvas class="tb-canvas"></canvas>
-        <button class="tb-fighter-target tb-fighter-target--p1" type="button" data-agent="0"></button>
-        <button class="tb-fighter-target tb-fighter-target--p2" type="button" data-agent="1"></button>
+        <button
+          class="tb-fighter-target tb-fighter-target--p1"
+          type="button"
+          data-agent="0"
+          aria-describedby="tb-reasoning-panel"
+        ></button>
+        <button
+          class="tb-fighter-target tb-fighter-target--p2"
+          type="button"
+          data-agent="1"
+          aria-describedby="tb-reasoning-panel"
+        ></button>
       </div>
-      <div class="tb-reasoning" data-reasoning></div>
+      <div
+        class="tb-reasoning"
+        id="tb-reasoning-panel"
+        data-reasoning
+        role="status"
+        aria-live="polite"
+      ></div>
     </div>
     <div class="tb-readout" data-readout></div>
     <button class="tb-button" type="button" data-play>Replay</button>
@@ -334,40 +436,62 @@ export function renderApp(root: MountPoint, log: CommandLog, view: HostView): Mo
   // declaration, which may legally be called before the narrowing runs.
   const panelNode = panel;
 
-  // Which fighter the pointer or focus last landed on, and what the panel last
-  // showed. `null` means nothing is selected and the panel shows its resting
-  // prompt. `renderedKey` exists so following playback costs one comparison per
-  // frame instead of an `innerHTML` write per frame.
-  const selection: { agentIndex: 0 | 1 | null; renderedKey: string } = {
-    agentIndex: null,
-    renderedKey: '',
-  };
+  // Which fighter the pointer or focus last landed on, what the panel last
+  // showed, and whether letting go should put playback back. `null` means
+  // nothing is selected and the panel shows its resting prompt. `renderedKey`
+  // exists so following playback costs one comparison per frame instead of an
+  // `innerHTML` write per frame.
+  const selection: {
+    agentIndex: 0 | 1 | null;
+    renderedKey: string;
+    resumeOnRelease: boolean;
+  } = { agentIndex: null, renderedKey: '', resumeOnRelease: false };
 
   function renderPanel(): void {
     if (selection.agentIndex === null) {
       if (selection.renderedKey !== 'idle') {
         selection.renderedKey = 'idle';
         panelNode.innerHTML =
-          '<p class="tb-reasoning-body tb-reasoning--idle">Hover a fighter to read what it was thinking.</p>';
+          '<p class="tb-reasoning-body tb-reasoning--idle">Hover, tap or tab to a fighter to read what it was thinking. Playback pauses while you read.</p>';
       }
       return;
     }
     const agentIndex = selection.agentIndex;
-    // The Decision Point on screen right now, mapped to the tick the log keys
-    // its decisions by. Story 4.3 pins the exactness of this correspondence;
-    // 4.2 needs it only to have something real to display.
-    const tick = mounted.decisionPoint() * DEFAULT_FIGHTER_CONFIG.ticksPerDecision;
-    const lookup = reasoning.at(tick, agentIndex);
-    const key = `${String(agentIndex)}:${String(tick)}:${lookup.status}`;
+    // AC1. The Decision Point on screen is exact -- it is the frame's own index
+    // -- but a fighter inside a Commitment Window was never polled there, so
+    // `resolveDecision` walks back to the decision it is still executing and
+    // says which. It never looks forward and never rounds to whichever entry is
+    // nearest. See `replay/decision-point.ts`.
+    const resolved = resolveDecision(
+      mounted.decisionPoint(),
+      agentIndex,
+      (tick, agent) => reasoning.at(tick, agent).found,
+      DEFAULT_FIGHTER_CONFIG.ticksPerDecision,
+    );
+    const lookup = reasoning.at(resolved?.tick ?? -1, agentIndex);
+    const key = `${String(agentIndex)}:${String(resolved?.tick ?? -1)}:${String(resolved?.polled ?? false)}:${lookup.status}`;
     if (key === selection.renderedKey) {
       return;
     }
     selection.renderedKey = key;
 
-    const panelView = reasoningPanel(lookup, log.agents[agentIndex].id);
+    const panelView = reasoningView(lookup, resolved, log.agents[agentIndex].id);
+    const chips = panelView.chips
+      .map((chip) => `<span class="tb-chip ${chip.modifier}">${escapeHtml(chip.label)}</span>`)
+      .join('');
+    const raw =
+      panelView.rawResponse === null
+        ? ''
+        : `<p class="tb-reasoning-label">Raw response</p><pre class="tb-reasoning-raw">${escapeHtml(panelView.rawResponse)}</pre>`;
+
     panelNode.innerHTML = `
       <p class="tb-reasoning-heading">${escapeHtml(panelView.heading)}</p>
-      <p class="tb-reasoning-body ${panelView.modifier}">${escapeHtml(panelView.body)}</p>
+      <div class="tb-reasoning-meta">
+        ${panelView.tickLabel === '' ? '' : `<span class="tb-chip tb-chip--tick">${escapeHtml(panelView.tickLabel)}</span>`}
+        ${chips}
+      </div>
+      <p class="tb-reasoning-body ${panelView.bodyModifier}">${escapeHtml(panelView.body)}</p>
+      ${raw}
     `;
   }
 
@@ -402,18 +526,62 @@ export function renderApp(root: MountPoint, log: CommandLog, view: HostView): Mo
       continue;
     }
     target.innerHTML = `<span class="tb-visually-hidden">Reasoning for ${escapeHtml(log.agents[agentIndex].id)}</span>`;
+
+    /**
+     * Pointer, tap and keyboard all land here (AC4, AC5), and all three pause.
+     *
+     * Reading is the point of this feature and it is impossible at five
+     * Decision Points per second, so the clock stops on the frame that is on
+     * screen -- which is also what makes AC1's "at that exact position" a
+     * position that holds still long enough to be read.
+     */
     const select = (): void => {
+      if (selection.agentIndex === null) {
+        selection.resumeOnRelease = mounted.clock.isRunning();
+      }
+      mounted.clock.stop();
       selection.agentIndex = agentIndex;
       renderPanel();
     };
+
+    /**
+     * Letting go puts playback back where it was.
+     *
+     * `pointerType === 'touch'` is excluded deliberately: a touch pointer
+     * *leaves* on lift, so honouring it would show the panel and hide it in the
+     * same tap. On touch the selection is sticky, which is what AC4 asks for --
+     * "when a visitor taps a fighter, then the same reasoning appears", and
+     * stays appeared.
+     */
+    const release = (event?: PointerLike): void => {
+      if (event?.pointerType === 'touch') {
+        return;
+      }
+      selection.agentIndex = null;
+      renderPanel();
+      if (selection.resumeOnRelease) {
+        selection.resumeOnRelease = false;
+        mounted.clock.resume();
+      }
+    };
+
     target.addEventListener('pointerenter', select);
     target.addEventListener('focus', select);
     target.addEventListener('click', select);
+    target.addEventListener('pointerleave', release);
+    target.addEventListener('blur', release);
   }
 
   renderPanel();
 
   play.addEventListener('click', () => {
+    // Clears the reading selection too. Without this a visitor who tapped a
+    // fighter (touch selections are sticky, by design) and then pressed Replay
+    // would watch the fight restart with `resumeOnRelease` still armed, and the
+    // next pointer leave would resume a clock that was already running.
+    selection.agentIndex = null;
+    selection.resumeOnRelease = false;
+    renderPanel();
     mounted.clock.stop();
     mounted.clock.start();
   });

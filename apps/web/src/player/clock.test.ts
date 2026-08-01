@@ -246,3 +246,110 @@ describe('the playback clock', () => {
     }
   });
 });
+
+/**
+ * Story 4.3: `resume`, and why `start` could not have been reused.
+ *
+ * Hovering a fighter pauses playback so the reasoning can be read; letting go
+ * has to put the film back where it was. `start()` deliberately rewinds -- that
+ * is what makes the Replay button replay, and Story 4.1 added the rewind to fix
+ * a real defect -- so continuing needs its own verb.
+ */
+describe('resuming after a pause (4.3)', () => {
+  it('continues from the frame on screen rather than from the beginning', () => {
+    const driver = createDriver();
+    const seen: number[] = [];
+    const clock = createPlaybackClock({
+      frameCount: 10,
+      onFrame: (index) => seen.push(index),
+      requestFrame: driver.requestFrame,
+      cancelFrame: driver.cancelFrame,
+    });
+
+    clock.start();
+    driver.pump(3);
+    clock.stop();
+    expect(clock.frameIndex()).toBe(2);
+
+    clock.resume();
+    driver.pump(2);
+
+    // 3 and 4, not 0 and 1. A `start()` here would have rewound the film.
+    expect(seen).toStrictEqual([0, 1, 2, 3, 4]);
+  });
+
+  it('is a no-op on a clock that is already running', () => {
+    // Two schedulers on one film advance it at double rate, which looks like a
+    // rendering choice rather than a defect. Reachable by re-entering a hover
+    // target without ever having left the stage.
+    const driver = createDriver();
+    const clock = createPlaybackClock({
+      frameCount: 10,
+      onFrame: () => undefined,
+      requestFrame: driver.requestFrame,
+    });
+
+    clock.start();
+    const scheduled = driver.pending();
+    clock.resume();
+    clock.resume();
+
+    expect(driver.pending()).toBe(scheduled);
+  });
+
+  it('does not restart a film that has already finished', () => {
+    // The Match can end while the panel is open. Resuming from the last frame
+    // would emit an out-of-range index -- the same defect the rewind in
+    // `start()` fixed from the other direction.
+    const driver = createDriver();
+    const seen: number[] = [];
+    const clock = createPlaybackClock({
+      frameCount: 3,
+      onFrame: (index) => seen.push(index),
+      requestFrame: driver.requestFrame,
+    });
+
+    clock.start();
+    driver.pump(3);
+    expect(seen).toStrictEqual([0, 1, 2]);
+    expect(clock.isRunning()).toBe(false);
+
+    clock.resume();
+    driver.pump(3);
+
+    expect(seen).toStrictEqual([0, 1, 2]);
+    expect(clock.isRunning()).toBe(false);
+  });
+
+  it('schedules nothing under reduced motion', () => {
+    // There is no motion to resume: `start()` already emitted the final frame
+    // and stopped. Scheduling here would be the preference quietly ignored.
+    const driver = createDriver();
+    const clock = createPlaybackClock({
+      frameCount: 10,
+      onFrame: () => undefined,
+      requestFrame: driver.requestFrame,
+      reducedMotion: true,
+    });
+
+    clock.start();
+    clock.resume();
+
+    expect(driver.pending()).toBe(0);
+    expect(clock.isRunning()).toBe(false);
+  });
+
+  it('does nothing on an empty film', () => {
+    const driver = createDriver();
+    const clock = createPlaybackClock({
+      frameCount: 0,
+      onFrame: () => undefined,
+      requestFrame: driver.requestFrame,
+    });
+
+    clock.resume();
+
+    expect(driver.pending()).toBe(0);
+    expect(clock.isRunning()).toBe(false);
+  });
+});

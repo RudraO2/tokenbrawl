@@ -74,14 +74,14 @@ function createCanvas(): { readonly surface: unknown; readonly paints: () => num
 }
 
 interface FakeRoot extends MountPoint {
-  readonly listeners: () => ReadonlyMap<string, (() => void)[]>;
-  readonly fire: (selector: string, type: string) => void;
+  readonly listeners: () => ReadonlyMap<string, ((event?: { readonly pointerType?: string }) => void)[]>;
+  readonly fire: (selector: string, type: string, event?: { readonly pointerType?: string }) => void;
   readonly html: () => string;
 }
 
 function createRoot(): FakeRoot {
   const canvas = createCanvas();
-  const listeners = new Map<string, (() => void)[]>();
+  const listeners = new Map<string, ((event?: { readonly pointerType?: string }) => void)[]>();
   const nodes = new Map<string, MountPointChild>();
   const state = { html: '' };
 
@@ -111,9 +111,9 @@ function createRoot(): FakeRoot {
     querySelector: (selector: string): MountPointChild | null =>
       selector === 'canvas' ? (canvas.surface as MountPointChild) : child(selector),
     listeners: () => listeners,
-    fire: (selector: string, type: string): void => {
+    fire: (selector: string, type: string, event?: { readonly pointerType?: string }): void => {
       for (const listener of listeners.get(`${selector}:${type}`) ?? []) {
-        listener();
+        listener(event);
       }
     },
     html: () => state.html + [...nodes.values()].map((node) => node.innerHTML).join(''),
@@ -455,5 +455,197 @@ describe('untrusted text never reaches innerHTML unescaped', () => {
     await startup(harness.globals);
 
     expect(harness.root.innerHTML).not.toContain('<script>alert');
+  });
+});
+
+/**
+ * Story 4.3, on the page: pointer, tap and keyboard all reach the same panel,
+ * and all three stop the clock so the reasoning can actually be read.
+ */
+describe('hovering a fighter to read its reasoning (4.3)', () => {
+  it('pauses playback on the frame that is on screen', async () => {
+    const { log } = await buildDemoBundle();
+    const harness = createHarness(log);
+
+    const result = await startup(harness.globals);
+    harness.runFrames(4);
+    const frozenAt = result?.mounted.clock.frameIndex();
+
+    harness.root.fire('[data-agent="0"]', 'pointerenter');
+
+    expect(result?.mounted.clock.isRunning()).toBe(false);
+    expect(result?.mounted.clock.frameIndex()).toBe(frozenAt);
+  });
+
+  it('resumes from that frame when the pointer leaves, not from the start', async () => {
+    const { log } = await buildDemoBundle();
+    const harness = createHarness(log);
+
+    const result = await startup(harness.globals);
+    harness.runFrames(4);
+    harness.root.fire('[data-agent="0"]', 'pointerenter');
+    harness.root.fire('[data-agent="0"]', 'pointerleave', { pointerType: 'mouse' });
+
+    expect(result?.mounted.clock.isRunning()).toBe(true);
+    harness.runFrames(2);
+    expect(result?.mounted.clock.frameIndex()).toBe(5);
+  });
+
+  it('keeps the panel open on a touch tap, which is what a tap is for (AC4)', async () => {
+    // A touch pointer *leaves* on lift, so honouring `pointerleave` for touch
+    // would show the panel and hide it in the same gesture.
+    const { log } = await buildDemoBundle();
+    const harness = createHarness(log);
+
+    await startup(harness.globals);
+    harness.root.fire('[data-agent="1"]', 'click');
+    const afterTap = harness.root.html();
+    harness.root.fire('[data-agent="1"]', 'pointerleave', { pointerType: 'touch' });
+
+    expect(harness.root.html()).toBe(afterTap);
+    expect(afterTap).toContain('Tick');
+  });
+
+  it('reaches the same panel from the keyboard, and releases on blur (AC5)', async () => {
+    const { log } = await buildDemoBundle();
+    const harness = createHarness(log);
+
+    const result = await startup(harness.globals);
+    harness.runFrames(3);
+    harness.root.fire('[data-agent="1"]', 'focus');
+
+    expect(result?.mounted.clock.isRunning()).toBe(false);
+    expect(harness.root.html()).toContain('Tick');
+
+    // `blur` carries no pointerType, so it is a real release.
+    harness.root.fire('[data-agent="1"]', 'blur');
+    expect(result?.mounted.clock.isRunning()).toBe(true);
+  });
+
+  it('does not resume a clock that had already finished', async () => {
+    const { log } = await buildDemoBundle();
+    const harness = createHarness(log);
+
+    const result = await startup(harness.globals);
+    harness.runFrames(result?.mounted.film.frames.length ?? 0);
+    expect(result?.mounted.clock.isRunning()).toBe(false);
+
+    harness.root.fire('[data-agent="0"]', 'pointerenter');
+    harness.root.fire('[data-agent="0"]', 'pointerleave', { pointerType: 'mouse' });
+
+    // It was not running when the panel opened, so letting go must not start it.
+    expect(result?.mounted.clock.isRunning()).toBe(false);
+  });
+
+  it('exposes the panel to a screen reader and names each target (AC5)', async () => {
+    const { log } = await buildDemoBundle();
+    const harness = createHarness(log);
+
+    await startup(harness.globals);
+
+    expect(harness.root.innerHTML).toContain('aria-live="polite"');
+    expect(harness.root.innerHTML).toContain('role="status"');
+    expect(harness.root.innerHTML).toContain('aria-describedby="tb-reasoning-panel"');
+    expect(harness.root.innerHTML).toContain('id="tb-reasoning-panel"');
+    // Each target carries an accessible name naming the fighter it reveals.
+    expect(harness.root.html()).toContain(`Reasoning for ${log.agents[0].id}`);
+    expect(harness.root.html()).toContain(`Reasoning for ${log.agents[1].id}`);
+  });
+
+  it('shows the Decision Point the fighter is at, with its raw response', async () => {
+    const { log, sidecar } = await buildDemoBundle();
+    const harness = createHarness(log, { spritesResolve: true, sidecar });
+
+    const result = await startup(harness.globals);
+    await result?.dressed;
+    harness.root.fire('[data-agent="0"]', 'pointerenter');
+
+    // The bots record no reasoning, but they do emit a line, and that line is
+    // the only thing the page can honestly show for them.
+    expect(harness.root.html()).toContain('Raw response');
+    expect(harness.root.html()).toContain('aggressive:');
+  });
+
+  it('clears the reading selection when Replay is pressed', async () => {
+    // Otherwise `resumeOnRelease` stays armed across a restart and the next
+    // pointer leave resumes a clock that is already running.
+    const { log } = await buildDemoBundle();
+    const harness = createHarness(log);
+
+    const result = await startup(harness.globals);
+    harness.runFrames(4);
+    harness.root.fire('[data-agent="0"]', 'pointerenter');
+    harness.root.fire('[data-play]', 'click');
+
+    expect(result?.mounted.clock.isRunning()).toBe(true);
+    expect(result?.mounted.clock.frameIndex()).toBe(-1);
+    expect(harness.root.html()).toContain('Hover, tap or tab to a fighter');
+
+    const scheduled = harness.frames();
+    harness.root.fire('[data-agent="0"]', 'pointerleave', { pointerType: 'mouse' });
+    expect(harness.frames()).toBe(scheduled);
+  });
+});
+
+/**
+ * AC2 and AC3 end to end.
+ *
+ * The committed demo Match is two Baseline Bots, so it contains no Reflex-Mode
+ * call and no Parse Failure -- the two states the story asks for by name are
+ * unreachable on the page today. Pinning them only against the pure view
+ * function would leave the wiring between the sidecar, the resolver and the DOM
+ * untested for exactly the two cases a visitor most needs to be told about, so
+ * the flags are injected through the sidecar, which is where a real Deployment
+ * log carries them.
+ */
+describe('the states a Deployment log will carry (4.3 AC2, AC3)', () => {
+  async function panelFor(patch: Record<string, unknown>): Promise<string> {
+    const { log, sidecar } = await buildDemoBundle();
+    const first = sidecar.entries[0];
+    const harness = createHarness(log, {
+      spritesResolve: true,
+      sidecar: {
+        ...sidecar,
+        entries: sidecar.entries.map((entry) =>
+          entry.tick === first.tick && entry.agentIndex === first.agentIndex
+            ? { ...entry, ...patch }
+            : entry,
+        ),
+      },
+    });
+
+    const result = await startup(harness.globals);
+    await result?.dressed;
+    // Frame zero is on screen, which is the Decision Point the patch targets.
+    harness.root.fire(`[data-agent="${String(first.agentIndex)}"]`, 'pointerenter');
+    return harness.root.html();
+  }
+
+  it('displays a Reflex-Mode call as such rather than as blank reasoning (AC2)', async () => {
+    const html = await panelFor({ reflexMode: true, reasoning: null });
+
+    expect(html).toContain('Reflex mode');
+    expect(html).toContain('Token Bank');
+    expect(html).toContain('tb-chip--reflex');
+  });
+
+  it('says a Parse Failure happened and shows the raw response (AC3)', async () => {
+    const html = await panelFor({
+      parseFailure: true,
+      reasoning: null,
+      rawResponse: 'I reckon I will step forward now.',
+    });
+
+    expect(html).toContain('Parse failure');
+    expect(html).toContain('tb-chip--failed');
+    expect(html).toContain('Raw response');
+    expect(html).toContain('I reckon I will step forward now.');
+  });
+
+  it('renders real reasoning as the body when a Deployment supplies it', async () => {
+    const html = await panelFor({ reasoning: 'It is out of range, so I close the gap.' });
+
+    expect(html).toContain('It is out of range, so I close the gap.');
+    expect(html).toContain('tb-reasoning--text');
   });
 });

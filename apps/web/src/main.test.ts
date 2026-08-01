@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { createFighterEnvironment } from '../../../packages/env-fighter/src/environment';
-import { decisionPointCount, hashChip, mountPlayer, reasoningPanel, type CanvasSurface } from './main';
+import { decisionPointCount, hashChip, mountPlayer, reasoningView, type CanvasSurface } from './main';
 import { buildDemoLog } from './testing/demo-log';
 import { buildReplayFilm } from './replay/film';
 import type { ReasoningLookup } from './replay/sidecar';
+import type { ResolvedDecision } from './replay/decision-point';
 import type { Canvas2D } from './render/canvas2d';
 import type { DrawnFighter, FighterArtist } from './render/artist';
 
@@ -148,39 +149,143 @@ describe('dressing an already-running fight (4.2)', () => {
   });
 });
 
-describe('what the reasoning panel says (4.2 AC4)', () => {
-  const base: ReasoningLookup = {
-    status: 'ready',
-    found: true,
-    reasoning: null,
-    rawResponse: null,
-    reflexMode: false,
-    parseFailure: false,
-  };
 
-  it('distinguishes loading from unavailable from recorded-nothing', () => {
-    const loading = reasoningPanel({ ...base, status: 'loading' }, 'model-a');
-    const gone = reasoningPanel({ ...base, status: 'unavailable' }, 'model-a');
-    const empty = reasoningPanel(base, 'model-a');
+/**
+ * Story 4.3: what the panel says, as three facts that are not each other.
+ *
+ * Reflex Mode, a Parse Failure and an Agent that recorded nothing are three
+ * different things about a Deployment, and the story asks for all three by
+ * name. A panel that renders any two of them identically has answered a
+ * question the visitor did not ask.
+ */
 
-    // Three distinct bodies. Collapsing any pair is how a slow network gets
-    // displayed to a visitor as a model that said nothing.
-    expect(new Set([loading.body, gone.body, empty.body]).size).toBe(3);
-    expect(loading.modifier).toBe('tb-reasoning--loading');
+const READY: ReasoningLookup = {
+  status: 'ready',
+  found: true,
+  reasoning: null,
+  rawResponse: null,
+  reflexMode: false,
+  parseFailure: false,
+};
+
+const HERE: ResolvedDecision = { tick: 120, decisionPoint: 4, polled: true };
+const COMMITTED: ResolvedDecision = { tick: 90, decisionPoint: 3, polled: false };
+
+describe('the reasoning panel (4.3)', () => {
+  it('shows the reasoning and the tick it belongs to', () => {
+    const view = reasoningView({ ...READY, reasoning: 'stay outside its range' }, HERE, 'model-a');
+
+    expect(view.body).toBe('stay outside its range');
+    expect(view.tickLabel).toBe('Tick 120');
+    expect(view.heading).toBe('model-a');
+    expect(view.chips).toStrictEqual([]);
   });
 
-  it('shows the reasoning itself when there is some', () => {
-    const panel = reasoningPanel({ ...base, reasoning: 'stay outside its range' }, 'model-a');
-    expect(panel.body).toBe('stay outside its range');
-    expect(panel.heading).toBe('model-a');
+  it('says a committed fighter is still executing an earlier decision (AC1)', () => {
+    // Not "nearest neighbour" -- the tick is the one this fighter is carrying
+    // out, and the panel says so rather than letting it read as a fresh choice.
+    const view = reasoningView({ ...READY, reasoning: 'commit to the attack' }, COMMITTED, 'model-a');
+
+    expect(view.tickLabel).toBe('Tick 90');
+    expect(view.chips.map((chip) => chip.label)).toStrictEqual(['Still committed']);
+  });
+
+  it('displays Reflex Mode as itself, never as blank reasoning (AC2)', () => {
+    const view = reasoningView({ ...READY, reflexMode: true }, HERE, 'model-a');
+
+    expect(view.chips.map((chip) => chip.label)).toContain('Reflex mode');
+    expect(view.body).toMatch(/Token Bank/);
+    expect(view.body).toMatch(/eight tokens/);
+    // The distinguishing test: it must not read like the ordinary empty case.
+    expect(view.body).not.toBe(reasoningView(READY, HERE, 'model-a').body);
+  });
+
+  it('says a Parse Failure happened and shows the raw response (AC3)', () => {
+    const view = reasoningView(
+      { ...READY, parseFailure: true, rawResponse: 'I think I shall advance!' },
+      HERE,
+      'model-a',
+    );
+
+    expect(view.chips.map((chip) => chip.label)).toContain('Parse failure');
+    expect(view.chips.find((chip) => chip.label === 'Parse failure')?.modifier).toBe(
+      'tb-chip--failed',
+    );
+    expect(view.rawResponse).toBe('I think I shall advance!');
+    expect(view.body).toMatch(/Fallback Action/);
+    // Story 1.6: never retried, and the visitor is told that too.
+    expect(view.body).toMatch(/not retried/i);
+  });
+
+  it('shows both chips when a Reflex-Mode call also failed to parse', () => {
+    const view = reasoningView(
+      { ...READY, reflexMode: true, parseFailure: true, rawResponse: 'ummm' },
+      HERE,
+      'model-a',
+    );
+
+    const labels = view.chips.map((chip) => chip.label);
+    expect(labels).toContain('Reflex mode');
+    expect(labels).toContain('Parse failure');
+    // The failure owns the body: it is the fact that changed the Action.
+    expect(view.body).toMatch(/Fallback Action/);
+    expect(view.rawResponse).toBe('ummm');
+  });
+
+  it('keeps the raw response visible for an ordinary call too', () => {
+    // A Baseline Bot records no reasoning but does emit a line, and that line is
+    // the only thing the page can honestly show for it.
+    const view = reasoningView({ ...READY, rawResponse: 'aggressive:advance' }, HERE, 'bot:aggressive');
+
+    expect(view.body).toMatch(/No reasoning recorded/);
+    expect(view.rawResponse).toBe('aggressive:advance');
+  });
+
+  it('has copy for a fighter that has not acted yet', () => {
+    const view = reasoningView(READY, null, 'model-a');
+
+    expect(view.tickLabel).toBe('');
+    expect(view.body).toMatch(/has not acted yet/);
+  });
+
+  it('keeps 4.2 AC4: a sidecar in flight is a loading state, not an empty model', () => {
+    const view = reasoningView({ ...READY, status: 'loading' }, HERE, 'model-a');
+
+    expect(view.bodyModifier).toBe('tb-reasoning--loading');
+    expect(view.tickLabel).toBe('Tick 120');
+  });
+
+  it('gives a screen reader the whole panel in one string (AC5)', () => {
+    const view = reasoningView(
+      { ...READY, reflexMode: true, rawResponse: 'ok' },
+      COMMITTED,
+      'model-a',
+    );
+
+    for (const part of ['model-a', 'Tick 90', 'Still committed', 'Reflex mode']) {
+      expect(view.announcement).toContain(part);
+    }
   });
 
   it('says nothing about how long anything took, in any state (INV-3)', () => {
-    // The loading affordance is the obvious place to leak think time, so the
-    // copy is swept for every word that would.
-    const timing = /\b(ms|second|seconds|elapsed|took|waiting for|slow|still)\b/i;
-    for (const status of ['inline', 'loading', 'ready', 'unavailable'] as const) {
-      expect(reasoningPanel({ ...base, status }, 'model-a').body).not.toMatch(timing);
+    // Ticks are simulation time -- identical for a fast Match and a slow one.
+    // Everything else that could stand in for a duration is swept for.
+    const timing = /\b(ms|millisecond|second|seconds|minute|elapsed|took|latency|waiting for|slow)\b/i;
+    const lookups: ReasoningLookup[] = [
+      READY,
+      { ...READY, status: 'loading' },
+      { ...READY, status: 'unavailable' },
+      { ...READY, reflexMode: true },
+      { ...READY, parseFailure: true, rawResponse: 'x' },
+      { ...READY, reasoning: 'close the gap' },
+    ];
+    for (const lookup of lookups) {
+      for (const resolved of [HERE, COMMITTED, null]) {
+        const view = reasoningView(lookup, resolved, 'model-a');
+        expect(view.body).not.toMatch(timing);
+        expect(view.tickLabel).not.toMatch(timing);
+        expect(view.chips.map((chip) => chip.label).join(' ')).not.toMatch(timing);
+      }
     }
   });
 });

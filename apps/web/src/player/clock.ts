@@ -32,8 +32,23 @@ export type RequestFrame = (callback: () => void) => number;
 export type CancelFrame = (handle: number) => void;
 
 export interface PlaybackClock {
+  /** Rewinds to the start, then plays. This is what the Replay button does. */
   readonly start: () => void;
   readonly stop: () => void;
+  /**
+   * Continues from the frame on screen.
+   *
+   * Story 4.3 needs this because reading is impossible at five Decision Points
+   * per second: hovering a fighter stops the clock and leaving continues it,
+   * and `start()` deliberately rewinds (Story 4.1 fixed the Replay button that
+   * way) so resuming cannot be expressed with it. Story 4.5's scrub wants the
+   * same verb.
+   *
+   * A no-op when the clock is already running, when the film has been played
+   * to its end, and under reduced motion -- in that last case there is no
+   * motion to resume, only a still that is already correct.
+   */
+  readonly resume: () => void;
   /** The frame most recently emitted, or `-1` before the first. */
   readonly frameIndex: () => number;
   readonly isRunning: () => boolean;
@@ -125,9 +140,28 @@ export function createPlaybackClock(config: PlaybackClockConfig): PlaybackClock 
     state.handle = requestFrame(tick);
   }
 
+  function resume(): void {
+    // Every guard here is a state a hover-to-read interaction actually reaches.
+    // Running: the pointer re-entered a target without ever leaving the stage.
+    // Finished: the Match ended while the panel was open, and resuming would
+    // emit an out-of-range index -- the same defect `start()`'s rewind fixed
+    // from the other direction. Reduced motion: there is no motion to resume,
+    // and scheduling one would be the preference ignored.
+    if (state.running || frameCount === 0 || config.reducedMotion === true) {
+      return;
+    }
+    if (state.index >= frameCount - 1) {
+      return;
+    }
+
+    state.running = true;
+    state.handle = requestFrame(tick);
+  }
+
   return Object.freeze({
     start,
     stop,
+    resume,
     frameIndex: () => state.index,
     isRunning: () => state.running,
   });
