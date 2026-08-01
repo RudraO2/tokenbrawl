@@ -37,6 +37,8 @@ Stories are executed in the order below. Each is self-contained: an agent with n
 | 4.4 token bank HUD | E4 | 4.3 | |
 | 4.5 timeline scrub | E4 | 4.4 | |
 | 4.6 BYOK run your own fight | E4 | 4.5, 3.5 | |
+| 4.7 BYOK model catalogue and custom models | E4 | 4.6 | Adds an OpenRouter adapter. Read its INV-8 note first. |
+| 4.8 resilient BYOK runner | E4 | 4.6 | Waits out a rate limit. Read its INV-1 note first. |
 | 5.1 local CLI | E5 | 2.4 | Parallel with E3, E4 |
 | 5.2 resumable tournament runner | E5 | 5.1 | |
 | 5.3 scheduled CI tournament | E5 | 5.2 | **Needs human: Actions secrets** |
