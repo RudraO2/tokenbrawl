@@ -174,6 +174,41 @@ body {
   overflow-wrap: break-word;
 }
 
+/*
+ * Story 4.5: both fighters at once, so the comparison the story is named for
+ * is possible without moving the pointer. Two columns while there is room, one
+ * below the other when there is not.
+ */
+.tb-reasoning-pair {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: var(--tb-space-2);
+}
+
+.tb-reasoning-card {
+  border: var(--tb-border-width) solid var(--tb-ink);
+  padding: var(--tb-space-2);
+  min-width: 0;
+}
+
+/*
+ * The hovered fighter's card is marked by inverting its border to the accent
+ * and displacing it by the shadow offset -- the same press-displaces language
+ * the buttons use, rather than a tint or a glow.
+ */
+.tb-reasoning-card--selected {
+  border-color: var(--tb-accent);
+  box-shadow: var(--tb-shadow);
+}
+
+.tb-reasoning-hint {
+  margin: 0 0 var(--tb-space-2);
+  font-family: var(--tb-font-mono);
+  font-size: 13px;
+  text-transform: uppercase;
+  color: var(--tb-muted);
+}
+
 /* A model id is data, so it is set in the mono face. See docs/DESIGN.md. */
 .tb-reasoning-heading {
   margin: 0 0 var(--tb-space-2);
@@ -307,6 +342,79 @@ body {
 .tb-hash {
   color: var(--tb-muted);
   word-break: break-all;
+}
+
+/* --- Transport --------------------------------------------------------- */
+
+.tb-transport {
+  margin-bottom: var(--tb-space-3);
+  max-width: 960px;
+}
+
+/*
+ * A real `<input type="range">`, so keyboard seeking, screen-reader support
+ * and touch dragging come from the platform rather than from a div this repo
+ * would have to make accessible by hand. The cost is vendor pseudo-elements,
+ * which is the price of not reimplementing a slider.
+ *
+ * `appearance: none` strips the platform look; everything that replaces it is
+ * a token. Flat fills, square ends, 4px ink, hard shadow on the thumb.
+ */
+.tb-timeline {
+  appearance: none;
+  -webkit-appearance: none;
+  display: block;
+  width: 100%;
+  height: 32px;
+  background: transparent;
+  border: var(--tb-border-width) solid var(--tb-ink);
+  padding: 0 var(--tb-space-1);
+  cursor: pointer;
+}
+
+.tb-timeline::-webkit-slider-runnable-track {
+  height: 8px;
+  background: var(--tb-muted);
+}
+
+.tb-timeline::-moz-range-track {
+  height: 8px;
+  background: var(--tb-muted);
+}
+
+/* Chunky and square: the handle is a block, not a knob. */
+.tb-timeline::-webkit-slider-thumb {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 20px;
+  height: 24px;
+  margin-top: -8px;
+  background: var(--tb-accent);
+  border: var(--tb-border-width) solid var(--tb-ink);
+}
+
+.tb-timeline::-moz-range-thumb {
+  width: 20px;
+  height: 24px;
+  background: var(--tb-accent);
+  border: var(--tb-border-width) solid var(--tb-ink);
+}
+
+.tb-timeline:focus-visible {
+  outline: 3px solid var(--tb-accent);
+  outline-offset: var(--tb-space-1);
+}
+
+.tb-timeline-readout {
+  margin: var(--tb-space-1) 0 var(--tb-space-2);
+  font-family: var(--tb-font-mono);
+  text-transform: uppercase;
+  color: var(--tb-muted);
+}
+
+.tb-controls {
+  display: flex;
+  gap: var(--tb-space-2);
 }
 
 /* --- Controls ---------------------------------------------------------- */

@@ -377,3 +377,112 @@ describe('the Token Bank meter (4.4)', () => {
     }
   });
 });
+
+/**
+ * Story 4.5, AC1 and AC3 -- and the reason they need a test rather than code.
+ *
+ * `buildReplayFilm` re-simulates the whole Match forward from `env.reset(seed)`
+ * and keeps every state; every playback frame indexes into that array. So a
+ * seek reads the same `states[n]` a play-through reads, because it is the same
+ * array produced by the same single forward pass. There is no reverse
+ * simulation to get wrong and no cached frame data to drift (AD-4).
+ *
+ * That argument is only worth as much as its evidence. INV-2 says "a seek that
+ * produces different state than continuous playback is a determinism bug", so
+ * what is asserted here is the drawn output at a position reached two
+ * different ways -- forwards, and by jumping straight to it.
+ */
+describe('seeking equals playing through (4.5 AC1, AC3)', () => {
+  async function filmOfTheDemoMatch(): Promise<Awaited<ReturnType<typeof buildFilm>>> {
+    return buildFilm();
+  }
+
+  async function buildFilm() {
+    const { createFighterEnvironment } = await import(
+      '../../../../packages/env-fighter/src/environment'
+    );
+    const { buildReplayFilm } = await import('../replay/film');
+    const { buildDemoLog } = await import('../testing/demo-log');
+    return buildReplayFilm(await buildDemoLog(), createFighterEnvironment());
+  }
+
+  function drawAt(film: Awaited<ReturnType<typeof buildFilm>>, index: number): RecordingCanvas {
+    const ctx = createRecordingCanvas();
+    drawFrame(ctx, film.frames[index], {
+      config: DEFAULT_FIGHTER_CONFIG,
+      viewport: VIEWPORT,
+      artists: [createBlockArtist(), createBlockArtist()],
+    });
+    return ctx;
+  }
+
+  it('draws a sampled position identically whether reached forwards or by jumping', async () => {
+    const film = await filmOfTheDemoMatch();
+    const last = film.frames.length - 1;
+    const sampled = [0, 1, 11, 12, Math.floor(last / 2), last - 1, last];
+
+    for (const index of sampled) {
+      // "Playing through": draw every frame from zero up to the target, as the
+      // clock does, keeping only what the last one drew. "Seeking": draw the
+      // target alone. The renderer holds no state between frames, so if these
+      // ever diverged it would mean something on this path had started
+      // remembering the frame before -- which is exactly INV-2's "a seek that
+      // produces different state than continuous playback is a determinism bug".
+      //
+      // Each frame gets its own recorder rather than one shared log sliced at
+      // the end: different frames issue different numbers of calls (an open
+      // Commitment Window draws a strike bar), so a fixed-length tail slice
+      // would compare the target against part of its predecessor.
+      const played: RecordedCall[] = [];
+      for (let n = 0; n <= index; n += 1) {
+        played.length = 0;
+        played.push(...drawAt(film, n).calls());
+      }
+
+      expect(played).toStrictEqual(drawAt(film, index).calls());
+    }
+  });
+
+  it('draws the same thing seeking backwards as it did going forwards (AC3)', async () => {
+    const film = await filmOfTheDemoMatch();
+    const target = 7;
+
+    const forwards = drawAt(film, target);
+    // Run to the very end first, then come back. Nothing may carry over.
+    for (let n = 0; n < film.frames.length; n += 1) {
+      drawAt(film, n);
+    }
+    const backwards = drawAt(film, target);
+
+    expect(backwards.calls()).toStrictEqual(forwards.calls());
+  });
+
+  it('keeps the strike visible at a scrub position, not only during playback', async () => {
+    // The constraint Story 4.1 recorded for this story by name: an attack's
+    // startup and active frames fall strictly BETWEEN two Decision Point
+    // samples, and `liveWindow` reconstructs them from `progressBasisPoints`.
+    // A seek that snapped to a Decision Point boundary would make the swing
+    // invisible again at every scrub position.
+    const { animationFor: _unused } = await import('./animation');
+    const film = await filmOfTheDemoMatch();
+
+    const clips = new Set<string>();
+    const spy = {
+      id: 'spy',
+      draw: (_ctx: unknown, fighter: { animation: { clip: string } }) =>
+        clips.add(fighter.animation.clip),
+    };
+    // Seek to every frame, in a deliberately scrambled order.
+    const order = film.frames.map((_, index) => index).sort((a, b) => ((a * 7) % 13) - ((b * 7) % 13));
+    for (const index of order) {
+      drawFrame(createRecordingCanvas(), film.frames[index], {
+        config: DEFAULT_FIGHTER_CONFIG,
+        viewport: VIEWPORT,
+        artists: [spy as never, spy as never],
+      });
+    }
+
+    expect(clips).toContain('attack-startup');
+    expect(clips).toContain('attack-active');
+  });
+});

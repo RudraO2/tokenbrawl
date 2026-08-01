@@ -88,6 +88,8 @@ function createCanvas(): {
 }
 
 interface FakeRoot extends MountPoint {
+  readonly node: (selector: string) => MountPointChild | null;
+  readonly attribute: (selector: string, name: string) => string | undefined;
   readonly painted: () => readonly string[];
   readonly listeners: () => ReadonlyMap<string, ((event?: { readonly pointerType?: string }) => void)[]>;
   readonly fire: (selector: string, type: string, event?: { readonly pointerType?: string }) => void;
@@ -98,6 +100,7 @@ function createRoot(): FakeRoot {
   const canvas = createCanvas();
   const listeners = new Map<string, ((event?: { readonly pointerType?: string }) => void)[]>();
   const nodes = new Map<string, MountPointChild>();
+  const attributes = new Map<string, string>();
   const state = { html: '' };
 
   const child = (selector: string): MountPointChild => {
@@ -107,6 +110,11 @@ function createRoot(): FakeRoot {
     }
     const node: MountPointChild = {
       innerHTML: '',
+      // Only the timeline uses these two; every other node ignores them.
+      value: '0',
+      setAttribute: (name: string, attributeValue: string) => {
+        attributes.set(`${selector}:${name}`, attributeValue);
+      },
       addEventListener: (type, listener) => {
         const key = `${selector}:${type}`;
         listeners.set(key, [...(listeners.get(key) ?? []), listener]);
@@ -123,6 +131,8 @@ function createRoot(): FakeRoot {
     set innerHTML(value: string) {
       state.html = value;
     },
+    node: (selector: string) => nodes.get(selector) ?? null,
+    attribute: (selector: string, name: string) => attributes.get(`${selector}:${name}`),
     painted: () => canvas.texts(),
     querySelector: (selector: string): MountPointChild | null =>
       selector === 'canvas' ? (canvas.surface as MountPointChild) : child(selector),
@@ -779,5 +789,168 @@ describe('the Token Bank HUD (4.4)', () => {
 
     expect(harness.painted().some((text) => text.startsWith('BANK'))).toBe(false);
     expect(harness.painted().some((text) => text.includes('REFLEX'))).toBe(false);
+  });
+});
+
+/**
+ * Story 4.5 on the page: the timeline, the transport, and both fighters at
+ * once.
+ */
+describe('the timeline scrub (4.5)', () => {
+  const TIMELINE = '[data-timeline]';
+
+  function seekTo(harness: Harness, frameIndex: number): void {
+    const node = harness.root.node(TIMELINE);
+    if (node !== null) {
+      node.value = String(frameIndex);
+    }
+    harness.root.fire(TIMELINE, 'input');
+  }
+
+  it('spans the whole film, so every Decision Point is reachable', async () => {
+    const { log } = await buildDemoBundle();
+    const harness = createHarness(log);
+
+    const result = await startup(harness.globals);
+
+    expect(harness.root.attribute(TIMELINE, 'max')).toBe(
+      String((result?.mounted.film.frames.length ?? 0) - 1),
+    );
+  });
+
+  it('seeks to the frame asked for (AC1)', async () => {
+    const { log } = await buildDemoBundle();
+    const harness = createHarness(log);
+
+    const result = await startup(harness.globals);
+    seekTo(harness, 96);
+
+    expect(result?.mounted.clock.frameIndex()).toBe(96);
+  });
+
+  it('seeks backwards without restarting the Match (AC3)', async () => {
+    const { log } = await buildDemoBundle();
+    const harness = createHarness(log);
+
+    const result = await startup(harness.globals);
+    harness.runFrames(120);
+    seekTo(harness, 24);
+
+    expect(result?.mounted.clock.frameIndex()).toBe(24);
+    // The film was not rebuilt: the same verdict, the same states.
+    expect(result?.mounted.film.matchesRecordedHash).toBe(true);
+  });
+
+  it('keeps one frame per callback after a scrub (AC4)', async () => {
+    // Seeking changes which frame, never the rate. This is INV-3 on the page.
+    const { log } = await buildDemoBundle();
+    const harness = createHarness(log);
+
+    const result = await startup(harness.globals);
+    harness.runFrames(4);
+    seekTo(harness, 200);
+    harness.runFrames(6);
+
+    expect(result?.mounted.clock.frameIndex()).toBe(206);
+  });
+
+  it('shows both fighters reasoning at every position, side by side (AC2)', async () => {
+    const { log } = await buildDemoBundle();
+    const harness = createHarness(log);
+
+    await startup(harness.globals);
+    seekTo(harness, 60);
+
+    const html = harness.root.html();
+    expect(html).toContain(log.agents[0].id);
+    expect(html).toContain(log.agents[1].id);
+    expect(html.match(/tb-reasoning-card/g)?.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('gives each card its own Agent Decision Point, never the other one', async () => {
+    const { log, sidecar } = await buildDemoBundle();
+    const harness = createHarness(log, {
+      spritesResolve: true,
+      sidecar: {
+        ...sidecar,
+        entries: sidecar.entries.map((entry) => ({
+          ...entry,
+          reasoning: `agent-${String(entry.agentIndex)}-tick-${String(entry.tick)}`,
+        })),
+      },
+    });
+
+    const result = await startup(harness.globals);
+    await result?.dressed;
+    seekTo(harness, 0);
+
+    // Both, and each labelled with its own index. A card reading the other
+    // fighter's entry is the defect this case exists to catch.
+    expect(harness.root.html()).toContain('agent-0-tick-0');
+    expect(harness.root.html()).toContain('agent-1-tick-0');
+  });
+
+  it('reports the position in Decision Points and ticks, never a duration (INV-3)', async () => {
+    const { log } = await buildDemoBundle();
+    const harness = createHarness(log);
+
+    await startup(harness.globals);
+    seekTo(harness, 60);
+
+    const readout = harness.root.node('[data-timeline-readout]')?.innerHTML ?? '';
+    expect(readout).toMatch(/DP \d+\/\d+/);
+    expect(readout).toMatch(/Tick \d+/);
+    expect(readout).not.toMatch(/\b(ms|sec|second|elapsed|remaining)\b/i);
+  });
+
+  it('pauses and resumes in place, and restarts only at the end', async () => {
+    const { log } = await buildDemoBundle();
+    const harness = createHarness(log);
+
+    const result = await startup(harness.globals);
+    harness.runFrames(10);
+
+    harness.root.fire('[data-toggle]', 'click');
+    expect(result?.mounted.clock.isRunning()).toBe(false);
+    expect(harness.root.node('[data-toggle]')?.innerHTML).toBe('Play');
+
+    harness.root.fire('[data-toggle]', 'click');
+    expect(result?.mounted.clock.isRunning()).toBe(true);
+    harness.runFrames(2);
+    // Continued from frame 9, not from zero.
+    expect(result?.mounted.clock.frameIndex()).toBe(11);
+  });
+
+  it('restarts rather than doing nothing when Play is pressed at the end', async () => {
+    const { log } = await buildDemoBundle();
+    const harness = createHarness(log);
+
+    const result = await startup(harness.globals);
+    harness.runFrames(result?.mounted.film.frames.length ?? 0);
+    expect(result?.mounted.clock.isRunning()).toBe(false);
+
+    harness.root.fire('[data-toggle]', 'click');
+    harness.runFrames(1);
+
+    // `start()` rewinds and the first frame arrives on the next callback, which
+    // is the same path the Replay button takes.
+    expect(result?.mounted.clock.isRunning()).toBe(true);
+    expect(result?.mounted.clock.frameIndex()).toBe(0);
+  });
+
+  it('announces only on a deliberate interaction, never once per frame', async () => {
+    // The visible panel follows playback and changes five times a second. A
+    // live region doing the same is worse for a screen-reader user than
+    // silence, so the announcement is a separate hidden node written on hover,
+    // focus, tap or seek and at no other time.
+    const { log } = await buildDemoBundle();
+    const harness = createHarness(log);
+
+    await startup(harness.globals);
+    harness.runFrames(40);
+    expect(harness.root.node('[data-announce]')?.innerHTML).toBe('');
+
+    harness.root.fire('[data-agent="0"]', 'focus');
+    expect(harness.root.node('[data-announce]')?.innerHTML).toContain(log.agents[0].id);
   });
 });

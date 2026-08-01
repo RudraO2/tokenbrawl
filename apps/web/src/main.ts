@@ -95,10 +95,24 @@ export interface PointerLike {
   readonly pointerType?: string;
 }
 
-export type ShellEvent = 'click' | 'pointerenter' | 'pointerleave' | 'focus' | 'blur';
+export type ShellEvent =
+  | 'click'
+  | 'pointerenter'
+  | 'pointerleave'
+  | 'focus'
+  | 'blur'
+  | 'input';
 
 export interface MountPointChild {
   innerHTML: string;
+  /** Present on the timeline's range input; absent on every other node the shell binds. */
+  value?: string;
+  /**
+   * Optional because only the timeline needs it, and because a structural
+   * interface that demanded it would force every test fake to implement a
+   * method none of the assertions care about.
+   */
+  setAttribute?(name: string, value: string): void;
   addEventListener(type: ShellEvent, listener: (event?: PointerLike) => void): void;
 }
 
@@ -374,6 +388,31 @@ export function reasoningView(
 }
 
 /**
+ * The timeline's readout (Story 4.5).
+ *
+ * Decision Points and ticks, and nothing else. Both are simulation time: a
+ * Match between two Deployments that took forty seconds a move and one between
+ * two that took two hundred milliseconds produce identical labels at every
+ * position, which is INV-3 stated as a value rather than as a rule. A
+ * percentage of elapsed time, or a remaining time, would each leak the thing
+ * the invariant exists to hide.
+ */
+export function timelineLabel(
+  frameIndex: number,
+  film: ReplayFilm,
+  ticksPerDecision: number,
+): string {
+  const frame = film.frames[Math.max(0, Math.min(frameIndex, film.frames.length - 1))];
+  if (frame === undefined) {
+    return 'No Decision Points';
+  }
+  const total = Math.max(0, film.states.length - 1);
+  return `DP ${String(frame.decisionPoint + 1)}/${String(total)} · Tick ${String(
+    frame.decisionPoint * ticksPerDecision,
+  )}`;
+}
+
+/**
  * Escapes text that came out of a log before it goes into `innerHTML`.
  *
  * Every string this page displays that it did not author itself passes through
@@ -395,13 +434,16 @@ export function escapeHtml(value: string): string {
  * every decision it displays computed by a pure function above.
  */
 export function renderApp(root: MountPoint, log: CommandLog, view: HostView): MountedApp {
-  // The panel carries `role="status"` and `aria-live="polite"`, so a screen
-  // reader announces it when it changes. That is only safe because hovering or
-  // focusing a fighter pauses playback: an unpaused panel changes five times a
-  // second, and a live region firing five times a second is worse for a
-  // screen-reader user than no announcement at all. Each target points at the
-  // panel with `aria-describedby`, so the reasoning is reachable from the
-  // control that reveals it (AC5).
+  // Each fighter target points at the panel with `aria-describedby`, so the
+  // reasoning is reachable from the control that reveals it (4.3 AC5).
+  //
+  // The live region is a *separate*, visually hidden element rather than the
+  // panel itself. Story 4.5 makes the panel show both fighters and follow
+  // playback, so it changes five times a second while a Match runs -- and a
+  // live region firing five times a second is worse for a screen-reader user
+  // than no announcement at all. The visible panel therefore updates freely
+  // and the announcement is written only on a deliberate interaction: hovering,
+  // focusing, or seeking.
   root.innerHTML = `
     <header class="tb-masthead">
       <h1 class="tb-wordmark">Tokenbrawl</h1>
@@ -423,24 +465,40 @@ export function renderApp(root: MountPoint, log: CommandLog, view: HostView): Mo
           aria-describedby="tb-reasoning-panel"
         ></button>
       </div>
-      <div
-        class="tb-reasoning"
-        id="tb-reasoning-panel"
-        data-reasoning
-        role="status"
-        aria-live="polite"
-      ></div>
+      <div class="tb-reasoning" id="tb-reasoning-panel" data-reasoning></div>
+      <p class="tb-visually-hidden" data-announce role="status" aria-live="polite"></p>
+    </div>
+    <div class="tb-transport">
+      <label class="tb-visually-hidden" for="tb-timeline">Seek to a Decision Point</label>
+      <input class="tb-timeline" id="tb-timeline" type="range" min="0" value="0" step="1" data-timeline />
+      <p class="tb-timeline-readout" data-timeline-readout></p>
+      <div class="tb-controls">
+        <button class="tb-button" type="button" data-toggle>Pause</button>
+        <button class="tb-button" type="button" data-play>Replay</button>
+      </div>
     </div>
     <div class="tb-readout" data-readout></div>
-    <button class="tb-button" type="button" data-play>Replay</button>
   `;
 
   const canvas = root.querySelector('canvas');
   const readout = root.querySelector('[data-readout]');
   const panel = root.querySelector('[data-reasoning]');
   const play = root.querySelector('[data-play]');
+  const toggle = root.querySelector('[data-toggle]');
+  const timeline = root.querySelector('[data-timeline]');
+  const timelineReadout = root.querySelector('[data-timeline-readout]');
+  const announce = root.querySelector('[data-announce]');
   const targets = [root.querySelector('[data-agent="0"]'), root.querySelector('[data-agent="1"]')];
-  if (canvas === null || readout === null || panel === null || play === null) {
+  if (
+    canvas === null ||
+    readout === null ||
+    panel === null ||
+    play === null ||
+    toggle === null ||
+    timeline === null ||
+    timelineReadout === null ||
+    announce === null
+  ) {
     throw new Error('renderApp: the shell did not mount.');
   }
 
@@ -448,6 +506,10 @@ export function renderApp(root: MountPoint, log: CommandLog, view: HostView): Mo
   // non-nullable node: TypeScript will not carry a narrowing into a function
   // declaration, which may legally be called before the narrowing runs.
   const panelNode = panel;
+  const timelineNode = timeline;
+  const timelineReadoutNode = timelineReadout;
+  const announceNode = announce;
+  const toggleNode = toggle;
 
   // Which fighter the pointer or focus last landed on, what the panel last
   // showed, and whether letting go should put playback back. `null` means
@@ -460,19 +522,15 @@ export function renderApp(root: MountPoint, log: CommandLog, view: HostView): Mo
     resumeOnRelease: boolean;
   } = { agentIndex: null, renderedKey: '', resumeOnRelease: false };
 
-  function renderPanel(): void {
-    if (selection.agentIndex === null) {
-      if (selection.renderedKey !== 'idle') {
-        selection.renderedKey = 'idle';
-        panelNode.innerHTML =
-          '<p class="tb-reasoning-body tb-reasoning--idle">Hover, tap or tab to a fighter to read what it was thinking. Playback pauses while you read.</p>';
-      }
-      return;
-    }
-    const agentIndex = selection.agentIndex;
-    // AC1. The Decision Point on screen is exact -- it is the frame's own index
-    // -- but a fighter inside a Commitment Window was never polled there, so
-    // `resolveDecision` walks back to the decision it is still executing and
+  /**
+   * One fighter's card. Story 4.3 built this as the whole panel; Story 4.5's
+   * AC2 puts two of them side by side, because the thing a visitor is here to
+   * do is compare how two models read the same position.
+   */
+  function reasoningCard(agentIndex: 0 | 1): string {
+    // AC1 of 4.3. The Decision Point on screen is exact -- it is the frame's own
+    // index -- but a fighter inside a Commitment Window was never polled there,
+    // so `resolveDecision` walks back to the decision it is still executing and
     // says which. It never looks forward and never rounds to whichever entry is
     // nearest. See `replay/decision-point.ts`.
     const resolved = resolveDecision(
@@ -482,12 +540,6 @@ export function renderApp(root: MountPoint, log: CommandLog, view: HostView): Mo
       DEFAULT_FIGHTER_CONFIG.ticksPerDecision,
     );
     const lookup = reasoning.at(resolved?.tick ?? -1, agentIndex);
-    const key = `${String(agentIndex)}:${String(resolved?.tick ?? -1)}:${String(resolved?.polled ?? false)}:${lookup.status}`;
-    if (key === selection.renderedKey) {
-      return;
-    }
-    selection.renderedKey = key;
-
     const panelView = reasoningView(lookup, resolved, log.agents[agentIndex].id);
     const chips = panelView.chips
       .map((chip) => `<span class="tb-chip ${chip.modifier}">${escapeHtml(chip.label)}</span>`)
@@ -496,23 +548,79 @@ export function renderApp(root: MountPoint, log: CommandLog, view: HostView): Mo
       panelView.rawResponse === null
         ? ''
         : `<p class="tb-reasoning-label">Raw response</p><pre class="tb-reasoning-raw">${escapeHtml(panelView.rawResponse)}</pre>`;
+    const selected = selection.agentIndex === agentIndex ? ' tb-reasoning-card--selected' : '';
 
-    panelNode.innerHTML = `
-      <p class="tb-reasoning-heading">${escapeHtml(panelView.heading)}</p>
-      <div class="tb-reasoning-meta">
-        ${panelView.tickLabel === '' ? '' : `<span class="tb-chip tb-chip--tick">${escapeHtml(panelView.tickLabel)}</span>`}
-        ${chips}
-      </div>
-      <p class="tb-reasoning-body ${panelView.bodyModifier}">${escapeHtml(panelView.body)}</p>
-      ${raw}
+    return `
+      <article class="tb-reasoning-card${selected}">
+        <p class="tb-reasoning-heading">${escapeHtml(panelView.heading)}</p>
+        <div class="tb-reasoning-meta">
+          ${panelView.tickLabel === '' ? '' : `<span class="tb-chip tb-chip--tick">${escapeHtml(panelView.tickLabel)}</span>`}
+          ${chips}
+        </div>
+        <p class="tb-reasoning-body ${panelView.bodyModifier}">${escapeHtml(panelView.body)}</p>
+        ${raw}
+      </article>
     `;
   }
 
-  const mounted = mountPlayer(canvas as unknown as CanvasSurface, log, view, () => {
-    if (selection.agentIndex !== null) {
-      renderPanel();
+  /**
+   * Rewrites the panel when what it would say has changed, and not otherwise.
+   *
+   * The key covers both fighters and the current selection, because the panel
+   * now shows both at once (4.5 AC2) and highlights one (4.3). Comparing it
+   * first is what lets this be called from the paint loop without an
+   * `innerHTML` write per frame -- and, since the panel is an `aria-live`
+   * region, without an announcement per frame either.
+   */
+  function renderPanel(): void {
+    const decisionPoint = mounted.decisionPoint();
+    const key = `${String(decisionPoint)}:${String(selection.agentIndex)}:${reasoning.status()}`;
+    if (key === selection.renderedKey) {
+      return;
     }
+    selection.renderedKey = key;
+
+    const hint =
+      selection.agentIndex === null
+        ? '<p class="tb-reasoning-hint">Hover, tap or tab to a fighter to read what it was thinking. Playback pauses while you read.</p>'
+        : '';
+    panelNode.innerHTML = `${hint}<div class="tb-reasoning-pair">${reasoningCard(0)}${reasoningCard(1)}</div>`;
+  }
+
+  /**
+   * Keeps the timeline handle and its readout on the frame that is drawn.
+   *
+   * Written every paint rather than diffed: a range input's `value` is one
+   * property assignment and the readout is one short string, and a handle that
+   * lagged the fight by a frame would be a worse defect than the write is a
+   * cost. The panel next to it *is* diffed, because that one is an `innerHTML`
+   * rewrite.
+   */
+  function syncTimeline(frameIndex: number): void {
+    timelineNode.value = String(frameIndex);
+    timelineReadoutNode.innerHTML = escapeHtml(
+      timelineLabel(frameIndex, mounted.film, DEFAULT_FIGHTER_CONFIG.ticksPerDecision),
+    );
+  }
+
+  // `mountPlayer` paints frame zero before it returns, so its `onPaint` fires
+  // once while `mounted` is still in its temporal dead zone. Both callbacks
+  // below read it. The flag is the honest fix: the shell is not wired until
+  // this function says so, and the initial render is done explicitly further
+  // down rather than by accident during construction.
+  const shell = { ready: false };
+
+  const mounted = mountPlayer(canvas as unknown as CanvasSurface, log, view, (frameIndex) => {
+    if (!shell.ready) {
+      return;
+    }
+    // Both fighters' cards follow playback (4.5 AC2), not only a selected one.
+    // `renderPanel` compares first, so this is a string comparison per frame
+    // rather than an `innerHTML` write per frame.
+    renderPanel();
+    syncTimeline(frameIndex);
   });
+  shell.ready = true;
   // After `mountPlayer`, never before: this walks `log.decisions`, and
   // `replayCommandLog` (reached through `mountPlayer`) is what establishes that
   // the document is a version this player understands at all (AD-3).
@@ -555,6 +663,8 @@ export function renderApp(root: MountPoint, log: CommandLog, view: HostView): Mo
       mounted.clock.stop();
       selection.agentIndex = agentIndex;
       renderPanel();
+      announceSelection();
+      toggleNode.innerHTML = 'Play';
     };
 
     /**
@@ -582,6 +692,7 @@ export function renderApp(root: MountPoint, log: CommandLog, view: HostView): Mo
       if (selection.resumeOnRelease) {
         selection.resumeOnRelease = false;
         mounted.clock.resume();
+        toggleNode.innerHTML = 'Pause';
       }
     };
 
@@ -592,7 +703,68 @@ export function renderApp(root: MountPoint, log: CommandLog, view: HostView): Mo
     target.addEventListener('blur', release);
   }
 
+  /**
+   * Writes the selected fighter's card into the live region.
+   *
+   * Called on a deliberate interaction only -- hover, focus, tap or seek --
+   * never from the paint loop. The visible panel follows playback and changes
+   * five times a second; a live region doing the same is worse for a
+   * screen-reader user than silence.
+   */
+  function announceSelection(): void {
+    const agentIndex = selection.agentIndex ?? 0;
+    const resolved = resolveDecision(
+      mounted.decisionPoint(),
+      agentIndex,
+      (tick, agent) => reasoning.at(tick, agent).found,
+      DEFAULT_FIGHTER_CONFIG.ticksPerDecision,
+    );
+    announceNode.innerHTML = escapeHtml(
+      reasoningView(reasoning.at(resolved?.tick ?? -1, agentIndex), resolved, log.agents[agentIndex].id)
+        .announcement,
+    );
+  }
+
+  timelineNode.value = '0';
+  // `max` is set here rather than in the template because the frame count is
+  // only known once the film exists, and the film only exists after the log has
+  // been validated (AD-3).
+  timelineNode.setAttribute?.('max', String(Math.max(0, mounted.film.frames.length - 1)));
   renderPanel();
+  syncTimeline(0);
+
+  /**
+   * Seeking. AC1 and AC3 in three lines, and they are three lines because
+   * Story 4.1 already did the work: `buildReplayFilm` re-simulated the Match
+   * forward from `env.reset(seed)` and kept every state, so a seek is an index
+   * into that array. There is no reverse simulation to get wrong and no cached
+   * frame data to drift from the engine (AD-4).
+   *
+   * `clock.seek` leaves the running state alone, so dragging a paused film
+   * stays paused and dragging a playing one carries on from where the visitor
+   * let go.
+   */
+  timeline.addEventListener('input', () => {
+    mounted.clock.seek(Number.parseInt(timelineNode.value ?? '0', 10));
+    renderPanel();
+    announceSelection();
+  });
+
+  toggle.addEventListener('click', () => {
+    if (mounted.clock.isRunning()) {
+      mounted.clock.stop();
+    } else if (mounted.clock.frameIndex() >= mounted.film.frames.length - 1) {
+      // At the end there is nothing to resume into, and a Play button that did
+      // nothing would read as broken.
+      mounted.clock.start();
+    } else {
+      mounted.clock.resume();
+    }
+    // Pressing Play must not leave a hover's `resumeOnRelease` armed to resume
+    // a clock that is already running, or to restart one deliberately paused.
+    selection.resumeOnRelease = false;
+    toggleNode.innerHTML = mounted.clock.isRunning() ? 'Pause' : 'Play';
+  });
 
   play.addEventListener('click', () => {
     // Clears the reading selection too. Without this a visitor who tapped a
@@ -604,6 +776,7 @@ export function renderApp(root: MountPoint, log: CommandLog, view: HostView): Mo
     renderPanel();
     mounted.clock.stop();
     mounted.clock.start();
+    toggleNode.innerHTML = 'Pause';
   });
   mounted.clock.start();
 

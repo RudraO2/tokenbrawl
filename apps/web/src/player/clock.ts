@@ -49,6 +49,20 @@ export interface PlaybackClock {
    * motion to resume, only a still that is already correct.
    */
   readonly resume: () => void;
+  /**
+   * Draws `index`, clamped into the film, and leaves the running state exactly
+   * as it found it (Story 4.5).
+   *
+   * Neither existing verb can express "go here": `start` rewinds and `resume`
+   * continues. Leaving `running` alone is what makes both drag behaviours fall
+   * out for free -- scrubbing a paused film stays paused, and scrubbing a
+   * playing one carries on from wherever the visitor let go, because the
+   * already-scheduled callback simply advances from the new index.
+   *
+   * Seeking changes *which* frame, never the rate. There is still no time
+   * input on this path (INV-3, AC4).
+   */
+  readonly seek: (index: number) => void;
   /** The frame most recently emitted, or `-1` before the first. */
   readonly frameIndex: () => number;
   readonly isRunning: () => boolean;
@@ -158,10 +172,23 @@ export function createPlaybackClock(config: PlaybackClockConfig): PlaybackClock 
     state.handle = requestFrame(tick);
   }
 
+  function seek(index: number): void {
+    if (frameCount === 0 || !Number.isFinite(index)) {
+      return;
+    }
+    // Clamped rather than rejected: a range input's value is a string from the
+    // DOM and a rounding difference at either end is a normal thing for it to
+    // produce, not a caller bug worth throwing over.
+    const target = Math.max(0, Math.min(frameCount - 1, Math.floor(index)));
+    state.index = target;
+    onFrame(target);
+  }
+
   return Object.freeze({
     start,
     stop,
     resume,
+    seek,
     frameIndex: () => state.index,
     isRunning: () => state.running,
   });

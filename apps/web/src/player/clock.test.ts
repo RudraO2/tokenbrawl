@@ -353,3 +353,123 @@ describe('resuming after a pause (4.3)', () => {
     expect(clock.isRunning()).toBe(false);
   });
 });
+
+/**
+ * Story 4.5: `seek`.
+ *
+ * `start` rewinds and `resume` continues; neither can express "go here". The
+ * property worth pinning is that seeking changes *which* frame and never the
+ * rate -- that is AC4, and it is INV-3 in the one file that could break it.
+ */
+describe('seeking (4.5)', () => {
+  it('draws the frame asked for and leaves a paused clock paused', () => {
+    const driver = createDriver();
+    const seen: number[] = [];
+    const clock = createPlaybackClock({
+      frameCount: 20,
+      onFrame: (index) => seen.push(index),
+      requestFrame: driver.requestFrame,
+    });
+
+    clock.seek(11);
+
+    expect(seen).toStrictEqual([11]);
+    expect(clock.frameIndex()).toBe(11);
+    expect(clock.isRunning()).toBe(false);
+    expect(driver.pending()).toBe(0);
+  });
+
+  it('leaves a running clock running, continuing from where it was dragged', () => {
+    const driver = createDriver();
+    const seen: number[] = [];
+    const clock = createPlaybackClock({
+      frameCount: 20,
+      onFrame: (index) => seen.push(index),
+      requestFrame: driver.requestFrame,
+    });
+
+    clock.start();
+    driver.pump(2);
+    clock.seek(15);
+    driver.pump(2);
+
+    expect(seen).toStrictEqual([0, 1, 15, 16, 17]);
+    expect(clock.isRunning()).toBe(true);
+  });
+
+  it('seeks backwards without rewinding to the start', () => {
+    const driver = createDriver();
+    const seen: number[] = [];
+    const clock = createPlaybackClock({
+      frameCount: 20,
+      onFrame: (index) => seen.push(index),
+      requestFrame: driver.requestFrame,
+    });
+
+    clock.start();
+    driver.pump(10);
+    clock.stop();
+    clock.seek(3);
+
+    expect(seen[seen.length - 1]).toBe(3);
+    expect(clock.frameIndex()).toBe(3);
+  });
+
+  it('keeps the rate constant across a scrub: one frame per callback, always (AC4)', () => {
+    // The whole of AC4. Seeking must not become a speed control, and the clock
+    // has no time input for it to become one with.
+    const driver = createDriver();
+    const seen: number[] = [];
+    const clock = createPlaybackClock({
+      frameCount: 60,
+      onFrame: (index) => seen.push(index),
+      requestFrame: driver.requestFrame,
+    });
+
+    clock.start();
+    driver.pump(5);
+    const beforeScrub = seen.length;
+    clock.seek(40);
+    const afterSeek = seen.length;
+    driver.pump(7);
+
+    expect(afterSeek - beforeScrub).toBe(1);
+    expect(seen.length - afterSeek).toBe(7);
+  });
+
+  it('clamps rather than emitting a frame outside the film', () => {
+    const driver = createDriver();
+    const seen: number[] = [];
+    const clock = createPlaybackClock({
+      frameCount: 5,
+      onFrame: (index) => seen.push(index),
+      requestFrame: driver.requestFrame,
+    });
+
+    clock.seek(-7);
+    clock.seek(900);
+    clock.seek(2.9);
+
+    expect(seen).toStrictEqual([0, 4, 2]);
+  });
+
+  it('does nothing on an empty film, or on a value that is not a number', () => {
+    const driver = createDriver();
+    const seen: number[] = [];
+    const empty = createPlaybackClock({
+      frameCount: 0,
+      onFrame: (index) => seen.push(index),
+      requestFrame: driver.requestFrame,
+    });
+    empty.seek(3);
+    expect(seen).toStrictEqual([]);
+
+    const real = createPlaybackClock({
+      frameCount: 5,
+      onFrame: (index) => seen.push(index),
+      requestFrame: driver.requestFrame,
+    });
+    real.seek(Number.NaN);
+    expect(seen).toStrictEqual([]);
+  });
+});
