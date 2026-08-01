@@ -93,6 +93,21 @@ describe('the count alone is not the rule (AC3, AD-12)', () => {
     expect(row.exclusions).toStrictEqual(['insufficient-mirrored-seeds']);
   });
 
+  it('applies the count rule at its own boundary, independently of the mirrored one', () => {
+    // The two rules overlap almost everywhere -- 15 mirrored seeds implies 30
+    // Matches -- so a count threshold silently loosened by one would be
+    // invisible against every other case here: the mirrored rule would still
+    // hold the pairing provisional and `provisional` would still be `true`.
+    // What it *would* change is the reason given, and a reason that stops
+    // naming the real shortfall is how a coverage report becomes unreadable.
+    // 29 Matches over 15 seeds: 14 mirrored, one seed one-sided.
+    const row = only([...mirrored('a', 'b', 14), { seed: 1014, agentIds: ['a', 'b'] }]);
+    expect(row.matches).toBe(29);
+    expect(row.mirroredSeeds).toBe(14);
+    expect(row.exclusions).toStrictEqual(['insufficient-matches', 'insufficient-mirrored-seeds']);
+    expect(row.reason).toContain(`fewer than the required ${String(MINIMUM_MATCHES_PER_PAIRING)}`);
+  });
+
   it('reports both reasons when both fail, and only the failing one when one does', () => {
     expect(only(mirrored('a', 'b', 2)).exclusions).toStrictEqual([
       'insufficient-matches',

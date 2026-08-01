@@ -103,8 +103,27 @@ export function side0Score(outcome: 'p1' | 'p2' | 'draw'): number {
   return DRAW_BASIS_POINTS;
 }
 
+/**
+ * Code-unit ordering, deliberately **not** `localeCompare`.
+ *
+ * `skill-gate.ts` uses `localeCompare` for its tie-break and this diverges from
+ * it on purpose: `localeCompare` is collation-dependent, so two engines with
+ * different ICU data can order the same two ids differently. That is harmless
+ * for a tie-break on a displayed row, and not harmless here -- the pair order
+ * decides which score each resampling index lands on, so a locale difference
+ * would move the published confidence interval and take the committed report
+ * red on a runner nobody changed anything on. `<` on strings is code-unit
+ * order, which is the same everywhere.
+ */
+function compareIds(left: string, right: string): number {
+  if (left === right) {
+    return 0;
+  }
+  return left < right ? -1 : 1;
+}
+
 function sortedPairing(agentIds: readonly [string, string]): readonly [string, string] {
-  return agentIds[0].localeCompare(agentIds[1]) <= 0
+  return compareIds(agentIds[0], agentIds[1]) <= 0
     ? [agentIds[0], agentIds[1]]
     : [agentIds[1], agentIds[0]];
 }
@@ -187,8 +206,8 @@ function collectPairs(matches: readonly SideAdvantageMatch[]): {
   // the committed interval reproduces exactly (AD-5).
   pairs.sort(
     (left, right) =>
-      left.pairing[0].localeCompare(right.pairing[0]) ||
-      left.pairing[1].localeCompare(right.pairing[1]) ||
+      compareIds(left.pairing[0], right.pairing[0]) ||
+      compareIds(left.pairing[1], right.pairing[1]) ||
       left.seed - right.seed,
   );
 
