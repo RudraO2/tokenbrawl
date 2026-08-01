@@ -13,17 +13,26 @@ name: Tournament
 
 on:
   schedule:
-    # 03:00 UTC, Monday through Friday.
+    # 03:00 UTC, every day.
     #
-    # Story 7.1 doubled the plan: every pairing is now played from both sides,
-    # so ~9,000 calls per Deployment against a 1,000-RPD ceiling is nine
-    # segments -- about two calendar weeks at five weekday segments each. The
-    # cadence is deliberately unchanged. The runner is resumable by
-    # construction (AD-9: the committed logs ARE the state), so a longer run
-    # converges rather than restarting, and raising the cadence is a decision
-    # about quota headroom that belongs to whoever owns the schedule, not a
-    # side effect of removing a side bias.
-    - cron: '0 3 * * 1-5'
+    # Was Monday-to-Friday until Story 7.1, and that was never a weekend-off
+    # policy -- it was sized to the workload: "~4,500 calls per Deployment
+    # against a 1,000-RPD ceiling is 4.5 days". Story 7.1 doubled the plan by
+    # playing every pairing from both sides, so the same arithmetic now gives
+    # ~9,000 calls and nine segments. Keeping `1-5` would not have preserved
+    # 5.3's decision, only its number after the input changed.
+    #
+    # Seven days rather than five because the free-tier allowance resets daily
+    # whether or not it is used: skipping Saturday and Sunday discards two days
+    # of it per week and buys nothing back. Hosted-runner minutes are free on a
+    # public repository (INV-8's other half, checked in this file's runner
+    # pins), so the cadence is indifferent there too.
+    #
+    # The shorter window is also the more honest dataset. Two calendar weeks is
+    # long enough for a provider to swap the model behind an endpoint or move a
+    # free-tier limit mid-tournament, and Matches from day 1 and day 14 are
+    # published as though contemporaneous.
+    - cron: '0 3 * * *'
   workflow_dispatch:
     inputs:
       dry_run:
