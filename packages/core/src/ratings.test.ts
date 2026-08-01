@@ -615,6 +615,60 @@ describe('degenerate input is refused rather than absorbed', () => {
     ).toThrow(/appears as both a bot and a deployment/);
   });
 
+  it('refuses the same matchId twice', () => {
+    // Two documents with one id are the same Match counted twice: it inflates a
+    // pairing toward the coverage floor and narrows an interval that has not
+    // earned it. The runner cannot produce this, which is why nothing else
+    // would notice it.
+    expect(() =>
+      computeLeaderboard({
+        matches: [
+          { matchId: 'same', seed: 1, agents: [spacing, aggressive], outcome: 'p1' },
+          { matchId: 'same', seed: 2, agents: [spacing, aggressive], outcome: 'p1' },
+        ],
+        tracks,
+        resamples: RESAMPLES,
+        seed: SEED,
+      }),
+    ).toThrow(/matchId "same" appears twice/);
+  });
+
+  it('refuses a track that contradicts a later occurrence of the same Agent', () => {
+    // The contradiction guard has to run on every occurrence. Checking only the
+    // first would decide the question on whichever log happened to be read
+    // first, which is not a decision anybody made.
+    const logged: AgentIdentity = { id: 'groq:model', kind: 'deployment', track: 'reflex' };
+    const unmarked: AgentIdentity = { id: 'groq:model', kind: 'deployment' };
+    expect(() =>
+      computeLeaderboard({
+        matches: [
+          { matchId: 'a', seed: 1, agents: [spacing, unmarked], outcome: 'p1' },
+          { matchId: 'b', seed: 1, agents: [logged, spacing], outcome: 'p1' },
+        ],
+        tracks: tracksFor([
+          [spacing, 'main'],
+          [unmarked, 'main'],
+        ]),
+        resamples: RESAMPLES,
+        seed: SEED,
+      }),
+    ).toThrow(/logged as track "reflex" but the supplied map says "main"/);
+  });
+
+  it('passes an explicit confidence through to every interval', () => {
+    const board = computeLeaderboard({
+      matches: pairing(spacing, aggressive, 15, firstAlwaysWins),
+      tracks,
+      resamples: RESAMPLES,
+      seed: SEED,
+      confidenceBasisPoints: 8000,
+    });
+    expect(board.bootstrap.confidenceBasisPoints).toBe(8000);
+    for (const row of board.main) {
+      expect(row.interval.confidenceBasisPoints).toBe(8000);
+    }
+  });
+
   it('returns empty tables rather than throwing on an empty corpus', () => {
     const leaderboard = computeLeaderboard({
       matches: [],

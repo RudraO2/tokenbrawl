@@ -240,6 +240,10 @@ describe('AC2: results are committed back, and the commit is path-based', () => 
     // failed because a key was missing.
     const source = tournamentSource();
     const generateAt = source.indexOf('- name: Generate leaderboard');
+    // Asserted before the slice: `indexOf` returning -1 makes the check below
+    // pass vacuously, so a deleted step would leave this case green while
+    // proving nothing about a step that no longer exists.
+    expect(generateAt).toBeGreaterThan(-1);
     const step = source.slice(generateAt, source.indexOf('- name:', generateAt + 10));
     expect(step).not.toMatch(/secrets\./);
   });

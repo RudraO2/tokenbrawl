@@ -88,7 +88,16 @@ export async function loadCorpus(io: CliIo, logDir: string): Promise<LoadedCorpu
       continue;
     }
 
-    if (log.configHash !== expectedConfigHash || log.environment.id !== CLI_ENVIRONMENT_ID) {
+    // Environment version as well as config hash. `configHash` covers the
+    // frame data, not the code that reads it, so a version bump is the only
+    // statement a log carries that the engine itself changed -- and two
+    // Matches played by two engines are not comparable however identical their
+    // configuration was.
+    if (
+      log.configHash !== expectedConfigHash ||
+      log.environment.id !== CLI_ENVIRONMENT_ID ||
+      log.environment.version !== CLI_ENVIRONMENT_VERSION
+    ) {
       staleConfig.push(name);
       continue;
     }
@@ -175,6 +184,27 @@ export async function generateLeaderboard(
   reportDir: string = LEADERBOARD_REPORT_DIR,
 ): Promise<LeaderboardCommandResult> {
   const corpus = await loadCorpus(io, logDir);
+
+  // Refusing to publish nothing *over something*.
+  //
+  // An empty corpus is an ordinary first run and publishes an empty board
+  // happily. An empty corpus when a board already exists is not ordinary: it
+  // means this invocation read the wrong directory -- a mistyped `--out`, a
+  // config whose `outputDir` moved, a workflow running from the wrong working
+  // directory -- and overwriting real published ratings with a blank table
+  // would be committed by the next step and look exactly like a tournament
+  // that had produced nothing.
+  if (corpus.matches.length === 0) {
+    const existing = await io
+      .readFile(joinPath(reportDir, LEADERBOARD_REPORT_NAME))
+      .then(() => true)
+      .catch(() => false);
+    if (existing) {
+      throw new Error(
+        `No Command Log found in "${logDir}", but ${joinPath(reportDir, LEADERBOARD_REPORT_NAME)} already exists. Refusing to overwrite a published leaderboard with an empty one -- check the log directory.`,
+      );
+    }
+  }
 
   const leaderboard = computeLeaderboard({
     matches: corpus.matches,

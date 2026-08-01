@@ -134,6 +134,20 @@ describe('loadCorpus', () => {
     const corpus = await loadCorpus(io, 'replays');
     expect(corpus.matches).toHaveLength(0);
   });
+
+  it('excludes a log played by a different Environment version', async () => {
+    const io = await playedCorpus();
+    const [path] = logPaths(io);
+    const older: CommandLog = {
+      ...readLog(io, path),
+      environment: { id: 'fighter-1v1', version: '0.9.0' },
+    };
+    io.files.set('replays/older-engine.command-log.json', JSON.stringify(older));
+
+    // `configHash` covers the frame data, not the engine that reads it.
+    const corpus = await loadCorpus(io, 'replays');
+    expect(corpus.staleConfig).toStrictEqual(['older-engine.command-log.json']);
+  });
 });
 
 describe('tracksFor', () => {
@@ -252,6 +266,27 @@ describe('generateLeaderboard', () => {
       [...result.report.mainLeaderboard, ...result.report.reflexTrack].map((row) => row.agent),
     ).not.toContain('byok:visitor-model');
     expect(result.report.unrated.map((row) => row.agent)).toStrictEqual(['byok:visitor-model']);
+  });
+
+  it('refuses to overwrite a published board with an empty one', async () => {
+    // The failure this closes is silent and total: a mistyped --out, or a
+    // workflow running from the wrong directory, reads no logs, publishes a
+    // blank table over the real ratings, and the next step commits it.
+    const io = await playedCorpus();
+    await generateLeaderboard(io, 'replays');
+
+    await expect(generateLeaderboard(io, 'somewhere-else')).rejects.toThrow(
+      /Refusing to overwrite a published leaderboard with an empty one/,
+    );
+    // The published board is untouched.
+    expect(io.files.get('docs/reports/leaderboard.md')).toContain('| bot:spacing | bot |');
+  });
+
+  it('publishes an empty board on a first run, when there is nothing to overwrite', async () => {
+    const io = createMemoryIo({ files: { 'run.json': RUN_CONFIG } });
+    const result = await generateLeaderboard(io, 'replays');
+    expect(result.report.matches).toBe(0);
+    expect(io.files.has('docs/reports/leaderboard.md')).toBe(true);
   });
 
   it('publishes an empty board rather than nothing when no pairing is covered', async () => {

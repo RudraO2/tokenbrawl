@@ -175,6 +175,15 @@ interface AgentAccumulator {
   readonly byOpponent: Map<string, number[]>;
 }
 
+/**
+ * The track for this identity, checked against what the log itself claims.
+ *
+ * Called for **every** occurrence of an Agent, not only the first. Checking
+ * once would let a corpus where a Deployment is logged `main` in one Match and
+ * `reflex` in another pass silently, on whichever of the two happened to be
+ * read first -- and that disagreement is exactly the condition INV-5 cares
+ * about.
+ */
 function trackOf(
   tracks: ReadonlyMap<string, RatingTrack>,
   identity: AgentIdentity,
@@ -210,22 +219,6 @@ function assertMatch(match: LeaderboardMatch, index: number): void {
   }
 }
 
-/** One line naming every reason, so a reader of the exclusion list never has to look one up. */
-function describeExclusions(
-  exclusions: readonly MatchExclusionReason[],
-  byokReason: string | null,
-  coverageReason: string | null,
-): string {
-  const parts: string[] = [];
-  if (exclusions.includes('byok') && byokReason !== null) {
-    parts.push(byokReason);
-  }
-  if (coverageReason !== null) {
-    parts.push(coverageReason);
-  }
-  return parts.join(' ');
-}
-
 function pairingKey(left: string, right: string): string {
   return compareIds(left, right) <= 0 ? `${left} ${right}` : `${right} ${left}`;
 }
@@ -250,6 +243,23 @@ export function computeLeaderboard(params: LeaderboardParams): Leaderboard {
 
   matches.forEach(assertMatch);
 
+  // One Match, one row of evidence. A `matchId` is derived from
+  // (environment, seed, configHash, agent ids) by one function (AD-8), so two
+  // documents carrying the same id are the same Match twice -- and counting it
+  // twice both inflates a pairing toward the coverage floor and narrows an
+  // interval that has not earned it. The runner cannot produce this (a log's
+  // file name *is* its id), which is precisely why nothing downstream would
+  // notice a corpus that had it.
+  const identifiers = new Set<string>();
+  for (const match of matches) {
+    if (identifiers.has(match.matchId)) {
+      throw new Error(
+        `computeLeaderboard: matchId "${match.matchId}" appears twice. One Match may contribute to a rating once.`,
+      );
+    }
+    identifiers.add(match.matchId);
+  }
+
   // --- Pass 0: register every Agent in the corpus, rated or not. -----------
   //
   // Registration is deliberately ahead of every filter below. An Agent that
@@ -270,6 +280,8 @@ export function computeLeaderboard(params: LeaderboardParams): Leaderboard {
     }
     seen.set(identity.id, identity.kind);
 
+    const track = trackOf(tracks, identity);
+
     const existing = accumulators.get(identity.id);
     if (existing !== undefined) {
       return existing;
@@ -277,7 +289,7 @@ export function computeLeaderboard(params: LeaderboardParams): Leaderboard {
     const created: AgentAccumulator = {
       agent: identity.id,
       kind: identity.kind,
-      track: trackOf(tracks, identity),
+      track,
       scores: [],
       byOpponent: new Map<string, number[]>(),
     };
@@ -293,7 +305,6 @@ export function computeLeaderboard(params: LeaderboardParams): Leaderboard {
   // --- Pass 1: AD-11. A BYOK Match is not a Match for any of this. ---------
   const eligible: LeaderboardMatch[] = [];
   const excluded: MatchExclusion[] = [];
-  const byokReasons = new Map<string, string>();
 
   for (const match of matches) {
     const eligibility = ratingEligibility({ agents: [match.agents[0], match.agents[1]] });
@@ -302,7 +313,6 @@ export function computeLeaderboard(params: LeaderboardParams): Leaderboard {
       continue;
     }
     const reason = eligibility.reason ?? '';
-    byokReasons.set(match.matchId, reason);
     excluded.push(
       Object.freeze({
         matchId: match.matchId,
@@ -334,19 +344,22 @@ export function computeLeaderboard(params: LeaderboardParams): Leaderboard {
     const second = remember(match.agents[1]);
 
     const pairing = coverageByPairing.get(pairingKey(first.agent, second.agent));
-    if (pairing === undefined || !isPairingRatable(pairing)) {
-      const exclusions: readonly MatchExclusionReason[] =
-        pairing === undefined ? [] : pairing.exclusions;
+    if (pairing === undefined) {
+      // Not reachable: `coverage` was computed from these very Matches, so
+      // every eligible pairing has a row. Thrown rather than treated as an
+      // exclusion, because the alternative is an excluded Match with no stated
+      // reason -- the one shape this function promises never to produce.
+      throw new Error(
+        `computeLeaderboard: no coverage row for "${first.agent}" vs "${second.agent}", which cannot happen`,
+      );
+    }
+    if (!isPairingRatable(pairing)) {
       excluded.push(
         Object.freeze({
           matchId: match.matchId,
           agentIds: Object.freeze([first.agent, second.agent]) as readonly [string, string],
-          exclusions: Object.freeze([...exclusions]) as readonly MatchExclusionReason[],
-          reason: describeExclusions(
-            exclusions,
-            byokReasons.get(match.matchId) ?? null,
-            pairing?.reason ?? null,
-          ),
+          exclusions: Object.freeze([...pairing.exclusions]) as readonly MatchExclusionReason[],
+          reason: pairing.reason ?? '',
         }),
       );
       continue;
