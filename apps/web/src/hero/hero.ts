@@ -140,7 +140,11 @@ export function wrapCaption(text: string, columns: number, maxLines: number): re
   }
   const kept = lines.slice(0, maxLines);
   const last = kept[maxLines - 1];
-  kept[maxLines - 1] = `${last.slice(0, Math.max(0, columns - 3))}...`;
+  // The ellipsis has to fit inside the column count too. At fewer than four
+  // columns there is no room for it at all, and appending it anyway would put
+  // three dots past the panel edge -- the exact overflow the truncation exists
+  // to prevent.
+  kept[maxLines - 1] = columns < 4 ? last.slice(0, columns) : `${last.slice(0, columns - 3)}...`;
   return kept;
 }
 
@@ -297,13 +301,26 @@ export function heroFrameIndices(scene: HeroScene): readonly number[] {
   return indices;
 }
 
-/** The whole hero: film, captions, diffed frames, encoded GIF. */
-export function renderHeroGif(log: unknown): Uint8Array {
-  const scene = buildHeroScene(log);
-  const frames: GifFrame[] = heroFrameIndices(scene).map((index) => ({
+/**
+ * Every frame of the animation, in order.
+ *
+ * Separate from `renderHeroGif` so the delays can be asserted directly. INV-3
+ * says nothing about how long a Deployment took to think may reach the screen,
+ * and a per-Match or per-Decision-Point frame delay is exactly how that would
+ * leak out of an animation -- invisible in the image, and readable off the file
+ * by anyone who cared to.
+ */
+export function heroGifFrames(scene: HeroScene): readonly GifFrame[] {
+  return heroFrameIndices(scene).map((index) => ({
     pixels: renderHeroFrame(scene, index),
     delayCentiseconds: HERO_DELAY_CENTISECONDS,
   }));
+}
+
+/** The whole hero: film, captions, diffed frames, encoded GIF. */
+export function renderHeroGif(log: unknown): Uint8Array {
+  const scene = buildHeroScene(log);
+  const frames = heroGifFrames(scene);
 
   return encodeAnimatedGif({
     width: HERO_WIDTH,

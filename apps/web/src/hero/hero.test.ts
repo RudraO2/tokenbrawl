@@ -10,6 +10,7 @@ import {
   STAND_IN_NOTICE,
   buildHeroScene,
   heroFrameIndices,
+  heroGifFrames,
   heroPalette,
   renderHeroFrame,
   wrapCaption,
@@ -50,6 +51,16 @@ describe('wrapCaption', () => {
     const lines = wrapCaption('supercalifragilistic', 8, 4);
     expect(lines.every((line) => line.length <= 8)).toBe(true);
     expect(lines.join('')).toBe('supercalifragilistic');
+  });
+
+  it('keeps the ellipsis inside the column count too', () => {
+    // Three dots are three characters. Appending them to a line already at the
+    // limit is the overflow the truncation exists to prevent, wearing a
+    // different name.
+    for (const columns of [1, 2, 3, 4, 5]) {
+      const lines = wrapCaption('alpha beta gamma delta epsilon zeta', columns, 2);
+      expect(lines.every((line) => line.length <= columns)).toBe(true);
+    }
   });
 
   it('returns nothing for a degenerate box instead of looping forever', () => {
@@ -130,10 +141,13 @@ describe('the hero scene', () => {
     expect(STAND_IN_NOTICE).toMatch(/NOT A LIVE MODEL/);
   });
 
-  it('holds each frame for a constant delay, which is INV-3 on the artefact', () => {
+  it('holds every frame for the same delay, which is INV-3 on the artefact', () => {
     // Nothing about how long a Deployment took to think may reach the screen,
-    // and a per-Match frame delay is exactly how that would leak.
-    expect(HERO_DELAY_CENTISECONDS).toBeGreaterThan(0);
+    // and a per-Decision-Point frame delay is exactly how that would leak --
+    // invisible in the image, and readable off the file by anyone who looked.
+    const delays = new Set(heroGifFrames(state.scene).map((frame) => frame.delayCentiseconds));
+    expect([...delays]).toStrictEqual([HERO_DELAY_CENTISECONDS]);
     expect(Number.isSafeInteger(HERO_DELAY_CENTISECONDS)).toBe(true);
+    expect(HERO_DELAY_CENTISECONDS).toBeGreaterThan(0);
   });
 });

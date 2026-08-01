@@ -147,6 +147,12 @@ describe('the raster Canvas2D', () => {
     expect(() => createRasterSurface(10, 1.5, PALETTE)).toThrow(/positive integers/);
   });
 
+  it('refuses an empty palette, which has no ground colour to start from', () => {
+    // Without this the surface starts with `fillStyle` undefined and dies on a
+    // TypeError inside the first draw call, several frames from the mistake.
+    expect(() => createRasterSurface(4, 4, [])).toThrow(/at least a ground colour/);
+  });
+
   it('hands back a copy, so a caller cannot scribble on the surface', () => {
     const surface = createRasterSurface(4, 4, PALETTE);
     const snapshot = surface.snapshot();

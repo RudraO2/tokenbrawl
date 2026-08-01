@@ -65,6 +65,12 @@ export function createRasterSurface(
       `createRasterSurface: width and height must be positive integers, got ${String(width)}x${String(height)}.`,
     );
   }
+  // An empty palette has no ground colour, so `fillStyle` starts `undefined`
+  // and the first draw dies on a TypeError several frames deep rather than
+  // here, where the caller can read what it did wrong.
+  if (palette.length === 0) {
+    throw new Error('createRasterSurface: the palette needs at least a ground colour.');
+  }
 
   const indexOfColour = new Map<string, number>();
   for (const [index, colour] of palette.entries()) {

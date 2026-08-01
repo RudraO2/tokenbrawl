@@ -12,8 +12,8 @@
  *
  * ## Inter-frame diffing
  *
- * At 960x620 a full frame is 595,200 pixels. Ninety of those, encoded whole,
- * is a README nobody can load on a phone. So every frame after the first is
+ * At 960x560 a full frame is 537,600 pixels. Eighty of those, encoded whole,
+ * is four times the file for the same animation. So every frame after the first is
  * encoded as the bounding box of what changed, with unchanged pixels written as
  * a transparent index and disposal method 1 ("leave it there"). The arena
  * ground, the borders and the static HUD furniture are paid for once.

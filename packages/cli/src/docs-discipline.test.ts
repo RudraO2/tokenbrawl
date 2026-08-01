@@ -156,14 +156,24 @@ describe('the asset manifest is complete (AC6)', () => {
     expect(faces.filter((face) => !manifest.includes(face.replace('.woff2', '')))).toStrictEqual([]);
   });
 
-  it('ships the licence text beside each sprite pack', () => {
+  it('keeps the licence text on disk for every sprite pack', () => {
+    // Either beside the art, which is how the two fighter packs ship it, or in
+    // `docs/licences/` under the pack's own name -- which is where the arena
+    // backdrop's 816 KB PDF lives, because `public/` ships verbatim.
+    //
+    // The first version of this test let a pack off entirely as long as
+    // ASSETS.md mentioned the string `docs/licences` anywhere, which it always
+    // does. It asserted nothing at all; this one names the file it wants.
     const spritesDir = join(publicDir, 'sprites');
+    const licences = readdirSync(join(ROOT, 'docs', 'licences'));
     const packs = readdirSync(spritesDir).filter((entry) =>
       statSync(join(spritesDir, entry)).isDirectory(),
     );
+
     const missing = packs.filter((pack) => {
-      const files = readdirSync(join(spritesDir, pack));
-      return !files.some((file) => /licen[cs]e/i.test(file)) && !assets().includes('docs/licences');
+      const beside = readdirSync(join(spritesDir, pack)).some((file) => /licen[cs]e/i.test(file));
+      const filed = licences.some((file) => file.startsWith(pack));
+      return !beside && !filed;
     });
     expect(missing).toStrictEqual([]);
   });
