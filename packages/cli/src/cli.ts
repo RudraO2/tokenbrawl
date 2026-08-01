@@ -6,14 +6,26 @@ import { createNodeIo } from './node-io';
 /**
  * The executable entry point.
  *
- * Run it with:
+ * Run it **from the repository root** with:
  *
- *   npm run tokenbrawl -w packages/cli -- tournament --config <path>
+ *   node --experimental-strip-types --no-warnings \
+ *        --import ./packages/cli/bin/register.mjs packages/cli/src/cli.ts \
+ *        tournament --config configs/tournament.config.json
  *
- * which expands to
+ * Not via `npm run tokenbrawl -w packages/cli -- ...`, which this comment
+ * recommended until Story 5.3 ran it on a real machine and found two defects
+ * in it, neither visible to a unit test:
  *
- *   node --experimental-strip-types --no-warnings --import ./bin/register.mjs \
- *        src/cli.ts tournament --config <path>
+ *   1. npm consumes `--config` and `--dry-run` even after `--`, because both
+ *      are npm's own flags. The CLI receives `tournament <path>` with the
+ *      options stripped and exits 2 on "Unexpected argument".
+ *   2. `-w packages/cli` sets cwd to `packages/cli`, so a config's relative
+ *      `outputDir` resolves under that directory instead of the repository
+ *      root -- silently writing Command Logs where nothing looks for them.
+ *
+ * Both are avoided by invoking node directly from the root, which is what
+ * `.github/workflows/tournament.yml` does. The `tokenbrawl` package script is
+ * kept for convenience on commands that use neither flag.
  *
  * The `--import` shim is not optional: this repo's TypeScript is written for
  * `moduleResolution: "Bundler"`, and a plain `node` cannot resolve the bare

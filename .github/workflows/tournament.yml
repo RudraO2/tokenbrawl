@@ -86,10 +86,31 @@ jobs:
           GOOGLE_AI_STUDIO_API_KEY: ${{ secrets.GOOGLE_AI_STUDIO_API_KEY }}
         run: |
           set -uo pipefail
+          # `node` directly, NOT `npm run tokenbrawl -w packages/cli --`, for
+          # two independent reasons. Both were found by running the documented
+          # command on a real machine, and neither is visible in a unit test:
+          #
+          # 1. npm consumes `--config` and `--dry-run` even after `--`. They
+          #    are npm's own flags, so the CLI received `tournament
+          #    configs/tournament.config.json` with the options stripped and
+          #    exited 2 on "Unexpected argument".
+          # 2. `-w packages/cli` runs with cwd = packages/cli, so the config's
+          #    relative `outputDir` would resolve to
+          #    packages/cli/apps/web/public/replays -- outside COMMIT_PATHS.
+          #    Every Match would run, cost real quota, and be staged by
+          #    nothing.
+          #
+          # Run from the repository root so `outputDir` and `--config` resolve
+          # against it. `bin/register.mjs` is the module-resolution shim this
+          # repo's "Bundler" TypeScript needs; it is path-independent.
           if [ "$DRY_RUN" = "true" ]; then
-            npm run tokenbrawl -w packages/cli -- tournament --config "$CONFIG_PATH" --dry-run
+            node --experimental-strip-types --no-warnings \
+              --import ./packages/cli/bin/register.mjs packages/cli/src/cli.ts \
+              tournament --config "$CONFIG_PATH" --dry-run
           else
-            npm run tokenbrawl -w packages/cli -- tournament --config "$CONFIG_PATH"
+            node --experimental-strip-types --no-warnings \
+              --import ./packages/cli/bin/register.mjs packages/cli/src/cli.ts \
+              tournament --config "$CONFIG_PATH"
           fi
 
       # Runs before the commit step and gates it. The CLI already refuses to

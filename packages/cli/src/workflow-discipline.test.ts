@@ -1,5 +1,7 @@
+import { spawnSync } from 'node:child_process';
 import { readdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { parseRunConfig, type DeploymentAgentConfig } from './config';
@@ -120,6 +122,68 @@ describe('AC1: the tournament is cron-scheduled and manually dispatchable', () =
     expect(match).not.toBeNull();
     expect(Number((match as RegExpExecArray)[1])).toBeLessThan(360);
   });
+});
+
+describe('the workflow’s invocation actually reaches the CLI', () => {
+  it('does not go through `npm run`, which eats --config and --dry-run', () => {
+    // Found by running the documented command on a real machine. npm treats
+    // `--config` and `--dry-run` as its OWN flags and consumes them even after
+    // `--`, so the CLI received `tournament configs/tournament.config.json`
+    // with both options stripped and exited 2 on "Unexpected argument".
+    //
+    // The second reason is worse and silent: `-w packages/cli` runs with
+    // cwd = packages/cli, so the config's relative `outputDir` resolves to
+    // packages/cli/apps/web/public/replays -- outside COMMIT_PATHS. Every
+    // Match runs, costs real quota, and is staged by nothing.
+    // Comment lines dropped: the workflow's own prose explains *why* it does
+    // not use npm, and naming the banned form is how that stays legible.
+    const offences = codeLines(tournamentSource())
+      .filter(({ text }) => /npm run tokenbrawl/.test(text))
+      .map(({ line, text }) => `${String(line)}: ${text.trim()}`);
+    expect(offences).toStrictEqual([]);
+  });
+
+  it('runs the CLI from the repository root, so relative paths resolve there', () => {
+    expect(tournamentSource()).toMatch(/--import \.\/packages\/cli\/bin\/register\.mjs packages\/cli\/src\/cli\.ts/);
+  });
+
+  it('really does parse both flags when spawned exactly as the workflow spawns it', () => {
+    // The only assertion here that could have caught the npm defect: a text
+    // check on an invocation nobody runs proves nothing. This spawns it.
+    //
+    // Dummy keys because a dry run resolves every key (D2) but issues no
+    // provider call -- they need only clear MIN_API_KEY_LENGTH.
+    const dummy = 'dummy-key-not-real-0123';
+    const result = spawnSync(
+      process.execPath,
+      [
+        '--experimental-strip-types',
+        '--no-warnings',
+        '--import',
+        './packages/cli/bin/register.mjs',
+        'packages/cli/src/cli.ts',
+        'tournament',
+        '--config',
+        'configs/tournament.config.json',
+        '--dry-run',
+      ],
+      {
+        cwd: REPO_ROOT,
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          GROQ_API_KEY: dummy,
+          CEREBRAS_API_KEY: dummy,
+          GOOGLE_AI_STUDIO_API_KEY: dummy,
+        },
+      },
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('450 planned');
+    // The plan was actually enumerated, not just counted.
+    expect(result.stdout.split('\n').filter((line) => line.startsWith('would run'))).toHaveLength(450);
+  }, 30_000);
 });
 
 describe('AC2: results are committed back, and the commit is path-based', () => {
