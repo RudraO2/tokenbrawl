@@ -202,9 +202,9 @@ describe('AC4: an interrupted tournament, rerun, completes only what is outstand
   it('runs the whole plan on a clean directory', async () => {
     const memory = io();
     expect(await main(['tournament', '--config', 'run.json'], memory)).toBe(EXIT_OK);
-    // 3 agents -> 3 pairs, times 3 seeds.
-    expect(logsIn(memory)).toHaveLength(9);
-    expect(memory.stdout.at(-1)).toContain('9 run, 0 already committed, 9 planned');
+    // 3 agents -> 3 pairs, times 3 seeds, times 2 side swaps (Story 7.1).
+    expect(logsIn(memory)).toHaveLength(18);
+    expect(memory.stdout.at(-1)).toContain('18 run, 0 already committed, 18 planned');
   });
 
   it('completes exactly the outstanding Matches after an interruption', async () => {
@@ -229,8 +229,8 @@ describe('AC4: an interrupted tournament, rerun, completes only what is outstand
     memory.stdout.length = 0;
 
     expect(await main(['tournament', '--config', 'run.json'], memory)).toBe(EXIT_OK);
-    expect(logsIn(memory)).toHaveLength(9);
-    expect(memory.stdout.at(-1)).toContain('5 run, 4 already committed, 9 planned');
+    expect(logsIn(memory)).toHaveLength(18);
+    expect(memory.stdout.at(-1)).toContain('14 run, 4 already committed, 18 planned');
 
     // The four that survived were not re-run: byte-identical, not merely present.
     for (const [path, contents] of survived) {
@@ -245,7 +245,7 @@ describe('AC4: an interrupted tournament, rerun, completes only what is outstand
     memory.stdout.length = 0;
 
     expect(await main(['tournament', '--config', 'run.json'], memory)).toBe(EXIT_OK);
-    expect(memory.stdout.at(-1)).toContain('0 run, 9 already committed');
+    expect(memory.stdout.at(-1)).toContain('0 run, 18 already committed');
   });
 
   it('re-runs a Match whose committed log was truncated mid-write', async () => {
@@ -258,7 +258,7 @@ describe('AC4: an interrupted tournament, rerun, completes only what is outstand
     memory.stdout.length = 0;
 
     expect(await main(['tournament', '--config', 'run.json'], memory)).toBe(EXIT_OK);
-    expect(memory.stdout.at(-1)).toContain('1 run, 8 already committed');
+    expect(memory.stdout.at(-1)).toContain('1 run, 17 already committed');
     expect(memory.files.get(victim)).toBe(whole);
   });
 
@@ -269,7 +269,7 @@ describe('AC4: an interrupted tournament, rerun, completes only what is outstand
     // Every file this run produced is a Command Log. INV-8 and AD-9: there is
     // no queue, no manifest, no lock file, no database.
     const produced = [...memory.files.keys()].filter((path) => path !== 'run.json');
-    expect(produced).toHaveLength(9);
+    expect(produced).toHaveLength(18);
     expect(produced.every((path) => path.startsWith('replays/') && path.endsWith('.command-log.json'))).toBe(true);
   });
 });
@@ -335,7 +335,8 @@ describe('AC3 through main', () => {
     expect(await main(['tournament', '--config', 'run.json'], memory, { fetch: quietFetch })).toBe(EXIT_OK);
 
     const written = logsIn(memory);
-    expect(written).toHaveLength(1);
+    // One pairing, one seed, both sides (Story 7.1).
+    expect(written).toHaveLength(2);
     for (const contents of memory.files.values()) {
       expect(contents).not.toContain(KEY);
     }
@@ -467,8 +468,8 @@ describe('AC1 (Story 5.2): kill-and-resume at several points', () => {
     const survived = new Map(logsIn(memory).map((path) => [path, memory.files.get(path)]));
 
     expect(await main(['tournament', '--config', 'run.json'], memory)).toBe(EXIT_OK);
-    expect(logsIn(memory)).toHaveLength(9);
-    expect(memory.stdout.at(-1)).toContain('2 run, 7 already committed, 9 planned');
+    expect(logsIn(memory)).toHaveLength(18);
+    expect(memory.stdout.at(-1)).toContain('11 run, 7 already committed, 18 planned');
 
     for (const [path, contents] of survived) {
       expect(memory.files.get(path)).toBe(contents);
@@ -521,9 +522,10 @@ describe('AC3 (Story 5.2): parking a Deployment past its daily quota', () => {
     });
 
     expect(code).toBe(EXIT_OK);
-    // bot-vs-bot, plus the one groq pairing that ran (and parked mid-flight);
-    // the second groq pairing was skipped, never attempted.
-    expect(logsIn(memory)).toHaveLength(2);
+    // Both bot-vs-bot orientations, plus the first groq Match that ran (and
+    // parked it mid-flight); every later groq Match was skipped, never
+    // attempted.
+    expect(logsIn(memory)).toHaveLength(3);
     expect(memory.stdout.at(-1)).toContain('parked');
     expect(memory.stderr.join('\n')).toContain('parked:');
     for (const contents of memory.files.values()) {
@@ -541,7 +543,7 @@ describe('AC3 (Story 5.2): parking a Deployment past its daily quota', () => {
       fetch: rateLimitedFetch,
       sleep: async () => {},
     });
-    expect(logsIn(memory)).toHaveLength(2);
+    expect(logsIn(memory)).toHaveLength(3);
     memory.stdout.length = 0;
 
     // A second invocation, quota no longer exhausted (a quiet provider this
@@ -550,8 +552,8 @@ describe('AC3 (Story 5.2): parking a Deployment past its daily quota', () => {
     // nothing it could have survived *in*.
     const code = await main(['tournament', '--config', 'run.json'], memory, { fetch: quietFetch });
     expect(code).toBe(EXIT_OK);
-    expect(logsIn(memory)).toHaveLength(3);
-    expect(memory.stdout.at(-1)).toContain('1 run, 2 already committed, 3 planned');
+    expect(logsIn(memory)).toHaveLength(6);
+    expect(memory.stdout.at(-1)).toContain('3 run, 3 already committed, 6 planned');
   });
 });
 
@@ -578,9 +580,9 @@ describe('Story 5.3, AC1/AC4: --dry-run rehearses the schedule without spending 
     const code = await main(['tournament', '--config', 'run.json', '--dry-run'], memory);
 
     expect(code).toBe(EXIT_OK);
-    // 3 agents round-robin = 3 pairings, over 3 seeds = 9 Matches.
-    expect(memory.stdout.filter((line) => line.startsWith('would run'))).toHaveLength(9);
-    expect(memory.stdout.at(-1)).toContain('tournament (dry run): 0 run, 0 already committed, 9 planned');
+    // 3 agents round-robin = 3 pairings, over 3 seeds, both sides = 18 Matches.
+    expect(memory.stdout.filter((line) => line.startsWith('would run'))).toHaveLength(18);
+    expect(memory.stdout.at(-1)).toContain('tournament (dry run): 0 run, 0 already committed, 18 planned');
     expect(logsIn(memory)).toStrictEqual([]);
   });
 
@@ -611,7 +613,7 @@ describe('Story 5.3, AC1/AC4: --dry-run rehearses the schedule without spending 
   it('sees what previous segments committed, and reports nothing left to run', async () => {
     const memory = io();
     await main(['tournament', '--config', 'run.json'], memory);
-    expect(logsIn(memory)).toHaveLength(9);
+    expect(logsIn(memory)).toHaveLength(18);
     memory.stdout.length = 0;
 
     // This is a segment starting the morning after a segment that finished:
@@ -620,7 +622,7 @@ describe('Story 5.3, AC1/AC4: --dry-run rehearses the schedule without spending 
 
     expect(code).toBe(EXIT_OK);
     expect(memory.stdout.filter((line) => line.startsWith('would run'))).toStrictEqual([]);
-    expect(memory.stdout.at(-1)).toContain('tournament (dry run): 0 run, 9 already committed, 9 planned');
+    expect(memory.stdout.at(-1)).toContain('tournament (dry run): 0 run, 18 already committed, 18 planned');
   });
 
   it('rehearses a single match too', async () => {

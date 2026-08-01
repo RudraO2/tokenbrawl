@@ -13,8 +13,16 @@ name: Tournament
 
 on:
   schedule:
-    # 03:00 UTC, Monday through Friday. Five segments, because ~4,500 calls per
-    # Deployment against a 1,000-RPD ceiling is 4.5 days.
+    # 03:00 UTC, Monday through Friday.
+    #
+    # Story 7.1 doubled the plan: every pairing is now played from both sides,
+    # so ~9,000 calls per Deployment against a 1,000-RPD ceiling is nine
+    # segments -- about two calendar weeks at five weekday segments each. The
+    # cadence is deliberately unchanged. The runner is resumable by
+    # construction (AD-9: the committed logs ARE the state), so a longer run
+    # converges rather than restarting, and raising the cadence is a decision
+    # about quota headroom that belongs to whoever owns the schedule, not a
+    # side effect of removing a side bias.
     - cron: '0 3 * * 1-5'
   workflow_dispatch:
     inputs:

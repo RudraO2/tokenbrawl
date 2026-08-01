@@ -180,9 +180,9 @@ describe('the workflow’s invocation actually reaches the CLI', () => {
     );
 
     expect(result.status).toBe(0);
-    expect(result.stdout).toContain('450 planned');
+    expect(result.stdout).toContain('900 planned');
     // The plan was actually enumerated, not just counted.
-    expect(result.stdout.split('\n').filter((line) => line.startsWith('would run'))).toHaveLength(450);
+    expect(result.stdout.split('\n').filter((line) => line.startsWith('would run'))).toHaveLength(900);
   }, 30_000);
 });
 
@@ -288,15 +288,30 @@ describe('the committed tournament config is the one FR-20 describes', () => {
     expect(config.agents).toHaveLength(6);
   });
 
-  it('reproduces FR-20’s arithmetic: 450 Matches, 150 per Deployment', () => {
+  it('reproduces FR-20’s arithmetic, doubled by Story 7.1: 900 Matches, 300 per Deployment', () => {
+    // Raised from 450 / 150 by Story 7.1, never loosened into a range. The pin
+    // is what keeps a quiet edit to `seedCount` from halving a tournament
+    // without anyone noticing -- the same class of weakening the
+    // skill-separation thresholds are pinned against in `audit-invariants.sh`.
     const planned = planTournament(config);
-    expect(planned).toHaveLength(450);
+    expect(planned).toHaveLength(900);
 
     for (const agent of config.agents.filter((a) => a.kind === 'deployment')) {
       const appearances = planned.filter((match) => match.agentIds.includes(agent.id));
-      // 5 opponents x 30 seeds. At ~30 Decision Points each that is the ~4,500
-      // calls per Deployment per tournament FR-20 states.
-      expect(appearances).toHaveLength(150);
+      // 5 opponents x 30 seeds x 2 sides. At ~30 Decision Points each that is
+      // ~9,000 calls per Deployment per tournament -- double FR-20's ~4,500,
+      // which is the price of removing the side bias 5.1 left in place.
+      expect(appearances).toHaveLength(300);
+    }
+  });
+
+  it('gives every Deployment the same number of Matches on each side (Story 7.1, AC1)', () => {
+    const planned = planTournament(config);
+    for (const agent of config.agents) {
+      const onSide0 = planned.filter((match) => match.agentIds[0] === agent.id).length;
+      const onSide1 = planned.filter((match) => match.agentIds[1] === agent.id).length;
+      expect(onSide0).toBe(onSide1);
+      expect(onSide0).toBeGreaterThan(0);
     }
   });
 
