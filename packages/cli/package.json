@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "vitest run"
+    "test": "vitest run",
+    "tokenbrawl": "node --experimental-strip-types src/cli.ts"
   },
   "devDependencies": {
     "vitest": "^4.1.0"
