@@ -49,6 +49,12 @@ export interface RunSummary {
   readonly completed: number;
   /** Paths written this run, in completion order. */
   readonly written: readonly string[];
+  /**
+   * Deployment ids parked during this run (Story 5.2, AC3). Any planned Match
+   * naming one of these on either side was skipped rather than attempted --
+   * not written, and therefore still outstanding for the next invocation.
+   */
+  readonly parked: readonly string[];
 }
 
 /**
@@ -114,8 +120,10 @@ export async function runOneMatch(
  * *are* the progress. A run killed at Match 40 of 200 leaves 40 files, and the
  * next invocation plans the same 200 and finds 160 outstanding.
  *
- * `planned` is the *outstanding* set, so `skipped` is supplied by the caller
- * -- this function never decides what to skip, it only reports it.
+ * `planned` is the *outstanding* set, so `skipped` (already-committed) is
+ * supplied by the caller -- this function never decides *that* kind of skip,
+ * it only reports it. Parking (Story 5.2, AC3) is the one skip this function
+ * does decide, because it can only be known partway through this very loop.
  */
 export async function runPlannedMatches(
   planned: readonly PlannedMatch[],
@@ -130,6 +138,20 @@ export async function runPlannedMatches(
   }
 
   for (const match of planned) {
+    // Story 5.2, AC3: a Deployment parked earlier in this run has its
+    // remaining Matches skipped rather than attempted, on either side of the
+    // pairing. Skipped, not failed -- the match stays outstanding and the
+    // loop continues with whatever else is planned, which is exactly "parks
+    // that Deployment's remaining Matches and continues with other
+    // Deployments rather than failing the run".
+    const parkedAgent = match.agentIds.find((id) => deps.quota?.isParked(id) ?? false);
+    if (parkedAgent !== undefined) {
+      deps.io.err(
+        `parked: skipping ${match.matchId} (seed ${String(match.seed)}) -- "${parkedAgent}" is parked for this run.`,
+      );
+      continue;
+    }
+
     const log = await runOneMatch(match, config, deps);
     const path = joinPath(config.outputDir, logFileName(log.matchId));
     // The io here is the *guarded* one (`main.ts` wraps it before any Match
@@ -144,5 +166,6 @@ export async function runPlannedMatches(
     skipped,
     completed: written.length,
     written: Object.freeze(written),
+    parked: deps.quota?.parked ?? Object.freeze([]),
   });
 }

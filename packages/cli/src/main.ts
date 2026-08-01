@@ -2,6 +2,7 @@ import { secretsFor, type AgentDeps } from './agents';
 import { loadRunConfig, tournamentWarnings, type RunConfig } from './config';
 import type { CliIo } from './io';
 import { outstandingMatches, planMatch, planTournament, type PlannedMatch } from './plan';
+import { createQuotaTracker } from './quota';
 import { runPlannedMatches, type RunSummary } from './run';
 import { guardSecrets } from './secrets';
 import type { FreeTierConfig } from '../../providers/src/free-tier';
@@ -169,9 +170,13 @@ function withOutputOverride(config: RunConfig, out: string | undefined): RunConf
 }
 
 function summarise(io: CliIo, label: string, summary: RunSummary): void {
+  const parkedNote =
+    summary.parked.length > 0
+      ? `, ${String(summary.parked.length)} parked (${summary.parked.join(', ')})`
+      : '';
   io.out(
     `${label}: ${String(summary.completed)} run, ${String(summary.skipped)} already committed, ` +
-      `${String(summary.planned)} planned.`,
+      `${String(summary.planned)} planned${parkedNote}.`,
   );
 }
 
@@ -203,14 +208,19 @@ async function runCommand(
     guarded.err(`warning: ${warning}`);
   }
 
+  // One tracker per invocation, never persisted (AD-9): a process restarted
+  // tomorrow starts with a clean one, and rediscovers a still-exhausted quota
+  // from the provider's own next 429 rather than from a state file it wrote
+  // itself.
+  const quota = createQuotaTracker();
+
   const agentDeps: AgentDeps = {
     io: guarded,
     ...(deps.fetch === undefined ? {} : { fetch: deps.fetch }),
     ...(deps.sleep === undefined ? {} : { sleep: deps.sleep }),
     ...(deps.freeTier === undefined ? {} : { freeTier: deps.freeTier }),
+    quota,
     onRateLimit: (signal) => {
-      // Story 5.1 reports it and does nothing else. Acting on it -- pacing,
-      // parking a Deployment that has hit a daily quota -- is Story 5.2.
       guarded.err(
         `rate limit: ${signal.provider} ${signal.model} -- retry after ${String(signal.retryAfterMs)}ms`,
       );

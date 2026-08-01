@@ -8,6 +8,7 @@ import {
   createSpacingBot,
 } from '../../env-fighter/src/bots';
 import { createCerebrasClient } from '../../providers/src/cerebras';
+import { freeTierProvider, loadFreeTierConfig } from '../../providers/src/free-tier';
 import type { FreeTierConfig } from '../../providers/src/free-tier';
 import { createGoogleClient } from '../../providers/src/google';
 import { createGroqClient } from '../../providers/src/groq';
@@ -15,6 +16,7 @@ import type { HttpFetch, Sleep } from '../../providers/src/http';
 import type { RateLimitSignal } from '../../providers/src/rate-limit';
 import type { AgentConfig, BotAgentConfig, DeploymentAgentConfig, RunConfig } from './config';
 import type { CliIo } from './io';
+import type { QuotaTracker } from './quota';
 import { resolveApiKey } from './secrets';
 
 /**
@@ -43,13 +45,19 @@ export interface AgentDeps {
   readonly sleep?: Sleep;
   readonly freeTier?: FreeTierConfig;
   /**
-   * Where a provider's rate-limit signal goes.
+   * Story 5.2: where a Deployment's rate-limit signals accumulate across the
+   * whole tournament, and what decides whether one gets parked. Optional so a
+   * single `runOneMatch` in a test still works with no tracker at all --
+   * parking then simply never happens, which is the right behaviour for a
+   * plan of one.
+   */
+  readonly quota?: QuotaTracker;
+  /**
+   * Where a provider's rate-limit signal goes, in addition to `quota`.
    *
-   * Story 5.1 forwards it to stderr and does nothing else with it. Consuming
-   * it -- pacing, parking a Deployment that has hit a daily quota, backing off
-   * across Matches rather than within one -- is Story 5.2's whole subject, and
-   * AD-9 puts that state in the runner rather than in an adapter. The sink is
-   * wired now so 5.2 inherits a seam instead of an omission.
+   * `main.ts` uses this to log every signal to stderr; `quota` is what decides
+   * whether one of them parks a Deployment. Both are called for every signal,
+   * `quota` first.
    */
   readonly onRateLimit?: (signal: RateLimitSignal) => void;
 }
@@ -75,6 +83,25 @@ function createBot(config: BotAgentConfig, seed: number, agentIndex: 0 | 1): Age
 }
 
 function createClient(config: DeploymentAgentConfig, apiKey: string, deps: AgentDeps): ProviderClient {
+  // The provider's own bound on one call's blocking wait -- `quota.ts` needs
+  // it to tell "the adapter already waited this out" from "the adapter's
+  // bounded wait could never have cleared it" (AC3).
+  const maxBackoffMs = freeTierProvider(config.provider, loadFreeTierConfig(deps.freeTier)).maxBackoffMs;
+
+  // Always wired, regardless of whether `deps.quota` or `deps.onRateLimit` is
+  // present: quota bookkeeping must see every signal even when nothing else
+  // is listening, and a caller that supplies neither still gets a harmless
+  // no-op.
+  const onRateLimit = (signal: RateLimitSignal): void => {
+    const parkedNow = deps.quota?.recordRateLimit(config.id, signal, maxBackoffMs) ?? false;
+    if (parkedNow) {
+      deps.io.err(
+        `parked: "${config.id}" reported a rate limit of ${String(signal.retryAfterMs)}ms, past what one call can wait out (${String(maxBackoffMs)}ms) -- its remaining Matches are skipped for the rest of this run.`,
+      );
+    }
+    deps.onRateLimit?.(signal);
+  };
+
   const shared = {
     apiKey,
     model: config.model,
@@ -82,7 +109,7 @@ function createClient(config: DeploymentAgentConfig, apiKey: string, deps: Agent
     ...(deps.fetch === undefined ? {} : { fetch: deps.fetch }),
     ...(deps.sleep === undefined ? {} : { sleep: deps.sleep }),
     ...(deps.freeTier === undefined ? {} : { freeTier: deps.freeTier }),
-    ...(deps.onRateLimit === undefined ? {} : { onRateLimit: deps.onRateLimit }),
+    onRateLimit,
   };
 
   if (config.provider === 'groq') {

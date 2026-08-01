@@ -431,3 +431,126 @@ describe('AC3 through main', () => {
     expect(logsIn(memory)).toHaveLength(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Story 5.2, AC1: kill-and-resume at several points, not just one.
+// ---------------------------------------------------------------------------
+
+describe('AC1 (Story 5.2): kill-and-resume at several points', () => {
+  it('converges to the full plan across three separate interruptions', async () => {
+    const memory = io();
+
+    function killedAtTotalOf(count: number): MemoryIo {
+      return {
+        ...memory,
+        writeFile: async (path: string, contents: string) => {
+          if (logsIn(memory).length >= count) {
+            throw new Error('killed');
+          }
+          await memory.writeFile(path, contents);
+        },
+      };
+    }
+
+    await main(['tournament', '--config', 'run.json'], killedAtTotalOf(2));
+    expect(logsIn(memory)).toHaveLength(2);
+
+    await main(['tournament', '--config', 'run.json'], killedAtTotalOf(5));
+    expect(logsIn(memory)).toHaveLength(5);
+
+    await main(['tournament', '--config', 'run.json'], killedAtTotalOf(7));
+    expect(logsIn(memory)).toHaveLength(7);
+
+    // What survived every interruption must still be exactly what it was --
+    // not merely present, byte-identical -- before the final, uninterrupted
+    // invocation completes the rest.
+    const survived = new Map(logsIn(memory).map((path) => [path, memory.files.get(path)]));
+
+    expect(await main(['tournament', '--config', 'run.json'], memory)).toBe(EXIT_OK);
+    expect(logsIn(memory)).toHaveLength(9);
+    expect(memory.stdout.at(-1)).toContain('2 run, 7 already committed, 9 planned');
+
+    for (const [path, contents] of survived) {
+      expect(memory.files.get(path)).toBe(contents);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Story 5.2, AC3: parking a Deployment past its daily quota, through the real
+// entry point -- the run keeps going and exits cleanly rather than failing.
+// ---------------------------------------------------------------------------
+
+const THREE_AGENT_DEPLOYMENT_CONFIG = JSON.stringify({
+  seedBase: 4101,
+  seedCount: 1,
+  outputDir: 'replays',
+  agents: [
+    { id: 'bot:spacing', kind: 'bot', bot: 'spacing' },
+    { id: 'bot:aggressive', kind: 'bot', bot: 'aggressive' },
+    {
+      id: 'groq:llama-3.1-8b-instant',
+      kind: 'deployment',
+      provider: 'groq',
+      model: 'llama-3.1-8b-instant',
+      apiKeyEnv: 'GROQ_API_KEY',
+    },
+  ],
+});
+
+const rateLimitedFetch: HttpFetch = () =>
+  Promise.resolve({
+    status: 429,
+    headers: { get: (name: string) => (name.toLowerCase() === 'retry-after' ? '9999' : null) },
+    text: () =>
+      Promise.resolve(
+        JSON.stringify({ error: { type: 'requests', message: 'Rate limit reached for requests per day (RPD)' } }),
+      ),
+  });
+
+describe('AC3 (Story 5.2): parking a Deployment past its daily quota', () => {
+  it('parks the Deployment, skips its remaining Matches, exits 0, and reports it', async () => {
+    const memory = createMemoryIo({
+      files: { 'run.json': THREE_AGENT_DEPLOYMENT_CONFIG },
+      env: { GROQ_API_KEY: KEY },
+    });
+
+    const code = await main(['tournament', '--config', 'run.json'], memory, {
+      fetch: rateLimitedFetch,
+      sleep: async () => {},
+    });
+
+    expect(code).toBe(EXIT_OK);
+    // bot-vs-bot, plus the one groq pairing that ran (and parked mid-flight);
+    // the second groq pairing was skipped, never attempted.
+    expect(logsIn(memory)).toHaveLength(2);
+    expect(memory.stdout.at(-1)).toContain('parked');
+    expect(memory.stderr.join('\n')).toContain('parked:');
+    for (const contents of memory.files.values()) {
+      expect(contents).not.toContain(KEY);
+    }
+  });
+
+  it('a later invocation does not remember the park -- it is not the resumable state', async () => {
+    const memory = createMemoryIo({
+      files: { 'run.json': THREE_AGENT_DEPLOYMENT_CONFIG },
+      env: { GROQ_API_KEY: KEY },
+    });
+
+    await main(['tournament', '--config', 'run.json'], memory, {
+      fetch: rateLimitedFetch,
+      sleep: async () => {},
+    });
+    expect(logsIn(memory)).toHaveLength(2);
+    memory.stdout.length = 0;
+
+    // A second invocation, quota no longer exhausted (a quiet provider this
+    // time): the still-outstanding groq pairing runs to completion. Nothing
+    // about the previous park survived to bias this decision -- there is
+    // nothing it could have survived *in*.
+    const code = await main(['tournament', '--config', 'run.json'], memory, { fetch: quietFetch });
+    expect(code).toBe(EXIT_OK);
+    expect(logsIn(memory)).toHaveLength(3);
+    expect(memory.stdout.at(-1)).toContain('1 run, 2 already committed, 3 planned');
+  });
+});

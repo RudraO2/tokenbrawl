@@ -10,6 +10,7 @@ import { createReasoningSource } from '../../../apps/web/src/replay/sidecar';
 import type { HttpFetch, HttpRequest } from '../../providers/src/http';
 import { parseRunConfig, type RunConfig } from './config';
 import { joinPath, logFileName, planMatch, planTournament } from './plan';
+import { createQuotaTracker } from './quota';
 import { runOneMatch, runPlannedMatches, serialiseCommandLog } from './run';
 import { guardSecrets } from './secrets';
 import { createMemoryIo } from './testing/memory-io';
@@ -196,6 +197,7 @@ describe('runPlannedMatches', () => {
       skipped: 1,
       completed: 1,
       written: [joinPath('replays', logFileName(planned[0].matchId))],
+      parked: [],
     });
   });
 
@@ -341,5 +343,106 @@ describe('AC3: a key never reaches disk', () => {
     const written = raw.files.get(summary.written[0]) ?? '';
     expect(written).not.toContain(KEY);
     expect(written).not.toContain('GROQ_API_KEY');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Story 5.2, AC3 & AC4: parking a Deployment that has hit its daily quota,
+// and continuing the tournament with everything else.
+// ---------------------------------------------------------------------------
+
+/** Groq's configured `maxBackoffMs` (`free-tier.config.json`). Past this, one call's bounded wait cannot have cleared the limit. */
+const MAX_BACKOFF_MS = 120_000;
+
+function rateLimitedFetch(retryAfterSeconds: number): HttpFetch {
+  return () =>
+    Promise.resolve({
+      status: 429,
+      headers: { get: (name: string) => (name.toLowerCase() === 'retry-after' ? String(retryAfterSeconds) : null) },
+      text: () =>
+        Promise.resolve(
+          JSON.stringify({ error: { type: 'requests', message: 'Rate limit reached for requests per day (RPD)' } }),
+        ),
+    });
+}
+
+/** Three agents so a tournament has both a parked-Deployment pairing and an unrelated bot-vs-bot one. */
+const THREE_AGENT_CONFIG: RunConfig = parseRunConfig(
+  JSON.stringify({
+    seedBase: SEED,
+    seedCount: 1,
+    outputDir: 'replays',
+    agents: [
+      { id: 'bot:spacing', kind: 'bot', bot: 'spacing' },
+      { id: 'bot:aggressive', kind: 'bot', bot: 'aggressive' },
+      {
+        id: 'groq:llama-3.1-8b-instant',
+        kind: 'deployment',
+        provider: 'groq',
+        model: GROQ_MODEL,
+        apiKeyEnv: 'GROQ_API_KEY',
+      },
+    ],
+  }),
+);
+
+describe('AC3/AC4: parking a Deployment past its daily quota', () => {
+  it('parks the Deployment and skips its remaining Matches, but keeps running everything else', async () => {
+    const io = createMemoryIo({ env: { GROQ_API_KEY: KEY } });
+    const quota = createQuotaTracker();
+    // 3 agents, 1 seed -> (spacing,aggressive), (spacing,groq), (aggressive,groq)
+    // in that plan order. The first Match against groq is the one that parks it.
+    const planned = planTournament(THREE_AGENT_CONFIG);
+
+    const summary = await runPlannedMatches(planned, THREE_AGENT_CONFIG, {
+      io,
+      fetch: rateLimitedFetch(9999), // 9,999,000ms, past MAX_BACKOFF_MS
+      sleep: async () => {},
+      quota,
+    });
+
+    expect(summary.parked).toStrictEqual(['groq:llama-3.1-8b-instant']);
+    // bot-vs-bot ran; the first groq pairing ran (and parked mid-flight); the
+    // second groq pairing was skipped entirely.
+    expect(summary.completed).toBe(2);
+    expect(summary.written).toHaveLength(2);
+    expect(quota.isParked('groq:llama-3.1-8b-instant')).toBe(true);
+
+    expect(io.stderr.join('\n')).toContain('parked:');
+  });
+
+  it('does not park on a rate limit short enough for one call to have already waited out', async () => {
+    const io = createMemoryIo({ env: { GROQ_API_KEY: KEY } });
+    const quota = createQuotaTracker();
+    const planned = planTournament(THREE_AGENT_CONFIG);
+
+    const summary = await runPlannedMatches(planned, THREE_AGENT_CONFIG, {
+      io,
+      fetch: rateLimitedFetch(5), // 5,000ms, well under MAX_BACKOFF_MS
+      sleep: async () => {},
+      quota,
+    });
+
+    expect(summary.parked).toStrictEqual([]);
+    // All three Matches ran; none were skipped for parking.
+    expect(summary.completed).toBe(3);
+  });
+
+  it('carries no quota state between two trackers -- a fresh run rediscovers it, never assumes it', async () => {
+    const io = createMemoryIo({ env: { GROQ_API_KEY: KEY } });
+    const first = createQuotaTracker();
+    await runPlannedMatches(planTournament(THREE_AGENT_CONFIG), THREE_AGENT_CONFIG, {
+      io,
+      fetch: rateLimitedFetch(9999),
+      sleep: async () => {},
+      quota: first,
+    });
+    expect(first.isParked('groq:llama-3.1-8b-instant')).toBe(true);
+
+    // A brand new tracker -- standing in for a brand new process -- has no
+    // memory of the park. Nothing on disk records it either (AD-9): quota
+    // state is not the resumable state, committed logs are.
+    const second = createQuotaTracker();
+    expect(second.isParked('groq:llama-3.1-8b-instant')).toBe(false);
   });
 });

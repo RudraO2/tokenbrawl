@@ -86,6 +86,7 @@ describe('the shipped file set is what this file thinks it is', () => {
       'main.ts',
       'node-io.ts',
       'plan.ts',
+      'quota.ts',
       'run.ts',
       'secrets.ts',
     ]);
