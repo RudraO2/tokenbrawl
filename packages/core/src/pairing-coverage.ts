@@ -75,9 +75,26 @@ interface Accumulator {
   readonly sidesBySeed: Map<number, Set<0 | 1>>;
 }
 
-/** `localeCompare`, matching `skill-gate.ts`'s tie-break, so ordering is a function of the input. */
+/**
+ * Code-unit ordering, deliberately **not** `localeCompare`.
+ *
+ * `localeCompare` is collation-dependent, so two engines with different ICU
+ * data can order the same two ids differently. Row order here decides which
+ * pairing a consumer reads first and, in `side-advantage.ts`, which score each
+ * resampling index lands on -- a published number must not move because a
+ * runner shipped different collation data. `<` on strings is code-unit order,
+ * which is the same everywhere. `skill-gate.ts` uses `localeCompare` for its
+ * display tie-break; this is a deliberate divergence, not an oversight.
+ */
+function compareIds(left: string, right: string): number {
+  if (left === right) {
+    return 0;
+  }
+  return left < right ? -1 : 1;
+}
+
 function sortedPairing(agentIds: readonly [string, string]): readonly [string, string] {
-  return agentIds[0].localeCompare(agentIds[1]) <= 0
+  return compareIds(agentIds[0], agentIds[1]) <= 0
     ? [agentIds[0], agentIds[1]]
     : [agentIds[1], agentIds[0]];
 }
@@ -166,8 +183,8 @@ export function summarisePairingCoverage(
     [...byPairing.values()]
       .sort(
         (left, right) =>
-          left.pairing[0].localeCompare(right.pairing[0]) ||
-          left.pairing[1].localeCompare(right.pairing[1]),
+          compareIds(left.pairing[0], right.pairing[0]) ||
+          compareIds(left.pairing[1], right.pairing[1]),
       )
       .map((entry) => {
         const matchCount = entry.matchesOnSide0 + entry.matchesOnSide1;
