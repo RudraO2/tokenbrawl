@@ -443,6 +443,48 @@ else
   skip "no package.json yet"
 fi
 
+# The CI half of INV-8, added by Story 5.3 when a *scheduled* workflow started
+# running the tournament unattended. "Free minutes on a public repository" is a
+# property of the workflow files, and every way of breaking it is a one-line
+# edit that no behavioural test would notice: `self-hosted` is a machine
+# somebody pays for, and a larger hosted runner (`ubuntu-latest-4-cores`) bills
+# per minute even on a public repository. Neither shows up until an invoice
+# does.
+#
+# `workflow-discipline.test.ts` runs the same two checks from inside the suite,
+# for the same reason every other discipline rule in this repo is checked
+# twice.
+if [ -d .github/workflows ]; then
+  workflows_broken=""
+
+  # Comment lines dropped first: the workflow's own prose names these tokens.
+  runner_hits=$(grep -hnE '^[[:space:]]*runs-on:' .github/workflows/*.yml .github/workflows/*.yaml 2>/dev/null \
+    | grep -vE '^[0-9]+:[[:space:]]*#' \
+    | grep -vE 'runs-on:[[:space:]]*(ubuntu-latest|ubuntu-[0-9]{2}\.[0-9]{2}|macos-latest|windows-latest)[[:space:]]*$')
+  if [ -n "$runner_hits" ]; then
+    workflows_broken="$workflows_broken non-standard-runner"
+    echo "$runner_hits" | sed 's/^/          /'
+  fi
+
+  # A secret is legal only as a bare `NAME: ${{ secrets.X }}` binding, which has
+  # no shell on the line at all. Anything else -- an echo, a curl header built
+  # in a `run:` body -- puts the key where `set -x` or a failing command's own
+  # error text will print it.
+  secret_hits=$(grep -hn 'secrets\.' .github/workflows/*.yml .github/workflows/*.yaml 2>/dev/null \
+    | grep -vE '^[0-9]+:[[:space:]]*#' \
+    | grep -vE '^[0-9]+:[[:space:]]*[A-Z][A-Z0-9_]*:[[:space:]]*\$\{\{[[:space:]]*secrets\.[A-Z][A-Z0-9_]*[[:space:]]*\}\}[[:space:]]*$')
+  if [ -n "$secret_hits" ]; then
+    workflows_broken="$workflows_broken secret-outside-an-env-binding"
+    echo "$secret_hits" | sed 's/^/          /'
+  fi
+
+  if [ -n "$workflows_broken" ]; then
+    fail "workflow discipline weakened:$workflows_broken"
+  else
+    pass "every workflow uses a free hosted runner and binds secrets only as env values"
+  fi
+fi
+
 # The other half of INV-8, and the reason it left the UNMECHANISED list in
 # Story 3.2: "every configured endpoint appears on the free-tier allowlist; a
 # paid-tier endpoint fails configuration validation."
