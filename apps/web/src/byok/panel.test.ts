@@ -453,14 +453,19 @@ describe('what the panel says while a Match is paused (4.8, AC5)', () => {
   });
 
   it('returns to running as soon as a call completes', async () => {
-    const { panel, gate } = pausingPanel(await finished);
+    const { host, panel, gate } = pausingPanel(await finished);
     const running = panel.submit();
     expect(panel.state()).toBe('waiting');
 
+    // `onCall` fires synchronously inside the release, so the resume is
+    // observable before the Match resolves. Without that, "returns to running"
+    // would be unfalsifiable -- `done` arrives either way a moment later, and a
+    // panel that never left `waiting` would still pass.
     gate.release?.();
+    expect(panel.state()).toBe('running');
+    expect(host.node('[data-status]').innerHTML).not.toContain('calls made so far');
+
     await running;
-    // The last thing announced before `done` was the resume, not the pause: a
-    // visitor who looked away must not come back to a stale pause message.
     expect(panel.state()).toBe('done');
   });
 

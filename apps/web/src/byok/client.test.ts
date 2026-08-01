@@ -555,11 +555,9 @@ describe('a rate limit is a pause, not the end of a Match (4.8)', () => {
     expect(transport.calls()).toHaveLength(2);
   });
 
-  it('does not pace twice on one exhausted reading', async () => {
-    // The wait was sized to refill exactly that bucket, so carrying the reading
-    // past it would double every wait. Every response here reports an empty
-    // bucket, so a client that failed to forget would wait before every call
-    // rather than before every other one.
+  it('paces once per exhausted response, never before the first call', async () => {
+    // Three calls, two waits: the first call goes out on no information at all,
+    // and each response after it earns exactly one wait.
     const transport = createFakeTransport({
       responseHeaders: { 'x-ratelimit-remaining-tokens': '0', 'x-ratelimit-reset-tokens': '5s' },
     });
@@ -568,6 +566,28 @@ describe('a rate limit is a pause, not the end of a Match (4.8)', () => {
     await client.complete(REQUEST);
     await client.complete(REQUEST);
     expect(waits).toStrictEqual([5000, 5000]);
+  });
+
+  it('waits once for a refusal, not twice for the refusal and its headers', async () => {
+    // The case a mutation probe found unpinned. A 429 carries `retry-after`
+    // *and* an exhausted token bucket -- Groq sends both on the same response.
+    // A runner that waits out the `retry-after` and then still holds that
+    // reading paces a second time for a bucket the first wait already refilled,
+    // doubling every pause a visitor sits through for no reason at all.
+    const transport = createFakeTransport({
+      rateLimitAt: [0],
+      responseHeaders: {
+        'retry-after': '2',
+        'x-ratelimit-remaining-tokens': '0',
+        'x-ratelimit-reset-tokens': '5s',
+      },
+    });
+    const { client, waits } = groqClient({ fetch: transport.fetch });
+
+    await client.complete(REQUEST);
+
+    expect(waits).toStrictEqual([2000]);
+    expect(transport.calls()).toHaveLength(2);
   });
 
   it('does not pace at all when the provider reports nothing', async () => {

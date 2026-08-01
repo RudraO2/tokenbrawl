@@ -798,20 +798,26 @@ body {
 /*
  * A Match paused on a provider quota (Story 4.8).
  *
- * Solid lime, ground ink: the same treatment `--done` gets, because both are
- * states the visitor should read from across the room and neither is a failure.
- * It is distinguished from `--done` by its words, not by a third colour -- one
- * accent carries live/active throughout, and a decorative third would be scope
- * creep.
+ * Reads as `--running` with the brakes on, and that is the point: accent border
+ * *and* accent text at 800, plus the hard shadow. It sits deliberately between
+ * its two neighbours rather than borrowing either -- `--running` is an accent
+ * outline on the ground, `--done` inverts to a solid accent fill.
+ *
+ * The first version of this rule was a copy of `--done`, which made a *paused*
+ * Match and a *finished* one pixel-identical. One is terminal and one is not,
+ * and telling them apart should not require reading the sentence. No third
+ * colour was needed to fix it: one accent carries live/active throughout, so
+ * the three states differ by how the accent is used.
+ *
+ * Lime on the ground measures 5.42:1 (docs/DESIGN.md), well over the floor.
  *
  * Deliberately static. A pulse, a shimmer or any animated "waiting" affordance
- * would run for exactly as long as the pause, which is the page encoding a
- * duration by another route -- INV-3 forbids that as surely as a countdown
- * would be forbidden.
+ * would run for exactly as long as the pause -- the page encoding a duration by
+ * another route, which INV-3 forbids as surely as it forbids a countdown.
  */
 .tb-byok-status--waiting {
-  background: var(--tb-accent);
-  color: var(--tb-bg);
+  border-color: var(--tb-accent);
+  color: var(--tb-accent);
   box-shadow: var(--tb-shadow);
   font-weight: 800;
 }

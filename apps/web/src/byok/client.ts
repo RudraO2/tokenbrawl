@@ -447,11 +447,17 @@ export function createByokClient(config: ByokClientConfig): ProviderClient {
   /**
    * Waits, then forgets what caused the wait.
    *
-   * The forgetting is not tidiness. A wait is sized to be exactly long enough
-   * for the bucket it read to refill, so carrying that reading into the next lap
-   * would pace a second time on a number that is stale by construction --
-   * doubling every wait, and on the reactive path turning one 429 into an
-   * endless alternation of wait and refusal.
+   * The forgetting is not tidiness, and the case that needs it is the *reactive*
+   * one specifically. A 429 almost always carries `x-ratelimit-remaining-tokens:
+   * 0` alongside its `retry-after`, and both are recorded before the branch
+   * below decides what to do. Wait out the `retry-after`, come back round the
+   * loop still holding that reading, and the runner paces a *second* time for
+   * the bucket the first wait already refilled -- two waits for one refusal.
+   *
+   * On the proactive path it is belt and braces: the snapshot is overwritten by
+   * the next response either way. That asymmetry is why a mutation probe of this
+   * line survived every test until one was written for the 429 path -- see the
+   * spec's Review Triage Log.
    */
   const waitAndForget = async (waitMs: number): Promise<void> => {
     config.onWait?.();
