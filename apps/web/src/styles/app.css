@@ -571,6 +571,48 @@ body {
   color: var(--tb-muted);
 }
 
+/*
+ * `appearance: none` takes the platform dropdown arrow with it, which left the
+ * two selects looking exactly like the text input below them -- a picker a
+ * visitor cannot see is a picker they will not use. The mark is a glyph in the
+ * mono face rather than an image or a gradient: flat ink on the ground, and no
+ * asset to fetch.
+ */
+.tb-byok-select {
+  position: relative;
+}
+
+.tb-byok-select::after {
+  content: '▾';
+  position: absolute;
+  right: var(--tb-space-1);
+  top: 50%;
+  transform: translateY(-50%);
+  font-family: var(--tb-font-mono);
+  color: var(--tb-ink);
+  /* The click belongs to the select underneath. */
+  pointer-events: none;
+}
+
+.tb-byok-select .tb-byok-input {
+  padding-right: var(--tb-space-3);
+}
+
+/*
+ * The same fact as the disabled options, in text. Chrome's accessibility tree
+ * drops a disabled `<option>` altogether, so without this a screen-reader user
+ * is never told that OpenRouter and xAI exist and cannot run here -- which is
+ * the whole of AC5. Muted, because it is metadata about the picker.
+ */
+.tb-byok-cli-only {
+  margin: var(--tb-space-2) 0 0;
+  max-width: 90ch;
+  font-family: var(--tb-font-mono);
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--tb-muted);
+}
+
 .tb-byok-check {
   display: flex;
   align-items: center;

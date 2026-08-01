@@ -6,7 +6,7 @@ import { DEFAULT_FIGHTER_CONFIG } from '../../../../packages/env-fighter/src/con
 import { createFighterEnvironment } from '../../../../packages/env-fighter/src/environment';
 import type { FreeTierConfig } from '../../../../packages/providers/src/free-tier';
 import type { HttpFetch } from '../../../../packages/providers/src/http';
-import { byokEndpoint, byokProvider } from './catalogue';
+import { byokEndpoint } from './catalogue';
 import { createByokClient } from './client';
 import { buildByokCommandLog, byokConfigHash } from './log';
 
@@ -116,10 +116,10 @@ export async function runByokMatch(config: ByokRunConfig): Promise<CommandLog> {
   const identities = [0, 1].map((index): AgentIdentity => {
     const agentIndex = index as 0 | 1;
     const fighter = config.fighters[agentIndex];
-    // `byokProvider` has already refused a CLI-only id inside `createByokClient`
-    // above; this call is what turns the selection into the label and endpoint
-    // the log records.
-    byokProvider(fighter.provider, config.freeTier);
+    // No provider check here: `createByokClient` above has already refused a
+    // CLI-only id, and `byokEndpoint` refuses one again on the next line. A
+    // third call was in this spot and was dead -- a mutation probe found it by
+    // changing nothing when it was deleted.
     return {
       id: byokAgentId(agentIndex, fighter.model),
       kind: 'deployment',

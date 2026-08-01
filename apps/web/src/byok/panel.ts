@@ -78,6 +78,28 @@ function optionMarkup(option: ByokProviderOption): string {
   return `<option value="${escapeHtml(option.id)}"${option.access === 'cli-only' ? ' disabled' : ''}>${escapeHtml(label)}</option>`;
 }
 
+/**
+ * The CLI-only providers, as a sentence beside the picker.
+ *
+ * Not decoration, and not a duplicate of the disabled `<option>`s: Chrome's
+ * accessibility tree omits a disabled option entirely, so a screen-reader user
+ * reading the picker is never told the provider exists, let alone that it is
+ * CLI-only -- which is precisely what AC5 asks to be told. Found by taking an
+ * a11y snapshot of the built page rather than by any test. The sentence also
+ * carries each provider's *reason*, which an option label has no room for.
+ */
+export function cliOnlyNotice(catalogue: readonly ByokProviderOption[]): string {
+  const excluded = catalogue.filter((option) => option.access === 'cli-only');
+  if (excluded.length === 0) {
+    return '';
+  }
+  return escapeHtml(
+    `Not runnable in a browser: ${excluded
+      .map((option) => `${option.label} (${option.cliOnlyReason ?? ''})`)
+      .join(' ')}`,
+  );
+}
+
 function modelMarkup(option: ByokProviderOption | undefined): string {
   return (option?.models ?? [])
     .map((model) => `<option value="${escapeHtml(model.model)}">${escapeHtml(model.model)}</option>`)
@@ -100,13 +122,17 @@ export function byokMarkup(catalogue: readonly ByokProviderOption[]): string {
     <fieldset class="tb-byok-fighter">
       <legend class="tb-byok-legend">${FIGHTER_LABELS[agentIndex]}</legend>
       <label class="tb-byok-label" for="tb-byok-provider-${String(agentIndex)}">Provider</label>
-      <select class="tb-byok-input" id="tb-byok-provider-${String(agentIndex)}" data-provider="${String(agentIndex)}">
-        ${catalogue.map((option) => optionMarkup(option)).join('')}
-      </select>
+      <div class="tb-byok-select">
+        <select class="tb-byok-input" id="tb-byok-provider-${String(agentIndex)}" data-provider="${String(agentIndex)}">
+          ${catalogue.map((option) => optionMarkup(option)).join('')}
+        </select>
+      </div>
       <label class="tb-byok-label" for="tb-byok-model-${String(agentIndex)}">Model</label>
-      <select class="tb-byok-input" id="tb-byok-model-${String(agentIndex)}" data-model="${String(agentIndex)}">
-        ${modelMarkup(first)}
-      </select>
+      <div class="tb-byok-select">
+        <select class="tb-byok-input" id="tb-byok-model-${String(agentIndex)}" data-model="${String(agentIndex)}">
+          ${modelMarkup(first)}
+        </select>
+      </div>
       <label class="tb-byok-label" for="tb-byok-key-${String(agentIndex)}">API key</label>
       <input
         class="tb-byok-input"
@@ -140,6 +166,7 @@ export function byokMarkup(catalogue: readonly ByokProviderOption[]): string {
         <button class="tb-button tb-byok-run" type="button" data-run>Run the fight</button>
       </fieldset>
     </div>
+    <p class="tb-byok-cli-only">${cliOnlyNotice(catalogue)}</p>
     <p class="tb-byok-progress" data-progress></p>
     <p class="tb-byok-status" data-status role="status" aria-live="polite"></p>
   `;

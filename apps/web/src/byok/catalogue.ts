@@ -135,6 +135,26 @@ export function byokCatalogue(config: FreeTierConfig = loadFreeTierConfig()): re
           model,
           endpoint: endpointForModel(entry.id, model, providerConfig.endpoints, config),
         }));
+
+      // A provider with an allowlisted endpoint but no listed model is a
+      // degenerate configuration: `free-tier.config.json` permits it (only
+      // `endpoints` must be non-empty), and offering it would put a selectable
+      // provider in the picker with an empty model list behind it, which fails
+      // at run time with "has no free-tier model" -- exactly the shape AC5 says
+      // must not happen. It is refused here instead, with the reason said out
+      // loud rather than left as an empty dropdown for a visitor to interpret.
+      if (models.length === 0) {
+        return Object.freeze({
+          id: entry.id,
+          label: entry.label,
+          access: 'cli-only' as const,
+          keyHeader: entry.keyHeader,
+          models: Object.freeze([] as ByokModelOption[]),
+          cliOnlyReason:
+            'CLI only — no free-tier model is listed for this provider in free-tier.config.json.',
+        });
+      }
+
       return Object.freeze({
         id: entry.id,
         label: entry.label,

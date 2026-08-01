@@ -4,7 +4,7 @@ import { createFakeTransport, chatCompletionBody } from '../testing/byok-transpo
 import { byokCatalogue } from './catalogue';
 import { ByokKeyError } from './client';
 import type { KeyStorage } from './keys';
-import { byokMarkup, mountByokPanel, type ByokHost, type ByokNode } from './panel';
+import { byokMarkup, cliOnlyNotice, mountByokPanel, type ByokHost, type ByokNode } from './panel';
 import { runByokMatch, type ByokRunConfig } from './run';
 
 /**
@@ -103,6 +103,22 @@ describe('the picker shows what can run here, and what cannot (AC5)', () => {
     // Disabled, not absent. A hidden provider tells a visitor nothing.
     expect(markup).toMatch(/<option value="openrouter" disabled>/);
     expect(markup).toMatch(/<option value="xai" disabled>/);
+  });
+
+  it('says which providers cannot run here in text, not only as a disabled option', () => {
+    // Chrome's accessibility tree omits a disabled `<option>` entirely, so the
+    // option alone tells a screen-reader user nothing -- found by snapshotting
+    // the built page, not by a test. The sentence carries the reason too.
+    const notice = cliOnlyNotice(byokCatalogue());
+    expect(notice).toContain('OpenRouter');
+    expect(notice).toContain('xAI');
+    expect(notice).toMatch(/no browser adapter/);
+    expect(byokMarkup(byokCatalogue())).toContain(notice);
+  });
+
+  it('says nothing when every provider can run here', () => {
+    const browserOnly = byokCatalogue().filter((option) => option.access === 'browser');
+    expect(cliOnlyNotice(browserOnly)).toBe('');
   });
 
   it('leaves the browser-capable providers selectable', () => {

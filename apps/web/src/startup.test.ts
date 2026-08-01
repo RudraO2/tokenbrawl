@@ -1094,16 +1094,46 @@ describe('the BYOK panel and the player it replaces (Story 4.6)', () => {
     // once it ships, which is why the guard is explicit rather than a
     // this-cannot-happen comment.
     const { log, sidecar } = await buildDemoBundle();
-    const harness = createHarness(log, { spritesResolve: true, sidecar });
+
+    // The sidecar is held open until the swap has happened, which is the only
+    // ordering that exercises the guard at all. An earlier version of this case
+    // passed a resolved sidecar and let `await byokLog()` run first -- by then
+    // the sidecar had already been adopted into the demo player, so the case
+    // was green with the guard deleted. A mutation found it.
+    const gate: { open: (value: unknown) => void } = { open: () => undefined };
+    const heldSidecar = new Promise<unknown>((resolve) => {
+      gate.open = resolve;
+    });
+    const harness = createHarness(log, {
+      json: async (url) => {
+        if (url === DEMO_REPLAY_URL) {
+          return log;
+        }
+        if (url.endsWith(DEMO_SIDECAR_PATH)) {
+          return heldSidecar;
+        }
+        throw new Error('no art here');
+      },
+    });
     const result = await startup(harness.globals);
 
     const replacement = result?.showLog(await byokLog());
+    gate.open(sidecar);
     await result?.dressed;
 
     // A BYOK log carries its reasoning inline, so `inline` is the honest state.
     // `ready` here would mean the demo's sidecar had been adopted into it.
     expect(replacement?.reasoning.status()).toBe('inline');
     expect(result?.current()).toBe(replacement);
+
+    // And the observable that actually bites. `adopt` targets the old player's
+    // own source, so it alone is harmless; what is not harmless is the
+    // `refresh()` that follows it, which repaints the *shared* canvas and
+    // rewrites the *shared* reasoning panel from the Match that is no longer on
+    // screen. The panel must still name the fighters of the Match that is.
+    const panel = harness.root.node('[data-reasoning]')?.innerHTML ?? '';
+    expect(panel).toContain('byok');
+    expect(panel).not.toContain(log.agents[0].id);
   });
 
   it('leaves the player alone when the page has no BYOK host at all', async () => {

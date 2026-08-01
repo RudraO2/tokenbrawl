@@ -77,6 +77,24 @@ describe('every offered endpoint is on the free-tier allowlist (INV-8)', () => {
     expect(() => byokEndpoint('groq', 'llama-3.3-70b-versatile')).toThrow(/has no free-tier model/);
   });
 
+  it('refuses a provider that has an endpoint but no listed model', () => {
+    // `free-tier.config.json` permits `models: {}` -- only `endpoints` must be
+    // non-empty -- so this configuration is reachable by editing one file. The
+    // picker must not offer a provider it cannot resolve a model for; the
+    // failure belongs before the key is pasted, not at request time (AC5).
+    const config = loadFreeTierConfig();
+    const modelless = loadFreeTierConfig({
+      verifiedOn: '2026-08-01',
+      providers: {
+        groq: { ...JSON.parse(JSON.stringify(config.providers.groq)) as object, models: {} },
+      },
+    });
+    const groq = byokCatalogue(modelless).find((option) => option.id === 'groq');
+    expect(groq?.access).toBe('cli-only');
+    expect(groq?.cliOnlyReason).toMatch(/no free-tier model/);
+    expect(() => byokProvider('groq', modelless)).toThrow(/cannot be run from a browser/);
+  });
+
   it('drops a provider whose free-tier entry has been removed rather than guessing an endpoint', () => {
     // Editing `free-tier.config.json` is how a provider is retired (INV-8 makes
     // that file authoritative). The picker must follow it, not a hard-coded list.

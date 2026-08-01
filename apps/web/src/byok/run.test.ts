@@ -215,6 +215,20 @@ describe('a failed key produces no Match at all (AC3)', () => {
     expect(transport.calls()).toHaveLength(0);
   });
 
+  it('accepts both ends of the seed range the frozen schema allows', async () => {
+    // Correct today and unpinned until now: the bounds are inclusive, and an
+    // off-by-one in either direction would refuse a seed the schema accepts.
+    for (const seed of [0, 4_294_967_295]) {
+      const log = await runByokMatch({
+        fighters: fighters(),
+        seed,
+        fetch: rotatingTransport().fetch,
+      });
+      expect(log.seed).toBe(seed);
+      expect(() => validateCommandLog(log)).not.toThrow();
+    }
+  });
+
   it('refuses a seed the frozen schema could not carry, before any request', async () => {
     const transport = rotatingTransport();
     for (const seed of [-1, 1.5, 4_294_967_296, Number.NaN]) {
