@@ -1,0 +1,106 @@
+import type { HttpFetch, HttpRequest, HttpResponse } from '../../../../packages/providers/src/http';
+
+/**
+ * The transport fake every BYOK test runs against (Story 4.6).
+ *
+ * It satisfies the same `HttpFetch` interface the real `fetch` does,
+ * structurally and by construction, so an assertion made here is an assertion
+ * about the shape of the real request: the URL it went to, the headers it
+ * carried, and the body on the wire. AC1 -- "the keys are transmitted only to
+ * the model provider that visitor selected, and to no other origin" -- is a
+ * claim about exactly those three things and is not otherwise observable
+ * without a network.
+ *
+ * Lives under `src/testing/`, which `source-discipline.test.ts` exempts from
+ * the shipped-file sweeps, for the same reason `demo-log.ts` does: it is
+ * scaffolding, imported only by `*.test.ts`, and never reaches the bundle.
+ */
+
+export interface RecordedCall {
+  readonly url: string;
+  readonly headers: Readonly<Record<string, string>>;
+  readonly body: string;
+}
+
+export interface FakeTransport {
+  readonly fetch: HttpFetch;
+  readonly calls: () => readonly RecordedCall[];
+  /** Every distinct origin any request reached. AC1 is a statement about this set. */
+  readonly origins: () => readonly string[];
+}
+
+/** An OpenAI-compatible completion, which is the shape Groq and Cerebras both return. */
+export function chatCompletionBody(text: string, completionTokens = 12): string {
+  return JSON.stringify({
+    choices: [{ message: { content: text } }],
+    usage: { completion_tokens: completionTokens },
+  });
+}
+
+/** Google AI Studio's `generateContent` shape. */
+export function generateContentBody(text: string, completionTokens = 12): string {
+  return JSON.stringify({
+    candidates: [{ content: { parts: [{ text }] } }],
+    usageMetadata: { candidatesTokenCount: completionTokens },
+  });
+}
+
+/**
+ * Scheme and authority, by pattern rather than by `URL`.
+ *
+ * `tsconfig.base.json` sets `lib: ["ES2022"]` with no DOM, so `URL` is not a
+ * name this project may reference -- the same constraint that made `main.ts`
+ * declare its own `CanvasSurface` instead of naming `HTMLCanvasElement`.
+ */
+function originOf(url: string): string {
+  return /^[a-z]+:\/\/[^/]+/i.exec(url)?.[0] ?? url;
+}
+
+function headersOf(entries: Readonly<Record<string, string>>): HttpResponse['headers'] {
+  return {
+    get: (name: string): string | null => entries[name.toLowerCase()] ?? null,
+  };
+}
+
+export interface FakeTransportConfig {
+  /** Status per call, in order. The last value repeats once the list is exhausted. */
+  readonly statuses?: readonly number[];
+  readonly body?: (call: number) => string;
+  readonly responseHeaders?: Readonly<Record<string, string>>;
+  /** When set, `fetch` rejects the way a cross-origin refusal or an offline tab does. */
+  readonly rejectWith?: Error;
+}
+
+/**
+ * Records every request and answers with whatever the configuration says.
+ *
+ * Answers with a *valid* Action by default. A test about where a key was sent
+ * should not also be a test about Parse Failure handling, and a Match whose
+ * every reply was unparseable would make the origin assertion weaker rather
+ * than stronger -- fewer Decision Points, fewer requests to check.
+ */
+export function createFakeTransport(config: FakeTransportConfig = {}): FakeTransport {
+  const calls: RecordedCall[] = [];
+  const statuses = config.statuses ?? [200];
+
+  const fetch: HttpFetch = (url: string, request: HttpRequest): Promise<HttpResponse> => {
+    calls.push({ url, headers: request.headers, body: request.body });
+    if (config.rejectWith !== undefined) {
+      return Promise.reject(config.rejectWith);
+    }
+    const index = calls.length - 1;
+    const status = statuses[Math.min(index, statuses.length - 1)];
+    const bodyText = config.body?.(index) ?? chatCompletionBody('ACTION: attack');
+    return Promise.resolve({
+      status,
+      headers: headersOf(config.responseHeaders ?? {}),
+      text: (): Promise<string> => Promise.resolve(bodyText),
+    });
+  };
+
+  return {
+    fetch,
+    calls: () => calls,
+    origins: () => [...new Set(calls.map((call) => originOf(call.url)))],
+  };
+}

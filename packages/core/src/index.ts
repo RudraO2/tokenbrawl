@@ -93,3 +93,11 @@ export type { MockProviderClient, MockProviderConfig } from './testing/mock-prov
 
 export { computeCacheStats, formatCacheDeviations } from './caching';
 export type { CacheStats } from './caching';
+
+// ---------------------------------------------------------------------------
+// Story 4.6: AD-11 as a predicate. BYOK Matches never enter the leaderboard,
+// and Story 7.2's rating computation imports this rather than re-deriving it.
+// ---------------------------------------------------------------------------
+
+export { isRatingEligible, ratingEligibility } from './rating-eligibility';
+export type { RatableLog, RatingEligibility, RatingExclusion } from './rating-eligibility';
