@@ -1,0 +1,132 @@
+{
+  "story": "7-2-ratings-with-confidence-intervals",
+  "title": "Baseline Bot ratings",
+  "generatedBy": "TOKENBRAWL_WRITE_RATINGS_REPORT=1 npx vitest run --root packages/env-fighter src/ratings.test.ts",
+  "corpus": "the Baseline Bot ladder — 600 Matches over 100 seeds from seed base 20260731, every seed played from both sides (AD-12)",
+  "environment": {
+    "id": "fighter-1v1",
+    "version": "1.0.0"
+  },
+  "configHash": "891e524089af5b88da76fcfb9149be945cb0d33738d2eda472498475180b48a2",
+  "matches": 600,
+  "ratedMatches": 600,
+  "excludedMatches": 0,
+  "exclusionTotals": [],
+  "bootstrap": {
+    "method": "percentile",
+    "resamples": 2000,
+    "seed": 20260802,
+    "confidenceBasisPoints": 9500
+  },
+  "mainLeaderboard": [
+    {
+      "agent": "spacing-aware",
+      "kind": "bot",
+      "track": "main",
+      "matches": 400,
+      "ratingBasisPoints": 9325,
+      "ciLowerBasisPoints": 9075,
+      "ciUpperBasisPoints": 9550,
+      "opponents": [
+        {
+          "opponent": "aggressive",
+          "matches": 200,
+          "scoreBasisPoints": 8700
+        },
+        {
+          "opponent": "random",
+          "matches": 200,
+          "scoreBasisPoints": 9950
+        }
+      ]
+    },
+    {
+      "agent": "aggressive",
+      "kind": "bot",
+      "track": "main",
+      "matches": 400,
+      "ratingBasisPoints": 5050,
+      "ciLowerBasisPoints": 4575,
+      "ciUpperBasisPoints": 5562,
+      "opponents": [
+        {
+          "opponent": "random",
+          "matches": 200,
+          "scoreBasisPoints": 8800
+        },
+        {
+          "opponent": "spacing-aware",
+          "matches": 200,
+          "scoreBasisPoints": 1300
+        }
+      ]
+    },
+    {
+      "agent": "random",
+      "kind": "bot",
+      "track": "main",
+      "matches": 400,
+      "ratingBasisPoints": 625,
+      "ciLowerBasisPoints": 412,
+      "ciUpperBasisPoints": 862,
+      "opponents": [
+        {
+          "opponent": "aggressive",
+          "matches": 200,
+          "scoreBasisPoints": 1200
+        },
+        {
+          "opponent": "spacing-aware",
+          "matches": 200,
+          "scoreBasisPoints": 50
+        }
+      ]
+    }
+  ],
+  "reflexTrack": [],
+  "unrated": [],
+  "coverage": [
+    {
+      "pairing": [
+        "aggressive",
+        "random"
+      ],
+      "matches": 200,
+      "matchesBySide": [
+        100,
+        100
+      ],
+      "mirroredSeeds": 100,
+      "provisional": false,
+      "exclusions": []
+    },
+    {
+      "pairing": [
+        "aggressive",
+        "spacing-aware"
+      ],
+      "matches": 200,
+      "matchesBySide": [
+        100,
+        100
+      ],
+      "mirroredSeeds": 100,
+      "provisional": false,
+      "exclusions": []
+    },
+    {
+      "pairing": [
+        "random",
+        "spacing-aware"
+      ],
+      "matches": 200,
+      "matchesBySide": [
+        100,
+        100
+      ],
+      "mirroredSeeds": 100,
+      "provisional": false,
+      "exclusions": []
+    }
+  ]
+}

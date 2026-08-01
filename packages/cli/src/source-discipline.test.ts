@@ -83,6 +83,7 @@ describe('the shipped file set is what this file thinks it is', () => {
       'config.ts',
       'index.ts',
       'io.ts',
+      'leaderboard.ts',
       'main.ts',
       'node-io.ts',
       'plan.ts',

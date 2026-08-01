@@ -1,6 +1,7 @@
 import { secretsFor, type AgentDeps } from './agents';
 import { loadRunConfig, tournamentWarnings, type RunConfig } from './config';
 import type { CliIo } from './io';
+import { LEADERBOARD_REPORT_DIR, generateLeaderboard } from './leaderboard';
 import { outstandingMatches, planMatch, planTournament, type PlannedMatch } from './plan';
 import { createQuotaTracker } from './quota';
 import { runPlannedMatches, type RunSummary } from './run';
@@ -25,16 +26,23 @@ import type { HttpFetch, Sleep } from '../../providers/src/http';
 
 export const USAGE = `tokenbrawl -- run Tokenbrawl Matches from the command line
 
-  match      --config <path> --seed <n> --agents <idA>,<idB> [--out <dir>] [--dry-run]
-  tournament --config <path> [--out <dir>] [--dry-run]
+  match       --config <path> --seed <n> --agents <idA>,<idB> [--out <dir>] [--dry-run]
+  tournament  --config <path> [--out <dir>] [--dry-run]
+  leaderboard --config <path> [--out <dir>] [--reports <dir>]
 
   --config   path to a JSON run config (required)
   --seed     the seed for a single Match (match only)
   --agents   two comma-separated agent ids from the config (match only)
   --out      output directory override (default: the config's outputDir, else replays/)
+  --reports  where the leaderboard is written (default: docs/reports)
   --dry-run  report what would run and stop. Loads the config, resolves every
              key and computes the outstanding set, but issues no provider call
              and writes no log. Spends no quota.
+
+The leaderboard command reads the Command Logs already committed under the
+output directory and writes docs/reports/leaderboard.json and .md. It plays no Match,
+resolves no key and issues no provider call, so it is safe to run at any time
+and after a tournament segment that failed partway.
 
 Provider keys are read from the environment only, via each Deployment's
 "apiKeyEnv" name. They are never read from the config file, never written to
@@ -201,6 +209,62 @@ function summarise(io: CliIo, label: string, summary: RunSummary): void {
   );
 }
 
+/**
+ * `leaderboard`: recompute the published ratings from the logs already on disk.
+ *
+ * Deliberately **not** routed through `runCommand`. That path resolves every
+ * Deployment's API key before it does anything, which is right for a command
+ * that is about to spend quota and wrong for one that reads committed files: it
+ * would make republishing the board impossible on a machine without the keys,
+ * including the CI step that runs after a segment which itself failed on a
+ * missing one. Nothing here can print a key -- it reads Command Logs, which
+ * `secrets.ts` already guarantees never contain one, and prints paths and
+ * counts.
+ */
+async function leaderboardCommand(parsed: ParsedArgs, io: CliIo): Promise<number> {
+  assertKnownOptions(parsed.options, ['config', 'out', 'reports']);
+
+  const loaded = await loadRunConfig(io, requireOption(parsed.options, 'config'));
+  const config = withOutputOverride(loaded, parsed.options['out']);
+
+  const reports = parsed.options['reports'] ?? LEADERBOARD_REPORT_DIR;
+  if (reports.trim() === '') {
+    throw new UsageError('--reports needs a directory name.');
+  }
+  // The scheduled workflow stages `apps/web/public/replays docs/reports` and
+  // commits whatever changed there. A board written outside those two paths is
+  // one no segment ever commits: a silent, permanent failure that reports a
+  // green run every night. Warned about rather than refused, because a local
+  // operator writing to a scratch directory is an ordinary thing to do.
+  if (!reports.startsWith(LEADERBOARD_REPORT_DIR)) {
+    io.err(
+      `warning: --reports ${reports} is outside ${LEADERBOARD_REPORT_DIR}, which is what the tournament workflow commits.`,
+    );
+  }
+
+  const result = await generateLeaderboard(io, config.outputDir, reports);
+
+  for (const name of result.corpus.unreadable) {
+    io.err(`warning: ${name} is not a readable Command Log and was not rated.`);
+  }
+  if (result.corpus.staleConfig.length > 0) {
+    io.err(
+      `warning: ${String(result.corpus.staleConfig.length)} logs were played under a different frame-data config hash and were not rated (AD-8).`,
+    );
+  }
+
+  io.out(
+    `leaderboard: ${String(result.report.matches)} Matches read, ${String(result.report.ratedMatches)} rated, ` +
+      `${String(result.report.excludedMatches)} excluded, ` +
+      `${String(result.report.mainLeaderboard.length)} on the main board, ${String(result.report.reflexTrack.length)} on the Reflex Track.`,
+  );
+  for (const path of result.written) {
+    io.out(`wrote ${path}`);
+  }
+
+  return EXIT_OK;
+}
+
 async function runCommand(
   parsed: ParsedArgs,
   io: CliIo,
@@ -301,10 +365,27 @@ export async function main(argv: readonly string[], io: CliIo, deps: MainDeps = 
     return EXIT_OK;
   }
 
-  if (parsed.command !== 'match' && parsed.command !== 'tournament') {
+  if (
+    parsed.command !== 'match' &&
+    parsed.command !== 'tournament' &&
+    parsed.command !== 'leaderboard'
+  ) {
     io.err(`Unknown command "${parsed.command}".`);
     io.err(USAGE);
     return EXIT_USAGE;
+  }
+
+  if (parsed.command === 'leaderboard') {
+    try {
+      return await leaderboardCommand(parsed, io);
+    } catch (error) {
+      io.err(error instanceof Error ? error.message : String(error));
+      if (error instanceof UsageError) {
+        io.err(USAGE);
+        return EXIT_USAGE;
+      }
+      return 1;
+    }
   }
 
   // Upgraded to the redacting wrapper the moment one exists, so a failure
