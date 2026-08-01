@@ -1,4 +1,6 @@
 import type { ProviderClient, ProviderRequest, ProviderResponse } from '../../core/src/deployment';
+import type { ParsedUrl } from './discovery';
+import { parseUrl } from './discovery';
 import type { HttpFetch, Sleep } from './http';
 import { defaultHttpFetch, defaultSleep } from './http';
 import { excerpt, mapOpenAiResponse, openAiRequestBody } from './openai-wire';
@@ -76,9 +78,9 @@ export function assertVisitorSuppliedEndpoint(baseUrl: string): VisitorEndpoint 
     throw new Error('Enter the base URL of an OpenAI-compatible endpoint, for example https://openrouter.ai/api/v1');
   }
 
-  let parsed: URL;
+  let parsed: ParsedUrl;
   try {
-    parsed = new URL(trimmed);
+    parsed = parseUrl(trimmed);
   } catch {
     throw new Error(`"${excerpt(trimmed)}" is not a URL. It should look like https://openrouter.ai/api/v1`);
   }

@@ -66,7 +66,7 @@ describe('a key goes to one origin and no other (AC1)', () => {
     const client = createByokClient({
       agentIndex: 1,
       provider: 'google-ai-studio',
-      model: 'gemini-2.5-flash',
+      model: 'gemma-4-31b',
       apiKey: KEY,
       fetch: transport.fetch,
     });
@@ -253,5 +253,194 @@ describe('progress is reported without any notion of duration (INV-3)', () => {
     });
     await expect(client.complete(REQUEST)).rejects.toBeInstanceOf(ByokKeyError);
     expect(seen).toStrictEqual([]);
+  });
+});
+
+/**
+ * Story 4.7: a model name that came from a visitor rather than a dropdown, an
+ * endpoint that came from one too, and the failure that only matters once both
+ * are possible.
+ */
+describe('a model the provider does not serve is its own failure (4.7, AC7)', () => {
+  it('is attributed as an unknown model, not as a generic provider error', async () => {
+    const { client } = groqClient({
+      model: 'gpt-oss-120b',
+      fetch: createFakeTransport({
+        statuses: [404],
+        body: () =>
+          JSON.stringify({
+            error: {
+              message: 'The model `gpt-oss-120b` does not exist or you do not have access to it.',
+              type: 'invalid_request_error',
+              code: 'model_not_found',
+            },
+          }),
+      }).fetch,
+    });
+
+    await expect(client.complete(REQUEST)).rejects.toMatchObject({
+      name: 'ByokKeyError',
+      failure: 'unknown-model',
+    });
+  });
+
+  it('says the thing a visitor can act on, and names the shape of the fix', () => {
+    // A missing `openai/` prefix is the overwhelmingly likely cause once model
+    // names can be typed, and the sentence says so rather than making someone
+    // guess between their key and their model.
+    const sentence = failureSentence('unknown-model');
+    expect(sentence).toMatch(/does not serve that model/);
+    expect(sentence).toContain('openai/gpt-oss-120b');
+  });
+
+  it('still calls a rejected key a rejected key, and a quota a quota', async () => {
+    // AC7's value is entirely in these three staying apart. A 401 classified as
+    // an unknown model sends a visitor to the wrong place.
+    for (const [status, expected] of [
+      [401, 'invalid-key'],
+      [403, 'invalid-key'],
+      [429, 'rate-limited'],
+      [500, 'provider-error'],
+    ] as const) {
+      const { client } = groqClient({
+        fetch: createFakeTransport({
+          statuses: [status],
+          body: () => '{"error":{"message":"something"}}',
+        }).fetch,
+      });
+      await expect(client.complete(REQUEST)).rejects.toMatchObject({ failure: expected });
+    }
+  });
+});
+
+describe('a model on no list at all (4.7, AC3)', () => {
+  it('reaches the wire verbatim, on the provider existing endpoint', async () => {
+    const transport = createFakeTransport();
+    const client = createByokClient({
+      agentIndex: 0,
+      provider: 'groq',
+      model: 'a-model-nobody-listed',
+      apiKey: KEY,
+      fetch: transport.fetch,
+    });
+
+    await client.complete(REQUEST);
+    expect(transport.origins()).toStrictEqual([GROQ_ORIGIN]);
+    expect(JSON.parse(transport.calls()[0].body)).toMatchObject({ model: 'a-model-nobody-listed' });
+    // The URL did not change, which is why this touches INV-8 not at all.
+    expect(transport.calls()[0].url).toBe(byokEndpoint('groq', 'llama-3.1-8b-instant'));
+    expect(client.model).toBe('a-model-nobody-listed');
+  });
+
+  it('is refused where the model is in the URL path, before any request', () => {
+    const transport = createFakeTransport();
+    expect(() =>
+      createByokClient({
+        agentIndex: 0,
+        provider: 'google-ai-studio',
+        model: 'gemini-nobody-allowlisted',
+        apiKey: KEY,
+        fetch: transport.fetch,
+      }),
+    ).toThrow(/free-tier allowlist entry/);
+    expect(transport.calls()).toHaveLength(0);
+  });
+});
+
+describe('an endpoint the visitor supplied (4.7, AC5, AC6)', () => {
+  it('sends the key to that origin and to no other, ignoring the picker', async () => {
+    const transport = createFakeTransport();
+    const client = createByokClient({
+      agentIndex: 1,
+      // Left on Groq deliberately: a base URL replaces the picker rather than
+      // overriding it, and a request to api.groq.com here would be the bug.
+      provider: 'groq',
+      model: 'anthropic/claude-opus-4',
+      apiKey: 'sk-or-visitor',
+      baseUrl: 'https://openrouter.ai/api/v1',
+      fetch: transport.fetch,
+    });
+
+    await client.complete(REQUEST);
+    expect(transport.origins()).toStrictEqual(['https://openrouter.ai']);
+    expect(transport.calls()[0].url).toBe('https://openrouter.ai/api/v1/chat/completions');
+    expect(transport.calls()[0].headers.Authorization).toBe('Bearer sk-or-visitor');
+  });
+
+  it('records the visitor endpoint and model, so provenance survives (INV-6)', () => {
+    const client = createByokClient({
+      agentIndex: 0,
+      provider: 'groq',
+      model: 'anthropic/claude-opus-4',
+      apiKey: 'sk',
+      baseUrl: 'https://gw.internal.example:8443/v1',
+      fetch: createFakeTransport().fetch,
+    });
+    expect(client.provider).toBe('byok');
+    expect(client.endpoint).toBe('https://gw.internal.example:8443/v1/chat/completions');
+    expect(client.model).toBe('anthropic/claude-opus-4');
+  });
+
+  it('refuses a plaintext endpoint outright, before any request exists (AC6)', () => {
+    const transport = createFakeTransport();
+    expect(() =>
+      createByokClient({
+        agentIndex: 0,
+        provider: 'groq',
+        model: 'm',
+        apiKey: 'k',
+        baseUrl: 'http://gw.example/v1',
+        fetch: transport.fetch,
+      }),
+    ).toThrow(/not https/);
+    expect(transport.calls()).toHaveLength(0);
+  });
+
+  it('names the origin rather than a provider label when a call fails there', async () => {
+    const client = createByokClient({
+      agentIndex: 0,
+      provider: 'groq',
+      model: 'm',
+      apiKey: 'sk-visitor-key',
+      baseUrl: 'https://gw.example/v1',
+      fetch: createFakeTransport({ statuses: [401], body: () => '{"error":"nope"}' }).fetch,
+    });
+
+    // "Fighter 1's Groq key" would be a lie: the key never went near Groq. The
+    // error is captured rather than matched through `.rejects.not`, which
+    // passes for a rejection that never happened as readily as for one that
+    // did.
+    const error = await client.complete(REQUEST).then(
+      () => null,
+      (caught: unknown) => caught,
+    );
+    expect(error).toBeInstanceOf(ByokKeyError);
+    expect((error as ByokKeyError).message).toContain('https://gw.example');
+    expect((error as ByokKeyError).message).not.toContain('Groq');
+    expect((error as ByokKeyError).provider).toBe('https://gw.example');
+  });
+
+  it('redacts the key from a visitor endpoint error, same as any other (AC2)', async () => {
+    const secret = 'sk-visitor-secret-value';
+    const client = createByokClient({
+      agentIndex: 0,
+      provider: 'groq',
+      model: 'm',
+      apiKey: secret,
+      baseUrl: 'https://gw.example/v1',
+      fetch: createFakeTransport({
+        statuses: [400],
+        body: () => JSON.stringify({ error: { message: `bad key ${secret}` } }),
+      }).fetch,
+    });
+
+    const error = await client.complete(REQUEST).then(
+      () => null,
+      (caught: unknown) => caught,
+    );
+    expect(error).toBeInstanceOf(ByokKeyError);
+    expect((error as ByokKeyError).detail).toContain('bad key');
+    expect((error as ByokKeyError).detail).not.toContain(secret);
+    expect((error as ByokKeyError).message).not.toContain(secret);
   });
 });

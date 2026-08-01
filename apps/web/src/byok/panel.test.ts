@@ -4,7 +4,14 @@ import { createFakeTransport, chatCompletionBody } from '../testing/byok-transpo
 import { byokCatalogue } from './catalogue';
 import { ByokKeyError } from './client';
 import type { KeyStorage } from './keys';
-import { byokMarkup, cliOnlyNotice, mountByokPanel, type ByokHost, type ByokNode } from './panel';
+import {
+  byokMarkup,
+  cliOnlyNotice,
+  modelMarkup,
+  mountByokPanel,
+  type ByokHost,
+  type ByokNode,
+} from './panel';
 import { runByokMatch, type ByokRunConfig } from './run';
 
 /**
@@ -112,7 +119,7 @@ describe('the picker shows what can run here, and what cannot (AC5)', () => {
     const notice = cliOnlyNotice(byokCatalogue());
     expect(notice).toContain('OpenRouter');
     expect(notice).toContain('xAI');
-    expect(notice).toMatch(/no browser adapter/);
+    expect(notice).toMatch(/Not in this picker/);
     expect(byokMarkup(byokCatalogue())).toContain(notice);
   });
 
@@ -138,9 +145,9 @@ describe('the picker shows what can run here, and what cannot (AC5)', () => {
     const { host } = mountWithTransport();
     host.node('[data-provider="1"]').value = 'google-ai-studio';
     host.fire('[data-provider="1"]', 'change');
-    expect(host.node('[data-model="1"]').innerHTML).toContain('gemini-2.5-flash');
+    expect(host.node('[data-model="1"]').innerHTML).toContain('gemma-4-31b');
     expect(host.node('[data-model="1"]').innerHTML).not.toContain('llama-3.1-8b-instant');
-    expect(host.node('[data-model="1"]').value).toBe('gemini-2.5-flash');
+    expect(host.node('[data-model="1"]').value).toBe('gemini-3.1-flash-lite');
   });
 
   it('offers no model, and refuses to run, if a CLI-only provider is forced in', async () => {
@@ -361,7 +368,7 @@ describe('the panel refuses what would fail at request time', () => {
           new ByokKeyError({
             agentIndex: 1,
             provider: 'Cerebras',
-            model: 'llama3.1-8b',
+            model: 'gpt-oss-120b',
             failure: 'rate-limited',
             detail: 'quota exhausted',
           }),
@@ -373,5 +380,215 @@ describe('the panel refuses what would fail at request time', () => {
     expect(host.node('[data-status]').innerHTML).toContain('Fighter 2');
     expect(host.node('[data-status]').innerHTML).toContain('Cerebras');
     expect(host.node('[data-status]').innerHTML).toContain('out of quota');
+  });
+});
+
+/**
+ * Story 4.7's surface: the Advanced disclosure, what it echoes back, and what
+ * "fetch my models" does to the picker.
+ */
+describe('progressive disclosure: the simple path is untouched (4.7)', () => {
+  it('keeps provider, model and key outside the disclosure', () => {
+    const markup = byokMarkup(byokCatalogue());
+    const advancedAt = markup.indexOf('<details');
+    expect(advancedAt).toBeGreaterThan(-1);
+    // Every control 4.6 shipped appears before the first `<details>`, which is
+    // the mechanical form of "a visitor who wants the simple thing must not
+    // have to read about base URLs to find it".
+    const simple = markup.slice(0, advancedAt);
+    for (const control of ['data-provider="0"', 'data-model="0"', 'data-key="0"']) {
+      expect(simple).toContain(control);
+    }
+  });
+
+  it('puts every 4.7 control inside it, collapsed', () => {
+    const markup = byokMarkup(byokCatalogue());
+    for (const control of [
+      'data-custom="0"',
+      'data-base="0"',
+      'data-discover="0"',
+      'data-preset="0"',
+    ]) {
+      expect(markup).toContain(control);
+    }
+    // No `open` attribute anywhere: collapsed is the default state.
+    expect(markup).not.toMatch(/<details[^>]*\bopen\b/);
+  });
+});
+
+describe('the limits a visitor reads before choosing (4.7, AC2)', () => {
+  it('carries RPM and RPD in each model option', () => {
+    // The mounted shell shows the first browser provider's models; the others
+    // are rendered by the same function when the picker changes, so both are
+    // checked through it.
+    expect(byokMarkup(byokCatalogue())).toContain(
+      'llama-3.1-8b-instant — 30 RPM / 14,400 RPD — 240 matches/day',
+    );
+    const google = byokCatalogue().find((option) => option.id === 'google-ai-studio');
+    expect(modelMarkup(google)).toContain('gemma-4-31b — 30 RPM / 14,400 RPD — 240 matches/day');
+  });
+
+  it('states a slow provider before the run, on selection', () => {
+    const { host } = mountWithTransport();
+    host.node('[data-provider="0"]').value = 'cerebras';
+    host.fire('[data-provider="0"]', 'change');
+    expect(host.node('[data-limits="0"]').innerHTML).toContain('12 minutes');
+    expect(host.node('[data-limits="0"]').innerHTML).toContain('5 requests a minute');
+  });
+
+  it('says nothing for a model with nothing unusual about it', () => {
+    const { host } = mountWithTransport();
+    host.node('[data-provider="0"]').value = 'google-ai-studio';
+    host.fire('[data-provider="0"]', 'change');
+    host.node('[data-model="0"]').value = 'gemma-4-31b';
+    host.fire('[data-model="0"]', 'change');
+    expect(host.node('[data-limits="0"]').innerHTML).toBe('');
+  });
+
+  it('marks a typed model as inheriting the provider defaults', () => {
+    const { host } = mountWithTransport();
+    host.node('[data-custom="0"]').value = 'a-model-nobody-listed';
+    host.fire('[data-custom="0"]', 'input');
+    expect(host.node('[data-limits="0"]').innerHTML).toContain('No measured free-tier row');
+  });
+});
+
+describe('the origin echoed back before the first request (4.7, AC6)', () => {
+  it('names the origin as soon as a URL is typed', () => {
+    const { host } = mountWithTransport();
+    host.node('[data-base="0"]').value = 'https://openrouter.ai/api/v1';
+    host.fire('[data-base="0"]', 'input');
+    const shown = host.node('[data-origin="0"]').innerHTML;
+    expect(shown).toContain('https://openrouter.ai');
+    expect(shown).toContain('no other origin');
+  });
+
+  it('refuses plaintext where it was typed, not at request time', () => {
+    const { host } = mountWithTransport();
+    host.node('[data-base="0"]').value = 'http://openrouter.ai/api/v1';
+    host.fire('[data-base="0"]', 'input');
+    expect(host.node('[data-origin="0"]').innerHTML).toMatch(/not https/);
+  });
+
+  it('fills the field from a preset, and echoes that origin', () => {
+    const { host } = mountWithTransport();
+    host.node('[data-preset="0"]').value = 'https://api.x.ai/v1';
+    host.fire('[data-preset="0"]', 'change');
+    expect(host.node('[data-base="0"]').value).toBe('https://api.x.ai/v1');
+    expect(host.node('[data-origin="0"]').innerHTML).toContain('https://api.x.ai');
+  });
+
+  it('says nothing at all while the field is empty', () => {
+    const { host } = mountWithTransport();
+    expect(host.node('[data-origin="0"]').innerHTML).toBe('');
+  });
+});
+
+describe('fetch my models (4.7, AC4)', () => {
+  function mountWithDiscovery(models: readonly string[] | Error) {
+    const host = createHost();
+    const asked: { provider: string; baseUrl: string; apiKey: string }[] = [];
+    const panel = mountByokPanel(host, {
+      onLog: (): void => undefined,
+      run: () => Promise.reject(new Error('not used')),
+      discover: (config) => {
+        asked.push({
+          provider: config.provider,
+          baseUrl: config.baseUrl,
+          apiKey: config.apiKey,
+        });
+        return models instanceof Error ? Promise.reject(models) : Promise.resolve(models);
+      },
+    });
+    host.node('[data-key="0"]').value = 'gsk_visitor_key';
+    return { host, panel, asked };
+  }
+
+  it('repopulates the picker from what the provider said (AC4)', async () => {
+    const { host, panel } = mountWithDiscovery(['a-brand-new-model', 'llama-3.1-8b-instant']);
+    await panel.discover(0);
+
+    const options = host.node('[data-model="0"]').innerHTML;
+    // The measured models stay, and the newly-discovered one is appended.
+    expect(options).toContain('llama-3.1-8b-instant');
+    expect(options).toContain('a-brand-new-model');
+    // Appended once, not twice: a discovered model already on the list is the
+    // ordinary case, not a duplicate row.
+    expect(options.match(/value="llama-3\.1-8b-instant"/g)).toHaveLength(1);
+    // And it carries the provider defaults, said out loud.
+    expect(options).toContain(
+      'a-brand-new-model — 30 RPM / 250 RPD — 4 matches/day (provider defaults)',
+    );
+  });
+
+  it('asks with the pasted key and this fighter own selection', async () => {
+    const { host, panel, asked } = mountWithDiscovery(['m']);
+    host.node('[data-base="0"]').value = 'https://openrouter.ai/api/v1';
+    host.fire('[data-base="0"]', 'input');
+    await panel.discover(0);
+    expect(asked).toStrictEqual([
+      { provider: 'groq', baseUrl: 'https://openrouter.ai/api/v1', apiKey: 'gsk_visitor_key' },
+    ]);
+  });
+
+  it('keeps the list it had when the key is rejected', async () => {
+    const { host, panel } = mountWithDiscovery(new Error('failed with status 401'));
+    const before = host.node('[data-model="0"]').innerHTML;
+    await panel.discover(0);
+    expect(host.node('[data-model="0"]').innerHTML).toBe(before);
+    expect(panel.state()).toBe('failed');
+    expect(host.node('[data-status]').innerHTML).toContain('401');
+    expect(host.node('[data-status]').innerHTML).toContain('Fighter 1');
+  });
+
+  it('drops a discovered list when the provider changes under it', async () => {
+    // Groq model ids do not exist on Cerebras. A list that survived the switch
+    // would offer selections guaranteed to 404.
+    const { host, panel } = mountWithDiscovery(['a-brand-new-model']);
+    await panel.discover(0);
+    expect(host.node('[data-model="0"]').innerHTML).toContain('a-brand-new-model');
+
+    host.node('[data-provider="0"]').value = 'cerebras';
+    host.fire('[data-provider="0"]', 'change');
+    expect(host.node('[data-model="0"]').innerHTML).not.toContain('a-brand-new-model');
+  });
+
+  it('leaves the other fighter picker alone', async () => {
+    const { host, panel } = mountWithDiscovery(['a-brand-new-model']);
+    await panel.discover(0);
+    expect(host.node('[data-model="1"]').innerHTML).not.toContain('a-brand-new-model');
+  });
+});
+
+describe('what the form hands the runner (4.7, AC3, AC5)', () => {
+  it('prefers a typed model over the picker selection, and passes a base URL through', async () => {
+    const host = createHost();
+    const seen: ByokRunConfig[] = [];
+    const panel = mountByokPanel(host, {
+      onLog: (): void => undefined,
+      run: (config) => {
+        seen.push(config);
+        return Promise.reject(
+          new ByokKeyError({
+            agentIndex: 0,
+            provider: 'Groq',
+            model: 'm',
+            failure: 'provider-error',
+            detail: 'stopped here on purpose',
+          }),
+        );
+      },
+    });
+    host.node('[data-key="0"]').value = 'k1';
+    host.node('[data-key="1"]').value = 'k2';
+    host.node('[data-custom="0"]').value = 'openai/gpt-oss-120b';
+    host.node('[data-base="1"]').value = 'https://gw.example/v1';
+
+    await panel.submit();
+
+    expect(seen).toHaveLength(1);
+    expect(seen[0].fighters[0].model).toBe('openai/gpt-oss-120b');
+    expect(seen[0].fighters[0].baseUrl).toBe('');
+    expect(seen[0].fighters[1].baseUrl).toBe('https://gw.example/v1');
   });
 });

@@ -51,15 +51,40 @@ function excerpt(bodyText: string): string {
     : bodyText;
 }
 
+/**
+ * The three fields this package reads off a parsed URL.
+ *
+ * Declared structurally and reached through `globalThis`, exactly as
+ * `defaultHttpFetch` reaches `fetch`, and for the same reason:
+ * `tsconfig.base.json` sets `lib: ["ES2022"]` with no DOM, so naming the
+ * ambient `URL` type would bind this package to whichever declaration happens
+ * to be installed -- today that is `@types/node`, in a package that must run in
+ * a browser (AD-4). `URL` is a web-platform global present in both runtimes;
+ * only its *type* is the problem, and this is the house answer to that.
+ */
+export interface ParsedUrl {
+  readonly origin: string;
+  readonly protocol: string;
+  readonly pathname: string;
+}
+
+type UrlConstructor = new (input: string) => ParsedUrl;
+
+export function parseUrl(input: string): ParsedUrl {
+  const candidate = (globalThis as unknown as { URL?: unknown }).URL;
+  if (typeof candidate !== 'function') {
+    throw new Error('No global URL is available. This build needs a browser or Node 18 or newer.');
+  }
+  try {
+    return new (candidate as UrlConstructor)(input);
+  } catch {
+    throw new Error(`Not a URL: ${excerpt(input)}`);
+  }
+}
+
 /** Scheme + host + port, with no trailing path. The unit AC4's "one origin" is measured in. */
 export function originOf(url: string): string {
-  let parsed: URL;
-  try {
-    parsed = new URL(url);
-  } catch {
-    throw new Error(`Not a URL: ${excerpt(url)}`);
-  }
-  return parsed.origin;
+  return parseUrl(url).origin;
 }
 
 /**

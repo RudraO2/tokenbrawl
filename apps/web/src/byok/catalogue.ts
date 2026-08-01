@@ -1,6 +1,16 @@
 import type { ProviderId } from '@tokenbrawl/contracts';
-import type { FreeTierConfig } from '../../../../packages/providers/src/free-tier';
-import { assertFreeTierEndpoint, loadFreeTierConfig } from '../../../../packages/providers/src/free-tier';
+import type { ModelListFamily } from '../../../../packages/providers/src/discovery';
+import type { FreeTierConfig, FreeTierLimits } from '../../../../packages/providers/src/free-tier';
+import {
+  assertFreeTierEndpoint,
+  freeTierLimitsFor,
+  loadFreeTierConfig,
+} from '../../../../packages/providers/src/free-tier';
+import type { MatchFeasibility } from '../../../../packages/providers/src/match-feasibility';
+import {
+  feasibilityNotice,
+  matchFeasibility,
+} from '../../../../packages/providers/src/match-feasibility';
 
 /**
  * Story 4.6, AC5: what the picker may offer, and what it must instead label
@@ -36,6 +46,29 @@ import { assertFreeTierEndpoint, loadFreeTierConfig } from '../../../../packages
  * Re-verify when `free-tier.config.json`'s `verifiedOn` moves. A provider that
  * starts refusing cross-origin requests becomes `cli-only` here, and nothing
  * else in the app has to change.
+ *
+ * ---------------------------------------------------------------------------
+ * Story 4.7 added three things to the same structure.
+ * ---------------------------------------------------------------------------
+ *
+ * 1. **Every option carries its quotas and what they imply.** AC2 asks that a
+ *    model's RPM and RPD be shown *with it*, and that an unusually long Match be
+ *    stated before the visitor starts rather than discovered halfway through.
+ *    Both come from `matchFeasibility`, which divides the numbers already in
+ *    `free-tier.config.json` -- see `match-feasibility.ts` for the arithmetic
+ *    and the report it reproduces.
+ *
+ * 2. **A model does not have to be on the list.** For every provider except
+ *    Google the model travels in the request *body* and the URL is unchanged,
+ *    so a name typed by a visitor or returned by discovery resolves to the
+ *    provider's existing allowlisted endpoint and touches INV-8 not at all.
+ *    `modelInBody` is the property that decides it, and it is read from the
+ *    shape of the data rather than keyed on a provider name.
+ *
+ * 3. **The two CLI-only entries now say where they *are* reachable.** OpenRouter
+ *    and xAI are OpenAI-compatible and their preflights pass, so Advanced mode
+ *    reaches both with the visitor's own key. Telling someone a thing is
+ *    impossible when it is one panel away is worse than not listing it.
  */
 
 export type ByokAccess = 'browser' | 'cli-only';
@@ -44,6 +77,17 @@ export interface ByokModelOption {
   readonly model: string;
   /** The one URL a key for this selection may ever be sent to (AC1). Allowlisted per INV-8. */
   readonly endpoint: string;
+  /** This model's free-tier quotas, or the provider's defaults when it has none of its own. */
+  readonly limits: FreeTierLimits;
+  /** What those quotas mean for a Match: can it finish, and roughly how long (AC1, AC2). */
+  readonly feasibility: MatchFeasibility;
+  /**
+   * False when the model has no row in `free-tier.config.json` -- a name the
+   * visitor typed, or one discovery returned. The limits are then the
+   * provider's defaults, and the picker says so rather than presenting a
+   * guess as a measurement.
+   */
+  readonly limitsKnown: boolean;
 }
 
 export interface ByokProviderOption {
@@ -52,6 +96,17 @@ export interface ByokProviderOption {
   readonly access: ByokAccess;
   /** The header the adapter puts the key on. Displayed, so a visitor can see what leaves the tab. */
   readonly keyHeader: string;
+  /**
+   * Whether the model travels in the request body rather than the URL path.
+   *
+   * True for every OpenAI-compatible provider, false for Google AI Studio,
+   * which addresses a model as `/models/<id>:generateContent`. That difference
+   * is the whole of why a custom model name is free for one and needs an
+   * allowlist entry for the other (INV-8).
+   */
+  readonly modelInBody: boolean;
+  /** Which `GET .../models` shape this provider answers with (AC4). */
+  readonly modelListFamily: ModelListFamily;
   readonly models: readonly ByokModelOption[];
   /** Present exactly when `access === 'cli-only'`. Rendered verbatim in the picker. */
   readonly cliOnlyReason: string | null;
@@ -64,31 +119,67 @@ export interface ByokProviderOption {
  * is the file INV-8 makes authoritative. Listing them twice is how a model that
  * was removed from the allowlist stays selectable in the picker.
  */
-const BROWSER_PROVIDERS: readonly { readonly id: ProviderId; readonly label: string; readonly keyHeader: string }[] = [
-  { id: 'groq', label: 'Groq', keyHeader: 'Authorization' },
-  { id: 'cerebras', label: 'Cerebras', keyHeader: 'Authorization' },
-  { id: 'google-ai-studio', label: 'Google AI Studio', keyHeader: 'x-goog-api-key' },
+interface BrowserProvider {
+  readonly id: ProviderId;
+  readonly label: string;
+  readonly keyHeader: string;
+  readonly modelInBody: boolean;
+  readonly modelListFamily: ModelListFamily;
+}
+
+const BROWSER_PROVIDERS: readonly BrowserProvider[] = [
+  {
+    id: 'groq',
+    label: 'Groq',
+    keyHeader: 'Authorization',
+    modelInBody: true,
+    modelListFamily: 'openai',
+  },
+  {
+    id: 'cerebras',
+    label: 'Cerebras',
+    keyHeader: 'Authorization',
+    modelInBody: true,
+    modelListFamily: 'openai',
+  },
+  {
+    id: 'google-ai-studio',
+    label: 'Google AI Studio',
+    keyHeader: 'x-goog-api-key',
+    // The model is in the URL path here, so a custom name is a new allowlist
+    // entry rather than a different request body.
+    modelInBody: false,
+    modelListFamily: 'google',
+  },
 ];
 
 /**
- * Providers in the frozen `ProviderId` enum that this build cannot run in a
- * browser, with the reason a visitor gets to read.
+ * Providers in the frozen `ProviderId` enum that this picker does not offer,
+ * with the reason a visitor gets to read.
  *
- * OpenRouter's is not a CORS problem and the text says so: its free tier is 50
- * requests a day and `tournament-config.ts` already reserves it for the
- * Metering Probe, so no adapter was ever built for it.
+ * Story 4.7 changed what these reasons say, and the change matters. Neither is
+ * a CORS problem -- both preflights pass, measured today and recorded in
+ * `docs/reports/byok-cors-preflight.md` -- and both are OpenAI-compatible, so
+ * Advanced mode reaches them with the visitor's own key. What each lacks is a
+ * *measured free-tier row*: `docs/reports/byok-provider-limits.md` has no table
+ * for either, and inventing quota numbers to fill a dropdown is exactly the
+ * failure this whole story exists to correct.
+ *
+ * So the reason text now names the base URL that works, rather than telling
+ * someone a thing is impossible when it is one panel away.
  */
 const CLI_ONLY_PROVIDERS: readonly { readonly id: ProviderId; readonly label: string; readonly reason: string }[] = [
   {
     id: 'openrouter',
     label: 'OpenRouter',
     reason:
-      'CLI only — no browser adapter in this build. Its free tier is 50 requests a day and is reserved for the Metering Probe.',
+      'Not in this picker — no measured free-tier row exists for it, and its free tier is reserved for the Metering Probe. Reachable under Advanced with your own key and base URL https://openrouter.ai/api/v1',
   },
   {
     id: 'xai',
     label: 'xAI',
-    reason: 'CLI only — no browser adapter in this build, and no free-tier endpoint on the allowlist.',
+    reason:
+      'Not in this picker — no free-tier endpoint on the allowlist. Reachable under Advanced with your own key and base URL https://api.x.ai/v1',
   },
 ];
 
@@ -119,11 +210,73 @@ function endpointForModel(
   return endpoint;
 }
 
+/** Whether this model has a row of its own, or is inheriting the provider defaults. */
+function hasOwnLimits(providerId: ProviderId, model: string, config: FreeTierConfig): boolean {
+  return config.providers[providerId]?.models[model] !== undefined;
+}
+
+function buildModelOption(
+  providerId: ProviderId,
+  model: string,
+  endpoints: readonly string[],
+  config: FreeTierConfig,
+): ByokModelOption {
+  const limits = freeTierLimitsFor(providerId, model, config);
+  return Object.freeze({
+    model,
+    endpoint: endpointForModel(providerId, model, endpoints, config),
+    limits,
+    feasibility: matchFeasibility(limits),
+    limitsKnown: hasOwnLimits(providerId, model, config),
+  });
+}
+
+/** Thousands separated, with no locale involved: `14400` reads as `14,400` everywhere. */
+export function groupDigits(value: number): string {
+  return String(value).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+}
+
 /**
- * The picker's whole contents: browser-capable providers first, CLI-only ones
- * after, every one of them listed. A provider that is simply missing from the
- * list is a provider a visitor will go looking for; AC5 asks for it to be shown
- * and labelled instead.
+ * What one model reads as in the picker (AC2).
+ *
+ * RPM and RPD go in the option's own label rather than only in a line beside
+ * the `<select>`, because AC2 says the limits are shown *with* the model -- a
+ * visitor comparing two models is looking at the open dropdown, not at whatever
+ * the currently-selected one happens to have put underneath it. Matches per day
+ * follows because it is the number that decides whether a choice is usable at
+ * all, and it is the one the raw quotas do not make obvious.
+ */
+export function modelOptionLabel(option: ByokModelOption): string {
+  const { limits, feasibility } = option;
+  const quotas = `${groupDigits(limits.requestsPerMinute)} RPM / ${groupDigits(limits.requestsPerDay)} RPD`;
+  if (!feasibility.runnable) {
+    return `${option.model} — ${quotas} — cannot finish a Match`;
+  }
+  const known = option.limitsKnown ? '' : ' (provider defaults)';
+  return `${option.model} — ${quotas} — ${groupDigits(feasibility.matchesPerDay)} matches/day${known}`;
+}
+
+/**
+ * The warning line under the picker, or `''` when there is nothing unusual to
+ * say. Empty for every ordinary model, which is what keeps it worth reading.
+ */
+export function modelOptionNotice(option: ByokModelOption): string {
+  const measured = feasibilityNotice(option.limits);
+  if (option.limitsKnown) {
+    return measured;
+  }
+  // A model nobody measured: the numbers shown are the provider defaults, and
+  // saying so is the difference between a fact and a guess presented as one.
+  const inherited =
+    'No measured free-tier row for this model — the numbers above are the provider defaults.';
+  return measured.length === 0 ? inherited : `${inherited} ${measured}`;
+}
+
+/**
+ * The picker's whole contents: browser-capable providers first, the rest after,
+ * every one of them listed. A provider that is simply missing from the list is
+ * a provider a visitor will go looking for; AC5 asks for it to be shown and
+ * labelled instead.
  */
 export function byokCatalogue(config: FreeTierConfig = loadFreeTierConfig()): readonly ByokProviderOption[] {
   const browser = BROWSER_PROVIDERS.filter((entry) => config.providers[entry.id] !== undefined).map(
@@ -131,12 +284,14 @@ export function byokCatalogue(config: FreeTierConfig = loadFreeTierConfig()): re
       const providerConfig = config.providers[entry.id];
       const models = Object.keys(providerConfig.models)
         .sort()
-        .map((model) => ({
-          model,
-          endpoint: endpointForModel(entry.id, model, providerConfig.endpoints, config),
-        }));
+        .map((model) => buildModelOption(entry.id, model, providerConfig.endpoints, config))
+        // AC1: a model whose daily cap cannot cover one Match is not offered at
+        // all. Story 4.7 removed the two such rows from the config, and this is
+        // the line that keeps the promise if a future edit puts one back --
+        // deleting bad data fixes today, refusing to offer it fixes the next one.
+        .filter((option) => option.feasibility.runnable);
 
-      // A provider with an allowlisted endpoint but no listed model is a
+      // A provider with an allowlisted endpoint but no *runnable* model is a
       // degenerate configuration: `free-tier.config.json` permits it (only
       // `endpoints` must be non-empty), and offering it would put a selectable
       // provider in the picker with an empty model list behind it, which fails
@@ -149,9 +304,11 @@ export function byokCatalogue(config: FreeTierConfig = loadFreeTierConfig()): re
           label: entry.label,
           access: 'cli-only' as const,
           keyHeader: entry.keyHeader,
+          modelInBody: entry.modelInBody,
+          modelListFamily: entry.modelListFamily,
           models: Object.freeze([] as ByokModelOption[]),
           cliOnlyReason:
-            'CLI only — no free-tier model is listed for this provider in free-tier.config.json.',
+            'Not offered — free-tier.config.json lists no model for this provider that could finish one Match.',
         });
       }
 
@@ -160,6 +317,8 @@ export function byokCatalogue(config: FreeTierConfig = loadFreeTierConfig()): re
         label: entry.label,
         access: 'browser' as const,
         keyHeader: entry.keyHeader,
+        modelInBody: entry.modelInBody,
+        modelListFamily: entry.modelListFamily,
         models: Object.freeze(models),
         cliOnlyReason: null,
       });
@@ -172,6 +331,8 @@ export function byokCatalogue(config: FreeTierConfig = loadFreeTierConfig()): re
       label: entry.label,
       access: 'cli-only' as const,
       keyHeader: '',
+      modelInBody: true,
+      modelListFamily: 'openai' as const,
       models: Object.freeze([] as ByokModelOption[]),
       cliOnlyReason: entry.reason,
     }),
@@ -203,20 +364,58 @@ export function byokProvider(
   return option;
 }
 
+/**
+ * One (provider, model) selection resolved to everything the app needs about
+ * it, whether or not the model is on any list (AC3).
+ *
+ * This is where the story's INV-8 reading becomes code, and the split is the
+ * whole point:
+ *
+ * - **The model is in the request body** (Groq, Cerebras, and every
+ *   OpenAI-compatible endpoint). The URL does not change, so a name the visitor
+ *   typed or discovery returned resolves to the provider's existing allowlisted
+ *   endpoint and touches INV-8 not at all. Nothing to decide.
+ * - **The model is in the URL path** (Google AI Studio). A custom name would
+ *   need a URL no allowlist entry names, so it is refused *here*, with the
+ *   reason -- not at request time with a 404, which is exactly the shape AC7
+ *   exists to prevent.
+ *
+ * An off-list model inherits the provider's `defaults`, which are deliberately
+ * the tightest published numbers, and `limitsKnown` is false so the picker can
+ * say the numbers are inherited rather than measured.
+ */
+export function byokModelOption(
+  providerId: string,
+  model: string,
+  config: FreeTierConfig = loadFreeTierConfig(),
+): ByokModelOption {
+  const option = byokProvider(providerId, config);
+  const listed = option.models.find((candidate) => candidate.model === model);
+  if (listed !== undefined) {
+    return listed;
+  }
+
+  if (model.trim().length === 0) {
+    throw new Error(`Choose a model for ${option.label}, or type one under Advanced.`);
+  }
+
+  if (!option.modelInBody) {
+    throw new Error(
+      `${option.label} puts the model in the URL path, so "${model}" would need its own free-tier allowlist entry (INV-8). Offered: ${option.models
+        .map((candidate) => candidate.model)
+        .join(', ')}`,
+    );
+  }
+
+  const endpoints = config.providers[option.id].endpoints;
+  return buildModelOption(option.id, model, endpoints, config);
+}
+
 /** The endpoint one (provider, model) selection resolves to, or a thrown sentence. */
 export function byokEndpoint(
   providerId: string,
   model: string,
   config: FreeTierConfig = loadFreeTierConfig(),
 ): string {
-  const option = byokProvider(providerId, config);
-  const entry = option.models.find((candidate) => candidate.model === model);
-  if (entry === undefined) {
-    throw new Error(
-      `${option.label} has no free-tier model "${model}". Available: ${option.models
-        .map((candidate) => candidate.model)
-        .join(', ')}`,
-    );
-  }
-  return entry.endpoint;
+  return byokModelOption(providerId, model, config).endpoint;
 }

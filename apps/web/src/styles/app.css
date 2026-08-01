@@ -613,6 +613,112 @@ body {
   color: var(--tb-muted);
 }
 
+/* --- Advanced disclosure (Story 4.7) ------------------------------------ *
+ *
+ * Progressive disclosure, and the whole of it: a visitor who wants the simple
+ * thing sees a provider, a model and a key, exactly as Story 4.6 shipped. The
+ * summary is a slab in its own right rather than a link, because everything
+ * else on this page with an edge has one.
+ */
+
+.tb-byok-advanced {
+  margin-top: var(--tb-space-2);
+  border: var(--tb-border-width) solid var(--tb-muted);
+}
+
+/*
+ * A native <details>/<summary>, kept native. The marker is replaced with a
+ * mono glyph that flips on open -- one character, no asset, no rotation
+ * animation, and the platform keeps the keyboard behaviour and the
+ * expanded/collapsed announcement.
+ */
+.tb-byok-summary {
+  padding: var(--tb-space-1);
+  background: var(--tb-bg);
+  color: var(--tb-muted);
+  font-family: var(--tb-font-mono);
+  font-size: 13px;
+  text-transform: uppercase;
+  cursor: pointer;
+  list-style: none;
+}
+
+.tb-byok-summary::-webkit-details-marker {
+  display: none;
+}
+
+.tb-byok-summary::before {
+  content: '+ ';
+}
+
+.tb-byok-advanced[open] > .tb-byok-summary {
+  background: var(--tb-accent);
+  color: var(--tb-bg);
+}
+
+.tb-byok-advanced[open] > .tb-byok-summary::before {
+  content: '– ';
+}
+
+.tb-byok-summary:hover {
+  background: var(--tb-ink);
+  color: var(--tb-bg);
+}
+
+.tb-byok-summary:focus-visible {
+  outline: 3px solid var(--tb-accent);
+  outline-offset: var(--tb-space-1);
+}
+
+/*
+ * The disclosure's contents sit inside its border rather than spilling past
+ * it. Padding on the container rather than margins on each child, because
+ * every control in here is `width: 100%` and a margin would push it past the
+ * edge -- `box-sizing: border-box` makes padding the one that works.
+ */
+.tb-byok-advanced[open] {
+  padding: 0 var(--tb-space-1) var(--tb-space-2);
+}
+
+.tb-byok-advanced > .tb-byok-summary {
+  margin: 0 calc(-1 * var(--tb-space-1));
+}
+
+.tb-byok-discover {
+  width: 100%;
+  margin-top: var(--tb-space-2);
+}
+
+/*
+ * AC6: the exact origin the key will be sent to, before the first request.
+ * Ink on the ground for the ordinary case, and ground ink on a warn fill when
+ * the URL is refused -- warn text directly on the ground measures 4.26:1 and
+ * misses the floor, so it is a fill here as everywhere else (docs/DESIGN.md).
+ */
+.tb-byok-origin {
+  margin: var(--tb-space-1) 0 var(--tb-space-2);
+  font-family: var(--tb-font-mono);
+  font-size: 13px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.tb-byok-origin--refused {
+  padding: var(--tb-space-1);
+  background: var(--tb-warn);
+  color: var(--tb-bg);
+  font-weight: 800;
+}
+
+/* AC2's warning: what this model costs in minutes, before a visitor starts. */
+.tb-byok-limits {
+  margin: var(--tb-space-1) 0 0;
+  font-family: var(--tb-font-mono);
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--tb-accent);
+}
+
 .tb-byok-check {
   display: flex;
   align-items: center;

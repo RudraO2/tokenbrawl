@@ -124,7 +124,8 @@ export {
 } from './match-feasibility';
 export type { FeasibilityBound, MatchFeasibility } from './match-feasibility';
 
-export { discoverModels, mapModelList, modelListEndpointFor, originOf } from './discovery';
+export { discoverModels, mapModelList, modelListEndpointFor, originOf, parseUrl } from './discovery';
+export type { ParsedUrl } from './discovery';
 export type { DiscoverModelsConfig, ModelListFamily } from './discovery';
 
 export { isUnknownModelResponse } from './model-errors';

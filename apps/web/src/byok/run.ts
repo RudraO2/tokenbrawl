@@ -6,8 +6,7 @@ import { DEFAULT_FIGHTER_CONFIG } from '../../../../packages/env-fighter/src/con
 import { createFighterEnvironment } from '../../../../packages/env-fighter/src/environment';
 import type { FreeTierConfig } from '../../../../packages/providers/src/free-tier';
 import type { HttpFetch } from '../../../../packages/providers/src/http';
-import { byokEndpoint } from './catalogue';
-import { createByokClient } from './client';
+import { byokFighterEndpoint, createByokClient } from './client';
 import { buildByokCommandLog, byokConfigHash } from './log';
 
 /**
@@ -38,6 +37,12 @@ export interface ByokFighterConfig {
   readonly provider: string;
   readonly model: string;
   readonly apiKey: string;
+  /**
+   * Story 4.7, Advanced. An OpenAI-compatible base URL the visitor supplied.
+   * When set, `provider` is not consulted -- see `byok-direct.ts` for the
+   * invariant reading that permits it.
+   */
+  readonly baseUrl?: string;
 }
 
 export interface ByokRunConfig {
@@ -58,17 +63,40 @@ export interface ByokRunConfig {
   readonly onCall?: (calls: number) => void;
 }
 
+/** The frozen schema's `agentIdentity.id` pattern is `^[a-z0-9._:-]{1,96}$`. */
+const AGENT_ID_MAX_LENGTH = 96;
+
 /**
  * The Agent id for one side.
  *
  * Side-prefixed because two fighters may legitimately be the same model on the
- * same provider -- "gemini-2.5-flash against itself" is one of the more
- * interesting things a visitor can run -- and two Agents sharing an id would
- * make the reasoning panel unreadable and the log ambiguous about which side a
- * name refers to. Lowercase with `:` and `-` only, per the schema's id pattern.
+ * same provider -- "Gemma 4 31B against itself" is one of the more interesting
+ * things a visitor can run -- and two Agents sharing an id would make the
+ * reasoning panel unreadable and the log ambiguous about which side a name
+ * refers to.
+ *
+ * **Story 4.7: the model is sanitised here and only here.** Once a model name
+ * can be typed, it can contain anything -- and two of the models this story
+ * *adds* already do: `openai/gpt-oss-120b` and `qwen/qwen3.6-27b` both carry a
+ * `/`, which the frozen id pattern does not allow. An unsanitised id would fail
+ * `validateCommandLog` at the very end of a Match the visitor had already paid
+ * for in quota.
+ *
+ * The substitution is one-way and that is fine: this is a display and grouping
+ * key. `deployment.model` beside it keeps the visitor's string **verbatim**,
+ * which is what INV-6 and AC3 actually ask for.
  */
 export function byokAgentId(agentIndex: 0 | 1, model: string): string {
-  return `p${String(agentIndex + 1)}:byok:${model.toLowerCase()}`;
+  const prefix = `p${String(agentIndex + 1)}:byok:`;
+  const sanitised = model
+    .toLowerCase()
+    .replace(/[^a-z0-9._:-]/g, '-')
+    .slice(0, AGENT_ID_MAX_LENGTH - prefix.length);
+  // A model of only unusable characters would otherwise produce a bare prefix,
+  // which is legal but says nothing. `model` is never blank by the time it gets
+  // here -- the client refuses that first -- so this is the degenerate case
+  // rather than the empty one.
+  return `${prefix}${sanitised.length > 0 ? sanitised : 'model'}`;
 }
 
 function assertSeed(seed: number): void {
@@ -106,6 +134,7 @@ export async function runByokMatch(config: ByokRunConfig): Promise<CommandLog> {
         provider: fighter.provider,
         model: fighter.model,
         apiKey: fighter.apiKey,
+        baseUrl: fighter.baseUrl,
         fetch: config.fetch,
         freeTier: config.freeTier,
         onCall: countCall,
@@ -117,9 +146,9 @@ export async function runByokMatch(config: ByokRunConfig): Promise<CommandLog> {
     const agentIndex = index as 0 | 1;
     const fighter = config.fighters[agentIndex];
     // No provider check here: `createByokClient` above has already refused a
-    // CLI-only id, and `byokEndpoint` refuses one again on the next line. A
-    // third call was in this spot and was dead -- a mutation probe found it by
-    // changing nothing when it was deleted.
+    // CLI-only id, and `byokFighterEndpoint` refuses one again on the next
+    // line. A third call was in this spot and was dead -- a mutation probe
+    // found it by changing nothing when it was deleted.
     return {
       id: byokAgentId(agentIndex, fighter.model),
       kind: 'deployment',
@@ -128,8 +157,12 @@ export async function runByokMatch(config: ByokRunConfig): Promise<CommandLog> {
         // the log still records what actually served every call (INV-6), and
         // `byok` is the fact that makes the Match unratable rather than a claim
         // about where it ran.
+        //
+        // Story 4.7: the endpoint comes from the *same* function the client
+        // used, so a Match can never record a URL other than the one it called
+        // -- including on the Advanced path, where the URL is the visitor's.
         provider: 'byok',
-        endpoint: byokEndpoint(fighter.provider, fighter.model, config.freeTier),
+        endpoint: byokFighterEndpoint(fighter, config.freeTier),
         model: fighter.model,
       },
     };

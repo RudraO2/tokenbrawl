@@ -493,7 +493,12 @@ else
   # *and* to the importer allowlist, and write down why here. Do not widen the
   # pattern, and do not rename a function to slip past the grep above.
   BYOK_ONLY_FACTORIES="packages/providers/src/byok-direct.ts"
-  BYOK_ONLY_IMPORTERS="apps/web/src/byok/client.ts"
+  # Both are under `apps/web/src/byok/`, which is BYOK by definition -- the
+  # containment that matters is that nothing *outside* that directory, and
+  # nothing in `packages/`, can reach an allowlist-free client. `client.ts`
+  # builds one; `advanced.ts` uses the URL validator to show the visitor which
+  # origin their key is about to go to, before it goes there (AC6).
+  BYOK_ONLY_IMPORTERS="apps/web/src/byok/client.ts apps/web/src/byok/advanced.ts"
 
   client_factories=$(grep -lE '^export function create[A-Za-z0-9]*Client' \
     packages/providers/src/*.ts 2>/dev/null | grep -v '\.test\.ts')

@@ -1,6 +1,21 @@
 import type { CommandLog } from '@tokenbrawl/contracts';
+import type { HttpFetch } from '../../../../packages/providers/src/http';
 import { escapeHtml } from '../main';
-import { byokCatalogue, type ByokProviderOption } from './catalogue';
+import {
+  ADVANCED_PRESETS,
+  discoverByokModels,
+  discoveredModelOptions,
+  originVerdict,
+  type ByokDiscoveryConfig,
+} from './advanced';
+import {
+  byokCatalogue,
+  byokModelOption,
+  modelOptionLabel,
+  modelOptionNotice,
+  type ByokModelOption,
+  type ByokProviderOption,
+} from './catalogue';
 import { ByokKeyError } from './client';
 import { createKeyStore, type KeyStorage } from './keys';
 import { runByokMatch, type ByokRunConfig } from './run';
@@ -20,6 +35,28 @@ import { runByokMatch, type ByokRunConfig } from './run';
  * `lib: ["ES2022"]` with no DOM, and adding one would hand `packages/core`
  * ambient `document` and `window` types and weaken the type-level half of INV-3
  * across the repo to spare a handful of interfaces here.
+ *
+ * ---------------------------------------------------------------------------
+ * Story 4.7: progressive disclosure, and why it is a `<details>`
+ * ---------------------------------------------------------------------------
+ *
+ * The default view is exactly what 4.6 shipped -- provider, model, key -- and
+ * the story is explicit that a visitor who wants the simple thing must not have
+ * to read about base URLs to find it. Everything 4.7 adds therefore sits inside
+ * one `<details>` per fighter.
+ *
+ * A native `<details>` rather than a rebuilt disclosure: it is keyboard
+ * operable, announced as expandable, and remembers nothing across a rebuild,
+ * all without a line of JavaScript. The same reasoning as 4.6's `accent-color`
+ * checkbox -- rebuilding a platform control means rebuilding its behaviour, and
+ * this file has no framework to do that with.
+ *
+ * The three controls inside it are, in the order a visitor needs them:
+ *
+ *   Fetch my models   populates the picker from the pasted key (AC4)
+ *   Custom model      a name on no list, sent in the request body (AC3)
+ *   Base URL          an endpoint of the visitor's own, with the resolved
+ *                     origin echoed back *before* the first request (AC5, AC6)
  */
 
 export type ByokEvent = 'click' | 'change' | 'input';
@@ -52,11 +89,17 @@ export interface ByokPanelDeps {
   /** The visitor's own `localStorage`, or nothing. Absent means the opt-in has nowhere to write. */
   readonly storage?: KeyStorage;
   readonly catalogue?: readonly ByokProviderOption[];
+  /** Injectable so "fetch my models" is testable without a network (AC4). */
+  readonly discover?: (config: ByokDiscoveryConfig) => Promise<readonly string[]>;
+  /** Handed to discovery. The Match's own transport comes through `run` instead. */
+  readonly fetch?: HttpFetch;
 }
 
 export interface ByokPanel {
   /** Runs the Match the form describes. Returns when it has succeeded or failed. */
   readonly submit: () => Promise<void>;
+  /** Repopulates one fighter's model picker from its provider (AC4). */
+  readonly discover: (agentIndex: 0 | 1) => Promise<void>;
   readonly state: () => ByokState;
 }
 
@@ -100,10 +143,96 @@ export function cliOnlyNotice(catalogue: readonly ByokProviderOption[]): string 
   );
 }
 
-function modelMarkup(option: ByokProviderOption | undefined): string {
-  return (option?.models ?? [])
-    .map((model) => `<option value="${escapeHtml(model.model)}">${escapeHtml(model.model)}</option>`)
-    .join('');
+/**
+ * The model `<select>`'s contents.
+ *
+ * Each option's own label carries its RPM/RPD and Matches-per-day (AC2), which
+ * is where a visitor comparing two models is actually looking. `extra` carries
+ * models that came from discovery or that the visitor typed: they are appended
+ * rather than merged into the sorted list, so the measured ones stay first.
+ */
+export function modelMarkup(
+  option: ByokProviderOption | undefined,
+  extra: readonly string[] = [],
+): string {
+  const listed = (option?.models ?? []).map(
+    (model) =>
+      `<option value="${escapeHtml(model.model)}">${escapeHtml(modelOptionLabel(model))}</option>`,
+  );
+
+  const known = new Set((option?.models ?? []).map((model) => model.model));
+  const discovered = extra
+    .filter((model) => !known.has(model))
+    .map((model) => {
+      // Resolved through the catalogue so a discovered model carries the
+      // provider's defaults and is labelled as inheriting them, rather than
+      // appearing with no numbers at all beside models that have some.
+      const resolved = resolveQuietly(option?.id ?? '', model);
+      const label = resolved === null ? model : modelOptionLabel(resolved);
+      return `<option value="${escapeHtml(model)}">${escapeHtml(label)}</option>`;
+    });
+
+  return [...listed, ...discovered].join('');
+}
+
+/** The catalogue lookup, or `null`. Markup must never throw halfway through a `<select>`. */
+function resolveQuietly(providerId: string, model: string): ByokModelOption | null {
+  try {
+    return byokModelOption(providerId, model);
+  } catch {
+    return null;
+  }
+}
+
+/** The line under a model picker: empty for an ordinary model, a warning otherwise (AC2). */
+export function modelNoticeText(providerId: string, model: string): string {
+  const resolved = resolveQuietly(providerId, model);
+  return resolved === null ? '' : modelOptionNotice(resolved);
+}
+
+function presetMarkup(): string {
+  return ADVANCED_PRESETS.map(
+    (preset) =>
+      `<option value="${escapeHtml(preset.baseUrl)}">${escapeHtml(preset.label)} — ${escapeHtml(preset.baseUrl)}</option>`,
+  ).join('');
+}
+
+/** The Advanced disclosure for one fighter. Collapsed by default; nothing here is needed to run a fight. */
+function advancedMarkup(agentIndex: 0 | 1): string {
+  const index = String(agentIndex);
+  return `
+      <details class="tb-byok-advanced">
+        <summary class="tb-byok-summary">Advanced</summary>
+        <button class="tb-button tb-byok-discover" type="button" data-discover="${index}">Fetch my models</button>
+        <label class="tb-byok-label" for="tb-byok-custom-${index}">Custom model name</label>
+        <input
+          class="tb-byok-input"
+          id="tb-byok-custom-${index}"
+          type="text"
+          autocomplete="off"
+          spellcheck="false"
+          placeholder="openai/gpt-oss-120b"
+          data-custom="${index}"
+        />
+        <label class="tb-byok-label" for="tb-byok-base-${index}">Base URL — any OpenAI-compatible endpoint</label>
+        <div class="tb-byok-select">
+          <select class="tb-byok-input" data-preset="${index}">
+            <option value="">Pick a known endpoint…</option>
+            ${presetMarkup()}
+          </select>
+        </div>
+        <input
+          class="tb-byok-input"
+          id="tb-byok-base-${index}"
+          type="url"
+          autocomplete="off"
+          spellcheck="false"
+          placeholder="https://openrouter.ai/api/v1"
+          data-base="${index}"
+        />
+        <p class="tb-byok-origin" data-origin="${index}"></p>
+      </details>
+  `;
 }
 
 /**
@@ -133,6 +262,7 @@ export function byokMarkup(catalogue: readonly ByokProviderOption[]): string {
           ${modelMarkup(first)}
         </select>
       </div>
+      <p class="tb-byok-limits" data-limits="${String(agentIndex)}"></p>
       <label class="tb-byok-label" for="tb-byok-key-${String(agentIndex)}">API key</label>
       <input
         class="tb-byok-input"
@@ -142,6 +272,7 @@ export function byokMarkup(catalogue: readonly ByokProviderOption[]): string {
         spellcheck="false"
         data-key="${String(agentIndex)}"
       />
+      ${advancedMarkup(agentIndex)}
     </fieldset>
   `;
 
@@ -188,6 +319,12 @@ export function mountByokPanel(host: ByokHost, deps: ByokPanelDeps): ByokPanel {
   const providers = [host.querySelector('[data-provider="0"]'), host.querySelector('[data-provider="1"]')];
   const models = [host.querySelector('[data-model="0"]'), host.querySelector('[data-model="1"]')];
   const keys = [host.querySelector('[data-key="0"]'), host.querySelector('[data-key="1"]')];
+  const customs = [host.querySelector('[data-custom="0"]'), host.querySelector('[data-custom="1"]')];
+  const bases = [host.querySelector('[data-base="0"]'), host.querySelector('[data-base="1"]')];
+  const presets = [host.querySelector('[data-preset="0"]'), host.querySelector('[data-preset="1"]')];
+  const origins = [host.querySelector('[data-origin="0"]'), host.querySelector('[data-origin="1"]')];
+  const limitsLines = [host.querySelector('[data-limits="0"]'), host.querySelector('[data-limits="1"]')];
+  const discovers = [host.querySelector('[data-discover="0"]'), host.querySelector('[data-discover="1"]')];
   const seed = host.querySelector('[data-seed]');
   const remember = host.querySelector('[data-remember]');
   const run = host.querySelector('[data-run]');
@@ -201,6 +338,18 @@ export function mountByokPanel(host: ByokHost, deps: ByokPanelDeps): ByokPanel {
     models[1] === null ||
     keys[0] === null ||
     keys[1] === null ||
+    customs[0] === null ||
+    customs[1] === null ||
+    bases[0] === null ||
+    bases[1] === null ||
+    presets[0] === null ||
+    presets[1] === null ||
+    origins[0] === null ||
+    origins[1] === null ||
+    limitsLines[0] === null ||
+    limitsLines[1] === null ||
+    discovers[0] === null ||
+    discovers[1] === null ||
     seed === null ||
     remember === null ||
     run === null ||
@@ -216,6 +365,12 @@ export function mountByokPanel(host: ByokHost, deps: ByokPanelDeps): ByokPanel {
   const providerNodes: readonly [ByokNode, ByokNode] = [providers[0], providers[1]];
   const modelNodes: readonly [ByokNode, ByokNode] = [models[0], models[1]];
   const keyNodes: readonly [ByokNode, ByokNode] = [keys[0], keys[1]];
+  const customNodes: readonly [ByokNode, ByokNode] = [customs[0], customs[1]];
+  const baseNodes: readonly [ByokNode, ByokNode] = [bases[0], bases[1]];
+  const presetNodes: readonly [ByokNode, ByokNode] = [presets[0], presets[1]];
+  const originNodes: readonly [ByokNode, ByokNode] = [origins[0], origins[1]];
+  const limitsNodes: readonly [ByokNode, ByokNode] = [limitsLines[0], limitsLines[1]];
+  const discoverNodes: readonly [ByokNode, ByokNode] = [discovers[0], discovers[1]];
   const seedNode = seed;
   const statusNode = status;
   const progressNode = progress;
@@ -223,7 +378,12 @@ export function mountByokPanel(host: ByokHost, deps: ByokPanelDeps): ByokPanel {
   const rememberNode = remember;
   const store = createKeyStore(deps.storage);
   const runMatch = deps.run ?? runByokMatch;
+  const discoverModels = deps.discover ?? discoverByokModels;
   const panelState: { value: ByokState } = { value: 'idle' };
+  // Models a provider told us about, per fighter. Not module-level -- a shipped
+  // file here may declare no mutable binding outside a function, and this is
+  // per-mount state anyway.
+  const discovered: [string[], string[]] = [[], []];
 
   const browserOptions = catalogue.filter((option) => option.access === 'browser');
   const firstBrowserId = browserOptions[0]?.id ?? '';
@@ -243,25 +403,151 @@ export function mountByokPanel(host: ByokHost, deps: ByokPanelDeps): ByokPanel {
     statusNode.setAttribute?.('class', `tb-byok-status tb-byok-status--${state}`);
   };
 
+  /**
+   * What this fighter will actually run, read off the form.
+   *
+   * One function, used by the run, by the limits line and by discovery, so the
+   * three can never disagree about which of the three sources wins. The order
+   * is base URL, then custom model, then the picker -- most specific first, and
+   * each one is something the visitor had to open a disclosure and type.
+   */
+  const fighterFrom = (agentIndex: 0 | 1): {
+    provider: string;
+    model: string;
+    baseUrl: string;
+  } => {
+    const baseUrl = (baseNodes[agentIndex].value ?? '').trim();
+    const custom = (customNodes[agentIndex].value ?? '').trim();
+    return {
+      provider: providerNodes[agentIndex].value ?? '',
+      model: custom.length > 0 ? custom : (modelNodes[agentIndex].value ?? ''),
+      baseUrl,
+    };
+  };
+
+  /** AC2's line, and AC6's. Both are "what will happen", written before it does. */
+  const refreshNotices = (agentIndex: 0 | 1): void => {
+    const fighter = fighterFrom(agentIndex);
+
+    // AC6: the origin, echoed back before the first request. `originVerdict`
+    // returns a message for the bad cases too, so a mistyped URL is answered
+    // where it was typed rather than by a failed Match.
+    const verdict = originVerdict(fighter.baseUrl);
+    originNodes[agentIndex].innerHTML = escapeHtml(verdict.message);
+    originNodes[agentIndex].setAttribute?.(
+      'class',
+      `tb-byok-origin${verdict.message.length > 0 && !verdict.ok ? ' tb-byok-origin--refused' : ''}`,
+    );
+
+    // A visitor-supplied endpoint publishes no quota this build knows, so there
+    // is nothing honest to say about how long a Match will take on it.
+    const notice =
+      fighter.baseUrl.length > 0 ? '' : modelNoticeText(fighter.provider, fighter.model);
+    limitsNodes[agentIndex].innerHTML = escapeHtml(notice);
+  };
+
+  const repaintModels = (agentIndex: 0 | 1, chosen: ByokProviderOption | undefined): void => {
+    const modelNode = modelNodes[agentIndex];
+    const browserChosen = chosen?.access === 'browser' ? chosen : undefined;
+    modelNode.innerHTML = modelMarkup(browserChosen, discovered[agentIndex]);
+    // Selected explicitly rather than left to the browser's "first option wins"
+    // default, so every path that repaints this list produces the same state by
+    // the same statement instead of by three different mechanisms.
+    modelNode.value = browserChosen?.models[0]?.model ?? discovered[agentIndex][0] ?? '';
+    refreshNotices(agentIndex);
+  };
+
   for (const agentIndex of [0, 1] as const) {
     const providerNode = providerNodes[agentIndex];
-    const modelNode = modelNodes[agentIndex];
     providerNode.value = firstBrowserId;
-    modelNode.innerHTML = modelMarkup(browserOptions[0]);
-    // Selected explicitly rather than left to the browser's "first option wins"
-    // default, so the mount path and the provider-change path below produce the
-    // same state by the same statement instead of by two different mechanisms.
-    modelNode.value = browserOptions[0]?.models[0]?.model ?? '';
+    repaintModels(agentIndex, browserOptions[0]);
 
     providerNode.addEventListener('change', () => {
-      const chosen = catalogue.find((option) => option.id === providerNode.value);
+      // A provider's models are its own: a list fetched for Groq must not
+      // survive a switch to Cerebras, where none of those ids exist.
+      discovered[agentIndex] = [];
       // A CLI-only id can only arrive here from a browser that ignored
       // `disabled`, or from an autofill. The models list stays empty and the
       // run refuses -- there is no path from here to a request.
-      modelNode.innerHTML = modelMarkup(chosen?.access === 'browser' ? chosen : undefined);
-      modelNode.value = chosen?.access === 'browser' ? (chosen.models[0]?.model ?? '') : '';
+      repaintModels(
+        agentIndex,
+        catalogue.find((option) => option.id === providerNode.value),
+      );
+    });
+
+    modelNodes[agentIndex].addEventListener('change', () => {
+      refreshNotices(agentIndex);
+    });
+    customNodes[agentIndex].addEventListener('input', () => {
+      refreshNotices(agentIndex);
+    });
+    baseNodes[agentIndex].addEventListener('input', () => {
+      refreshNotices(agentIndex);
+    });
+    presetNodes[agentIndex].addEventListener('change', () => {
+      const picked = presetNodes[agentIndex].value ?? '';
+      if (picked.length > 0) {
+        // A preset fills the field rather than becoming a mode: the visitor can
+        // overwrite it with anything, which is the point of Advanced.
+        baseNodes[agentIndex].value = picked;
+        refreshNotices(agentIndex);
+      }
+    });
+    discoverNodes[agentIndex].addEventListener('click', () => {
+      void discover(agentIndex);
     });
   }
+
+  /**
+   * "Fetch my models" (AC4).
+   *
+   * The key goes to one origin -- the one derived from the completions endpoint
+   * this selection already resolves to -- and the picker is repopulated from
+   * what came back. A failure is reported and changes nothing: a visitor whose
+   * key was rejected keeps the list they had rather than losing it as well.
+   */
+  const discover = async (agentIndex: 0 | 1): Promise<void> => {
+    const button = discoverNodes[agentIndex];
+    if (button.disabled === true) {
+      return;
+    }
+    const fighter = fighterFrom(agentIndex);
+    const apiKey = (keyNodes[agentIndex].value ?? '').trim();
+
+    button.disabled = true;
+    try {
+      const models = await discoverModels({
+        provider: fighter.provider,
+        baseUrl: fighter.baseUrl,
+        apiKey,
+        fetch: deps.fetch,
+      });
+
+      // A model the provider serves but this build cannot address -- a Google
+      // model with no allowlist entry -- is dropped rather than offered, since
+      // offering it would put a selection in the picker that fails on use.
+      discovered[agentIndex] =
+        fighter.baseUrl.length > 0
+          ? [...models]
+          : [...discoveredModelOptions(fighter.provider, models)];
+
+      repaintModels(
+        agentIndex,
+        catalogue.find((option) => option.id === fighter.provider),
+      );
+      say(
+        panelState.value === 'running' ? 'running' : 'idle',
+        `${FIGHTER_LABELS[agentIndex]}: ${String(discovered[agentIndex].length)} models this key can use.`,
+      );
+    } catch (error) {
+      say(
+        'failed',
+        `${FIGHTER_LABELS[agentIndex]}: could not fetch models. ${error instanceof Error ? error.message : String(error)}`,
+      );
+    } finally {
+      button.disabled = false;
+    }
+  };
 
   // The opt-in, and the whole of it: keys are read back only if a previous
   // session ticked this box, and unticking removes them immediately rather than
@@ -292,16 +578,8 @@ export function mountByokPanel(host: ByokHost, deps: ByokPanelDeps): ByokPanel {
     try {
       const log = await runMatch({
         fighters: [
-          {
-            provider: providerNodes[0].value ?? '',
-            model: modelNodes[0].value ?? '',
-            apiKey: fighterKeys[0].trim(),
-          },
-          {
-            provider: providerNodes[1].value ?? '',
-            model: modelNodes[1].value ?? '',
-            apiKey: fighterKeys[1].trim(),
-          },
+          { ...fighterFrom(0), apiKey: fighterKeys[0].trim() },
+          { ...fighterFrom(1), apiKey: fighterKeys[1].trim() },
         ],
         seed: Number.parseInt(seedNode.value ?? '', 10),
         onCall: (calls) => {
@@ -340,5 +618,5 @@ export function mountByokPanel(host: ByokHost, deps: ByokPanelDeps): ByokPanel {
 
   say('idle', 'Paste two keys and run. Nothing leaves this tab except the model calls themselves.');
 
-  return Object.freeze({ submit, state: (): ByokState => panelState.value });
+  return Object.freeze({ submit, discover, state: (): ByokState => panelState.value });
 }

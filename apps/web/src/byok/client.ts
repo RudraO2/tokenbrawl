@@ -9,8 +9,13 @@ import { defaultHttpFetch } from '../../../../packages/providers/src/http';
 import { createGroqClient } from '../../../../packages/providers/src/groq';
 import { createCerebrasClient } from '../../../../packages/providers/src/cerebras';
 import { createGoogleClient } from '../../../../packages/providers/src/google';
+import {
+  assertVisitorSuppliedEndpoint,
+  createVisitorEndpointClient,
+} from '../../../../packages/providers/src/byok-direct';
+import { isUnknownModelResponse } from '../../../../packages/providers/src/model-errors';
 import type { RateLimitSignal } from '../../../../packages/providers/src/rate-limit';
-import { byokEndpoint, byokProvider } from './catalogue';
+import { byokModelOption, byokProvider } from './catalogue';
 import { redact } from './keys';
 
 /**
@@ -36,10 +41,34 @@ import { redact } from './keys';
  *    Point stays auditable. For a visitor it would be a Match their quota never
  *    actually played, published as if it had been. So the signal is caught and
  *    thrown, `runMatch` rejects, and no log is built at all (AC3's second half).
+ *
+ * ---------------------------------------------------------------------------
+ * Story 4.7 added two things.
+ * ---------------------------------------------------------------------------
+ *
+ * **A visitor-supplied endpoint.** When `baseUrl` is set the provider picker is
+ * not consulted at all: the client comes from `byok-direct.ts`, which validates
+ * the URL (https only, one resolved origin) and consults no free-tier
+ * allowlist. That file's header carries the invariant reading in full, and
+ * `scripts/audit-invariants.sh` names this file as one of exactly two allowed
+ * to import it. The two paths meet again at the wrapper below, so attribution,
+ * redaction and the rate-limit rule are identical whichever was taken.
+ *
+ * **An unknown model is its own failure (AC7).** It matters far more now that a
+ * model name can be typed: "the provider returned an error" sends someone
+ * looking at their key when the real problem is a missing `openai/` prefix.
+ * `isUnknownModelResponse` reads the status and the provider's machine-readable
+ * error code and never its prose -- the same discipline that already keeps a
+ * 401 from being reclassified when an adapter reworded a sentence.
  */
 
 /** Why one call failed, in terms the panel can turn into a sentence about a key. */
-export type ByokFailure = 'invalid-key' | 'rate-limited' | 'unreachable' | 'provider-error';
+export type ByokFailure =
+  | 'invalid-key'
+  | 'rate-limited'
+  | 'unreachable'
+  | 'unknown-model'
+  | 'provider-error';
 
 /**
  * A failure attributed to one fighter's key.
@@ -84,6 +113,8 @@ export function failureSentence(failure: ByokFailure): string {
       return 'the provider says this key is out of quota for now. Nothing was recorded.';
     case 'unreachable':
       return 'the request never reached the provider. Check the connection, or an extension blocking the request.';
+    case 'unknown-model':
+      return 'the provider does not serve that model. Check the exact id — some providers prefix it, as in openai/gpt-oss-120b — or fetch the list your key can use.';
     case 'provider-error':
       return 'the provider returned an error.';
   }
@@ -98,6 +129,14 @@ export interface ByokClientConfig {
   readonly provider: string;
   readonly model: string;
   readonly apiKey: string;
+  /**
+   * Advanced: an OpenAI-compatible base URL the visitor supplied.
+   *
+   * When set and non-blank, `provider` is not consulted at all -- no picker
+   * entry, no free-tier allowlist, no catalogue lookup. See `byok-direct.ts`
+   * for why that is permitted and how it is contained.
+   */
+  readonly baseUrl?: string;
   /** Injectable so every failure branch is testable without a network. */
   readonly fetch?: HttpFetch;
   readonly freeTier?: FreeTierConfig;
@@ -119,6 +158,22 @@ function createUpstream(
   httpFetch: HttpFetch,
   onRateLimit: (signal: RateLimitSignal) => void,
 ): ProviderClient {
+  // Advanced first, and it short-circuits: a base URL means the provider
+  // dropdown is irrelevant, not merely overridden. Reading it in this order is
+  // what keeps "the key goes to the origin the visitor configured" true even if
+  // the picker were left on something else.
+  const baseUrl = config.baseUrl?.trim() ?? '';
+  if (baseUrl.length > 0) {
+    return createVisitorEndpointClient({
+      baseUrl,
+      apiKey: config.apiKey,
+      model: config.model,
+      fetch: httpFetch,
+      sleep: (): Promise<void> => Promise.resolve(),
+      onRateLimit,
+    });
+  }
+
   const shared = {
     apiKey: config.apiKey,
     model: config.model,
@@ -151,15 +206,20 @@ function createUpstream(
  * legitimately reword, and a regex over it would then silently reclassify every
  * bad key as a generic provider error.
  */
-function classify(status: number, networkFailed: boolean): ByokFailure {
+function classify(status: number, networkFailed: boolean, bodyText: string): ByokFailure {
   if (networkFailed) {
     return 'unreachable';
   }
+  // A key problem and a quota problem are checked before the model, because
+  // both have unambiguous statuses of their own and neither overlaps a 404.
   if (status === UNAUTHORISED || status === FORBIDDEN) {
     return 'invalid-key';
   }
   if (status === RATE_LIMITED) {
     return 'rate-limited';
+  }
+  if (isUnknownModelResponse(status, bodyText)) {
+    return 'unknown-model';
   }
   return 'provider-error';
 }
@@ -174,13 +234,15 @@ function classify(status: number, networkFailed: boolean): ByokFailure {
  * reaches `packages/core` -- core is handed this port and nothing else (AC2).
  */
 export function createByokClient(config: ByokClientConfig): ProviderClient {
-  const option = byokProvider(config.provider, config.freeTier);
-  const endpoint = byokEndpoint(config.provider, config.model, config.freeTier);
+  const endpoint = byokFighterEndpoint(config, config.freeTier);
+  // The name a failure sentence uses. For Advanced that is the origin the
+  // visitor typed, because "OpenRouter" is a guess and the origin is a fact.
+  const label = byokFighterLabel(config, config.freeTier);
 
   if (config.apiKey.trim().length === 0) {
     throw new ByokKeyError({
       agentIndex: config.agentIndex,
-      provider: option.label,
+      provider: label,
       model: config.model,
       failure: 'invalid-key',
       detail: 'No key was supplied.',
@@ -192,9 +254,15 @@ export function createByokClient(config: ByokClientConfig): ProviderClient {
   // rather than a sentence. Function-scoped and reset at the top of every call:
   // a client is reused across a whole Match and stale state here would
   // misattribute the second failure to the first one's cause.
-  const seen: { status: number; networkFailed: boolean; rateLimit: RateLimitSignal | null } = {
+  const seen: {
+    status: number;
+    networkFailed: boolean;
+    bodyText: string;
+    rateLimit: RateLimitSignal | null;
+  } = {
     status: 0,
     networkFailed: false,
+    bodyText: '',
     rateLimit: null,
   };
 
@@ -206,6 +274,7 @@ export function createByokClient(config: ByokClientConfig): ProviderClient {
   const forgetLastCall = (): void => {
     seen.status = 0;
     seen.networkFailed = false;
+    seen.bodyText = '';
     seen.rateLimit = null;
   };
 
@@ -213,7 +282,18 @@ export function createByokClient(config: ByokClientConfig): ProviderClient {
     try {
       const response = await baseFetch(url, request);
       seen.status = response.status;
-      return response;
+
+      // The body is read here and handed on as a resolved string, because a
+      // body can only be read once and the adapter downstream needs it too.
+      // Classification needs it for AC7: an unknown model is signalled by the
+      // provider's machine-readable error code, which lives in the body.
+      const bodyText = await response.text();
+      seen.bodyText = bodyText;
+      return Object.freeze({
+        status: response.status,
+        headers: response.headers,
+        text: (): Promise<string> => Promise.resolve(bodyText),
+      });
     } catch (error) {
       // A cross-origin refusal, an offline tab and a blocked request are all
       // this: `fetch` rejects with a TypeError carrying no status at all.
@@ -229,7 +309,7 @@ export function createByokClient(config: ByokClientConfig): ProviderClient {
   const fail = (failure: ByokFailure, detail: string): ByokKeyError =>
     new ByokKeyError({
       agentIndex: config.agentIndex,
-      provider: option.label,
+      provider: label,
       model: config.model,
       failure,
       // The key last, and always: a provider that quotes the offending
@@ -243,7 +323,7 @@ export function createByokClient(config: ByokClientConfig): ProviderClient {
 
     const response = await upstream.complete(request).catch((error: unknown) => {
       throw fail(
-        classify(seen.status, seen.networkFailed),
+        classify(seen.status, seen.networkFailed, seen.bodyText),
         error instanceof Error ? error.message : String(error),
       );
     });
@@ -268,4 +348,36 @@ export function createByokClient(config: ByokClientConfig): ProviderClient {
     model: config.model,
     complete,
   });
+}
+
+/**
+ * The one URL this fighter's key may ever be sent to.
+ *
+ * Exported and shared with `run.ts` on purpose. Story 4.6 had the endpoint
+ * resolved in two places -- once for the client and once for the Command Log's
+ * `deployment.endpoint` -- and a Match whose log named a URL other than the one
+ * actually called would be an INV-6 provenance failure that no test in either
+ * file would notice, because each would agree with itself.
+ */
+export function byokFighterEndpoint(
+  fighter: { readonly provider: string; readonly model: string; readonly baseUrl?: string },
+  config?: FreeTierConfig,
+): string {
+  const baseUrl = fighter.baseUrl?.trim() ?? '';
+  if (baseUrl.length > 0) {
+    return assertVisitorSuppliedEndpoint(baseUrl).completions;
+  }
+  return byokModelOption(fighter.provider, fighter.model, config).endpoint;
+}
+
+/** What a failure sentence calls this fighter's provider. An origin for Advanced, a label otherwise. */
+export function byokFighterLabel(
+  fighter: { readonly provider: string; readonly baseUrl?: string },
+  config?: FreeTierConfig,
+): string {
+  const baseUrl = fighter.baseUrl?.trim() ?? '';
+  if (baseUrl.length > 0) {
+    return assertVisitorSuppliedEndpoint(baseUrl).origin;
+  }
+  return byokProvider(fighter.provider, config).label;
 }

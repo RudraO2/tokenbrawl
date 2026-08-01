@@ -26,7 +26,7 @@ const SEED = 4_601;
 function fighters() {
   return [
     { provider: 'groq', model: 'llama-3.1-8b-instant', apiKey: P1_KEY },
-    { provider: 'cerebras', model: 'llama3.1-8b', apiKey: P2_KEY },
+    { provider: 'cerebras', model: 'gpt-oss-120b', apiKey: P2_KEY },
   ] as const;
 }
 
@@ -204,7 +204,7 @@ describe('a failed key produces no Match at all (AC3)', () => {
       runByokMatch({
         fighters: [
           { provider: 'groq', model: 'llama-3.1-8b-instant', apiKey: P1_KEY },
-          { provider: 'cerebras', model: 'llama3.1-8b', apiKey: '' },
+          { provider: 'cerebras', model: 'gpt-oss-120b', apiKey: '' },
         ],
         seed: SEED,
         fetch: transport.fetch,
@@ -260,7 +260,7 @@ describe('the result is marked, and unratable (AC4, AD-11)', () => {
     expect(log.agents[0].deployment?.endpoint).toContain('api.groq.com');
     expect(log.agents[0].deployment?.model).toBe('llama-3.1-8b-instant');
     expect(log.agents[1].deployment?.endpoint).toContain('api.cerebras.ai');
-    expect(log.agents[1].deployment?.model).toBe('llama3.1-8b');
+    expect(log.agents[1].deployment?.model).toBe('gpt-oss-120b');
   });
 
   it('is excluded from rating computation, with a stated reason', async () => {
@@ -284,5 +284,153 @@ describe('the result is marked, and unratable (AC4, AD-11)', () => {
     });
     expect(log.agents[0].id).not.toBe(log.agents[1].id);
     expect(() => validateCommandLog(log)).not.toThrow();
+  });
+});
+
+/**
+ * Story 4.7: a model, and an endpoint, that came from the visitor rather than
+ * from a list. The end-to-end half of AC3, AC5 and INV-6.
+ */
+describe('a custom model reaches the wire and the log verbatim (4.7, AC3)', () => {
+  it('records the exact string the visitor typed, however unlike an id it looks', async () => {
+    const transport = rotatingTransport();
+    const log = await runByokMatch({
+      fighters: [
+        { provider: 'groq', model: 'openai/gpt-oss-120b', apiKey: P1_KEY },
+        { provider: 'groq', model: 'Weird_Model.v2', apiKey: P2_KEY },
+      ],
+      seed: SEED,
+      fetch: transport.fetch,
+    });
+
+    // Verbatim in the log, which is what INV-6 and AC3 ask for.
+    expect(log.agents[0].deployment?.model).toBe('openai/gpt-oss-120b');
+    expect(log.agents[1].deployment?.model).toBe('Weird_Model.v2');
+
+    // And verbatim on the wire, which is the half a log cannot prove.
+    const modelsSent = new Set(
+      transport.calls().map((call) => (JSON.parse(call.body) as { model: string }).model),
+    );
+    expect([...modelsSent].sort()).toStrictEqual(['Weird_Model.v2', 'openai/gpt-oss-120b']);
+  });
+
+  it('sanitises the Agent id to the frozen pattern without touching the model', async () => {
+    // `openai/gpt-oss-120b` carries a `/`, which `^[a-z0-9._:-]{1,96}$` does
+    // not allow -- and it is a model this very story *adds*, so an unsanitised
+    // id would have failed validation at the end of a real Match.
+    const log = await runByokMatch({
+      fighters: [
+        { provider: 'groq', model: 'openai/gpt-oss-120b', apiKey: P1_KEY },
+        { provider: 'groq', model: 'qwen/qwen3.6-27b', apiKey: P2_KEY },
+      ],
+      seed: SEED,
+      fetch: rotatingTransport().fetch,
+    });
+
+    const pattern = /^[a-z0-9._:-]{1,96}$/;
+    for (const agent of log.agents) {
+      expect(agent.id).toMatch(pattern);
+    }
+    expect(log.agents[0].id).toBe('p1:byok:openai-gpt-oss-120b');
+    // The one that matters: the id was mangled, the model was not.
+    expect(log.agents[0].deployment?.model).toBe('openai/gpt-oss-120b');
+
+    // And the whole log still passes the frozen schema, which is the assertion
+    // the sanitising exists for.
+    expect(() => validateCommandLog(log)).not.toThrow();
+  });
+
+  it('keeps an absurdly long model name inside the pattern length', async () => {
+    const long = `x${'y'.repeat(200)}`;
+    const log = await runByokMatch({
+      fighters: [
+        { provider: 'groq', model: long, apiKey: P1_KEY },
+        { provider: 'groq', model: 'llama-3.1-8b-instant', apiKey: P2_KEY },
+      ],
+      seed: SEED,
+      fetch: rotatingTransport().fetch,
+    });
+    expect(log.agents[0].id.length).toBeLessThanOrEqual(96);
+    expect(log.agents[0].id).toMatch(/^[a-z0-9._:-]{1,96}$/);
+    expect(log.agents[0].deployment?.model).toBe(long);
+    expect(() => validateCommandLog(log)).not.toThrow();
+  });
+});
+
+describe('a visitor-supplied endpoint, end to end (4.7, AC5)', () => {
+  it('runs the Match there, contacts nothing else, and records the endpoint', async () => {
+    const transport = rotatingTransport();
+    const log = await runByokMatch({
+      fighters: [
+        {
+          provider: 'groq',
+          model: 'anthropic/claude-opus-4',
+          apiKey: P1_KEY,
+          baseUrl: 'https://gw.example/v1',
+        },
+        {
+          provider: 'groq',
+          model: 'openai/gpt-4o',
+          apiKey: P2_KEY,
+          baseUrl: 'https://gw.example/v1',
+        },
+      ],
+      seed: SEED,
+      fetch: transport.fetch,
+    });
+
+    // AC5's security half: one origin, and it is the one configured.
+    expect(transport.origins()).toStrictEqual(['https://gw.example']);
+    // AC5's provenance half (INV-6): the log names the URL that was called,
+    // and it names it because `run.ts` and `client.ts` resolve it once.
+    for (const agent of log.agents) {
+      expect(agent.deployment?.endpoint).toBe('https://gw.example/v1/chat/completions');
+      expect(agent.deployment?.provider).toBe('byok');
+    }
+    expect(() => validateCommandLog(log)).not.toThrow();
+    // AD-11 is unchanged by any of this: a paid model buys no leaderboard row.
+    expect(isRatingEligible(log)).toBe(false);
+  });
+
+  it('sends one fighter to their endpoint and the other to the picker, without crossing', async () => {
+    const transport = rotatingTransport();
+    await runByokMatch({
+      fighters: [
+        { provider: 'groq', model: 'llama-3.1-8b-instant', apiKey: P1_KEY },
+        {
+          provider: 'groq',
+          model: 'anthropic/claude-opus-4',
+          apiKey: P2_KEY,
+          baseUrl: 'https://gw.example/v1',
+        },
+      ],
+      seed: SEED,
+      fetch: transport.fetch,
+    });
+
+    expect([...transport.origins()].sort()).toStrictEqual([
+      'https://api.groq.com',
+      'https://gw.example',
+    ]);
+    // Neither key crossed to the other fighter's origin.
+    for (const call of transport.calls()) {
+      const expected = call.url.startsWith('https://gw.example') ? P2_KEY : P1_KEY;
+      expect(call.headers.Authorization).toBe(`Bearer ${expected}`);
+    }
+  });
+
+  it('makes no request at all when the endpoint is plaintext (AC6)', async () => {
+    const transport = rotatingTransport();
+    await expect(
+      runByokMatch({
+        fighters: [
+          { provider: 'groq', model: 'm', apiKey: P1_KEY, baseUrl: 'http://gw.example/v1' },
+          { provider: 'groq', model: 'llama-3.1-8b-instant', apiKey: P2_KEY },
+        ],
+        seed: SEED,
+        fetch: transport.fetch,
+      }),
+    ).rejects.toThrow(/not https/);
+    expect(transport.calls()).toHaveLength(0);
   });
 });
