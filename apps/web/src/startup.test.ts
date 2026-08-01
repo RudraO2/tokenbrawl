@@ -32,8 +32,13 @@ function pending<T>(): Promise<T> {
   return new Promise<T>(() => undefined);
 }
 
-function createCanvas(): { readonly surface: unknown; readonly paints: () => number } {
+function createCanvas(): {
+  readonly surface: unknown;
+  readonly paints: () => number;
+  readonly texts: () => readonly string[];
+} {
   const state = { paints: 0 };
+  const texts: string[] = [];
   // A Proxy rather than a hand-written stub: `Canvas2D` has fourteen members
   // and this file cares about none of them individually -- only that the
   // player painted at all. A stub would need updating every time the renderer
@@ -57,6 +62,12 @@ function createCanvas(): { readonly surface: unknown; readonly paints: () => num
           // `clearRect` opens every `drawFrame`, so counting it counts paints.
           if (property === 'clearRect' && args.length === 4) {
             state.paints += 1;
+            texts.length = 0;
+          }
+          // Story 4.4 asserts on the HUD's own labels, which are the only
+          // thing a call log can tell apart from a rectangle.
+          if (property === 'fillText' && typeof args[0] === 'string') {
+            texts.push(args[0]);
           }
         };
       },
@@ -70,10 +81,14 @@ function createCanvas(): { readonly surface: unknown; readonly paints: () => num
   return {
     surface: { width: 0, height: 0, getContext: () => context },
     paints: () => state.paints,
+    // Only the most recent frame's labels: the HUD is redrawn every frame, and
+    // accumulating every frame's text would make "shows one meter" unfalsifiable.
+    texts: () => texts,
   };
 }
 
 interface FakeRoot extends MountPoint {
+  readonly painted: () => readonly string[];
   readonly listeners: () => ReadonlyMap<string, ((event?: { readonly pointerType?: string }) => void)[]>;
   readonly fire: (selector: string, type: string, event?: { readonly pointerType?: string }) => void;
   readonly html: () => string;
@@ -108,6 +123,7 @@ function createRoot(): FakeRoot {
     set innerHTML(value: string) {
       state.html = value;
     },
+    painted: () => canvas.texts(),
     querySelector: (selector: string): MountPointChild | null =>
       selector === 'canvas' ? (canvas.surface as MountPointChild) : child(selector),
     listeners: () => listeners,
@@ -123,6 +139,7 @@ function createRoot(): FakeRoot {
 interface Harness {
   readonly globals: BrowserGlobals;
   readonly root: FakeRoot;
+  readonly painted: () => readonly string[];
   readonly frames: () => number;
   readonly runFrames: (count: number) => void;
   readonly requested: () => readonly string[];
@@ -179,6 +196,7 @@ function createHarness(
   return {
     globals,
     root,
+    painted: () => root.painted(),
     frames: () => queue.length,
     runFrames: (count: number): void => {
       for (let index = 0; index < count; index += 1) {
@@ -682,5 +700,84 @@ describe('two hover targets, one selection', () => {
 
     expect(result?.mounted.clock.isRunning()).toBe(true);
     expect(harness.root.html()).toContain('Hover, tap or tab to a fighter');
+  });
+});
+
+/**
+ * Story 4.4 end to end.
+ *
+ * The committed demo Match is two Baseline Bots, which is AC3's case and not
+ * AC1's or AC2's -- so a metered log is synthesised by adding `bankRemaining`
+ * to the same real Match. The simulation is untouched: `bankRemaining` is
+ * metadata about the call, not an input to it, so the film, the hash and every
+ * frame are identical either way. That is the property the first case asserts.
+ */
+describe('the Token Bank HUD (4.4)', () => {
+  function metered(log: CommandLog, levels: readonly number[]): CommandLog {
+    let index = 0;
+    return {
+      ...log,
+      tokenBankStart: 25_000,
+      decisions: log.decisions.map((entry) => {
+        if (entry.agentIndex !== 0) {
+          return entry;
+        }
+        const level = levels[Math.min(index, levels.length - 1)];
+        index += 1;
+        return { ...entry, bankRemaining: level };
+      }),
+    };
+  }
+
+  it('changes nothing about the simulation it annotates', async () => {
+    const { log } = await buildDemoBundle();
+    const plain = createHarness(log);
+    const withBank = createHarness(metered(log, [24_000, 12_000, 0]));
+
+    const a = await startup(plain.globals);
+    const b = await startup(withBank.globals);
+
+    // Same hash, same frame count, same verdict. A HUD that moved the fight
+    // would be a far worse defect than one that failed to draw.
+    expect(b?.mounted.film.finalStateHash).toBe(a?.mounted.film.finalStateHash);
+    expect(b?.mounted.film.frames.length).toBe(a?.mounted.film.frames.length);
+    expect(b?.mounted.film.matchesRecordedHash).toBe(true);
+  });
+
+  it('draws a meter for the metered Agent and none for the bot (AC1, AC3)', async () => {
+    const { log } = await buildDemoBundle();
+    const harness = createHarness(metered(log, [24_000, 12_000, 0]));
+
+    await startup(harness.globals);
+
+    const bankTexts = harness.painted().filter((text) => text.startsWith('BANK'));
+    const reflexTexts = harness.painted().filter((text) => text.includes('REFLEX'));
+    // Exactly one fighter has a bank, so exactly one meter is drawn per frame.
+    expect(bankTexts.length + reflexTexts.length).toBe(1);
+    expect(bankTexts[0]).toBe('BANK 24000');
+  });
+
+  it('enters the exhausted state once the bank empties, and keeps playing (AC2, AC4)', async () => {
+    const { log } = await buildDemoBundle();
+    const harness = createHarness(metered(log, [24_000, 12_000, 0]));
+
+    const result = await startup(harness.globals);
+    // Far enough in that the third recorded level is the one on screen.
+    harness.runFrames(60);
+
+    expect(harness.painted().some((text) => text.includes('REFLEX'))).toBe(true);
+    // The fight did not stop when the thinking did.
+    expect(result?.mounted.clock.isRunning()).toBe(true);
+  });
+
+  it('shows no meter at all for the committed Baseline-Bot demo (AC3)', async () => {
+    const { log } = await buildDemoBundle();
+    const harness = createHarness(log);
+
+    await startup(harness.globals);
+    harness.runFrames(20);
+
+    expect(harness.painted().some((text) => text.startsWith('BANK'))).toBe(false);
+    expect(harness.painted().some((text) => text.includes('REFLEX'))).toBe(false);
   });
 });

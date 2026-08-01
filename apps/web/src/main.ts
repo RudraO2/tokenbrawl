@@ -4,6 +4,7 @@ import { createFighterEnvironment } from '../../../packages/env-fighter/src/envi
 import { createPlaybackClock, type PlaybackClock } from './player/clock';
 import { buildReplayFilm, type ReplayFilm } from './replay/film';
 import { resolveDecision, type ResolvedDecision } from './replay/decision-point';
+import { createBankReadout } from './replay/token-bank';
 import {
   createReasoningSource,
   type ReasoningLookup,
@@ -154,6 +155,13 @@ export function mountPlayer(
 ): MountedPlayer {
   const env = createFighterEnvironment();
   const film = buildReplayFilm(log, env);
+  // After `buildReplayFilm`, never before: that call is what establishes the
+  // document is a schema version this player understands (AD-3), and this walks
+  // `log.decisions`.
+  const banks = createBankReadout(
+    log as Parameters<typeof createBankReadout>[0],
+    DEFAULT_FIGHTER_CONFIG.ticksPerDecision,
+  );
 
   const ctx = canvas.getContext('2d');
   if (ctx === null) {
@@ -177,9 +185,14 @@ export function mountPlayer(
 
   const paint = (index: number): void => {
     dressing.frameIndex = index;
+    const decisionPoint = film.frames[index]?.decisionPoint ?? 0;
     drawFrame(ctx, film.frames[index], {
       config: DEFAULT_FIGHTER_CONFIG,
       viewport,
+      // Story 4.4. Read per frame rather than cached per Decision Point: the
+      // readout is a map lookup, and a cache keyed on the wrong thing is how a
+      // meter ends up one Decision Point behind the fighter it belongs to.
+      banks: [banks.at(decisionPoint, 0), banks.at(decisionPoint, 1)],
       // Padded rather than filtered. `drawFrame` falls back from a missing
       // index to index 0, so handing it `[undefined, packTwo]` would dress
       // *both* fighters in pack two -- the one thing the two packs exist to

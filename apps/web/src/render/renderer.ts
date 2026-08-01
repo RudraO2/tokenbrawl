@@ -2,6 +2,7 @@ import type { FighterConfig } from '../../../../packages/env-fighter/src/config'
 import { COMMITTED_NONE, phaseOf } from '../../../../packages/env-fighter/src/frames';
 import type { FighterState } from '../../../../packages/env-fighter/src/state';
 import { BASIS_POINTS_FULL, type RenderFrame } from '../replay/film';
+import type { BankReading } from '../replay/token-bank';
 import { animationFor, isFree } from './animation';
 import type { Backdrop } from './backdrop';
 import type { Canvas2D } from './canvas2d';
@@ -39,6 +40,14 @@ export interface DrawFrameOptions {
   readonly artists?: readonly FighterArtist[];
   /** Scenery behind the fighters. Absent leaves the flat ground colour. */
   readonly backdrop?: Backdrop;
+  /**
+   * Story 4.4. One Token Bank reading per agent index, or `null` for an Agent
+   * that has no bank -- a Baseline Bot consumes nothing and must show no meter.
+   *
+   * Optional so that every Story 4.1 renderer assertion still describes what
+   * this function draws: omit it and the output is unchanged.
+   */
+  readonly banks?: readonly (BankReading | null)[];
 }
 
 /**
@@ -57,6 +66,15 @@ const HUD_BAR_WIDTH = 320;
 const HUD_SIDE_INSET = 32;
 const METER_HEIGHT = 10;
 const METER_GAP = 8;
+/** Baseline of the `HP … MTR …` readout under the two simulation bars. */
+const HUD_LABEL_BASELINE = HUD_TOP + HUD_BAR_HEIGHT + METER_GAP + METER_HEIGHT + 20;
+/**
+ * Story 4.4. The Token Bank sits at the bottom of the same stack, under health,
+ * meter and their readout -- the two resources a fighter spends, then the one
+ * it thinks with, in one column beside each fighter.
+ */
+const BANK_HEIGHT = 16;
+const BANK_TOP = HUD_LABEL_BASELINE + METER_GAP;
 
 /**
  * Interpolates one fighter's arena position between two simulated states.
@@ -171,6 +189,59 @@ function drawBar(
 }
 
 /**
+ * Draws the Token Bank meter for one fighter (Story 4.4).
+ *
+ * The exhausted state is deliberately the loudest thing the palette allows,
+ * because it is the moment the whole benchmark turns on: the bank empties,
+ * Reflex Mode caps the next call at eight tokens, and the fighter starts making
+ * instant, bad decisions. A bar that merely reached its left edge would pass
+ * unnoticed at five Decision Points per second, so the meter inverts to a solid
+ * `--tb-warn` block carrying the word REFLEX in ground ink -- the same
+ * warn-as-fill pattern `docs/DESIGN.md` sanctions for warning text, and the one
+ * pair in the palette that reads as an alarm.
+ *
+ * Nothing here is a duration. The bar is redrawn from a level the log recorded,
+ * so two Matches with identical `bankRemaining` sequences produce identical
+ * HUDs however long either Deployment took to think (INV-3).
+ */
+function drawTokenBank(
+  ctx: Canvas2D,
+  theme: Theme,
+  x: number,
+  reading: BankReading,
+): void {
+  if (reading.exhausted) {
+    ctx.fillStyle = theme.warn;
+    ctx.fillRect(x, BANK_TOP, HUD_BAR_WIDTH, BANK_HEIGHT);
+    ctx.strokeStyle = theme.ink;
+    ctx.lineWidth = theme.borderWidth;
+    ctx.strokeRect(x, BANK_TOP, HUD_BAR_WIDTH, BANK_HEIGHT);
+
+    ctx.fillStyle = theme.bg;
+    ctx.font = theme.monoFont;
+    ctx.textAlign = 'left';
+    ctx.fillText('REFLEX  BANK 0', x + METER_GAP, BANK_TOP + BANK_HEIGHT - theme.borderWidth);
+    return;
+  }
+
+  drawBar(
+    ctx,
+    theme,
+    x,
+    BANK_TOP,
+    HUD_BAR_WIDTH,
+    BANK_HEIGHT,
+    reading.filledBasisPoints / BASIS_POINTS_FULL,
+    theme.muted,
+  );
+
+  ctx.fillStyle = theme.ink;
+  ctx.font = theme.monoFont;
+  ctx.textAlign = 'left';
+  ctx.fillText(`BANK ${String(reading.remaining)}`, x + METER_GAP, BANK_TOP + BANK_HEIGHT - theme.borderWidth);
+}
+
+/**
  * Draws one frame of the film.
  *
  * Order is fixed and asserted: clear, floor, both fighters, both HUD blocks.
@@ -277,8 +348,16 @@ export function drawFrame(ctx: Canvas2D, frame: RenderFrame, options: DrawFrameO
     ctx.fillText(
       `HP ${String(frame.from.health[agentIndex])}  MTR ${String(frame.from.meter[agentIndex])}`,
       x,
-      HUD_TOP + HUD_BAR_HEIGHT + METER_GAP + METER_HEIGHT + 20,
+      HUD_LABEL_BASELINE,
     );
+
+    // Only for an Agent that has one. A Baseline Bot spends no tokens, records
+    // no `bankRemaining`, and must show no meter at all -- a bot with a
+    // full-looking Token Bank would misrepresent what is being measured (AC3).
+    const bank = options.banks?.[agentIndex];
+    if (bank != null) {
+      drawTokenBank(ctx, theme, x, bank);
+    }
   }
 
   ctx.fillStyle = theme.muted;

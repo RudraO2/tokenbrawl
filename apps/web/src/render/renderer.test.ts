@@ -11,6 +11,7 @@ import {
 } from '../../../../packages/env-fighter/src/frames';
 import type { FighterState } from '../../../../packages/env-fighter/src/state';
 import type { RenderFrame } from '../replay/film';
+import type { BankReading } from '../replay/token-bank';
 import { BASIS_POINTS_FULL } from '../replay/film';
 import type { Canvas2D } from './canvas2d';
 import { createBlockArtist } from './artist';
@@ -258,5 +259,107 @@ describe('the block artist', () => {
 
     expect(strikeX(rightward)).toBeGreaterThan(200);
     expect(strikeX(leftward)).toBeLessThan(200);
+  });
+});
+
+/**
+ * Story 4.4: the Token Bank meter.
+ *
+ * The story is judged by eye as much as by test, so what is pinned here is the
+ * part an eye cannot check reliably: that an Agent without a bank gets no meter
+ * at all, that zero is drawn as a different thing rather than as a short bar,
+ * and that omitting the option leaves Story 4.1's output untouched.
+ */
+describe('the Token Bank meter (4.4)', () => {
+  function drawWithBanks(banks: readonly (BankReading | null)[]): RecordingCanvas {
+    const ctx = createRecordingCanvas();
+    drawFrame(ctx, frameWith(stateWith(), stateWith()), {
+      config: DEFAULT_FIGHTER_CONFIG,
+      viewport: VIEWPORT,
+      banks,
+    });
+    return ctx;
+  }
+
+  function reading(remaining: number, start = 25_000): BankReading {
+    return {
+      remaining,
+      start,
+      filledBasisPoints: Math.floor((Math.max(0, remaining) * 10_000) / start),
+      exhausted: remaining <= 0,
+    };
+  }
+
+  function texts(ctx: RecordingCanvas): readonly string[] {
+    return ctx
+      .calls()
+      .filter((call) => call.op === 'fillText')
+      .map((call) => String(call.args[0]));
+  }
+
+  it('draws nothing extra when no bank is supplied, so 4.1 output is unchanged', () => {
+    const withNone = draw(frameWith(stateWith(), stateWith()));
+    const withNulls = drawWithBanks([null, null]);
+
+    expect(withNulls.calls()).toStrictEqual(withNone.calls());
+  });
+
+  it('shows the recorded level for a metered Agent (AC1)', () => {
+    const ctx = drawWithBanks([reading(18_400), null]);
+    expect(texts(ctx)).toContain('BANK 18400');
+  });
+
+  it('shows exactly one meter in a Deployment-versus-bot Match (AC3)', () => {
+    const ctx = drawWithBanks([reading(18_400), null]);
+    expect(texts(ctx).filter((text) => text.startsWith('BANK')).length).toBe(1);
+  });
+
+  it('renders an exhausted bank as a different thing, not a short bar (AC2)', () => {
+    const empty = drawWithBanks([reading(0), null]);
+    const nearlyEmpty = drawWithBanks([reading(1), null]);
+
+    // Loud, and legible without reading anything: the word, on a warn fill.
+    expect(texts(empty).some((text) => text.includes('REFLEX'))).toBe(true);
+    expect(texts(nearlyEmpty).some((text) => text.includes('REFLEX'))).toBe(false);
+
+    const warnFills = empty
+      .calls()
+      .filter((call) => call.op === 'fillRect' && call.fillStyle === THEME.warn);
+    expect(warnFills.length).toBeGreaterThan(0);
+  });
+
+  it('puts ground ink on the warn fill, never warn text on the ground', () => {
+    // --tb-warn on --tb-bg measures 4.26:1 and misses the 4.5:1 floor. The pair
+    // the other way round is what docs/DESIGN.md sanctions.
+    const ctx = drawWithBanks([reading(0), null]);
+    const reflex = ctx
+      .calls()
+      .find((call) => call.op === 'fillText' && String(call.args[0]).includes('REFLEX'));
+
+    expect(reflex?.fillStyle).toBe(THEME.bg);
+  });
+
+  it('shows both banks exhausted at once, and keeps drawing the fight (AC4)', () => {
+    const ctx = drawWithBanks([reading(0), reading(0)]);
+
+    expect(texts(ctx).filter((text) => text.includes('REFLEX')).length).toBe(2);
+    // The fighters and the arena are still there.
+    expect(ctx.calls()[0].op).toBe('clearRect');
+    expect(texts(ctx).some((text) => text.startsWith('HP '))).toBe(true);
+  });
+
+  it('is pure: the same reading drawn twice issues the same calls', () => {
+    expect(drawWithBanks([reading(7_000), reading(0)]).calls()).toStrictEqual(
+      drawWithBanks([reading(7_000), reading(0)]).calls(),
+    );
+  });
+
+  it('says nothing about time (INV-3)', () => {
+    // The meter shows tokens. A rate or a duration here would be the UI
+    // hinting at how long a Deployment thought.
+    const ctx = drawWithBanks([reading(12_500), reading(0)]);
+    for (const text of texts(ctx)) {
+      expect(text).not.toMatch(/\b(ms|sec|second|per|rate|elapsed)\b/i);
+    }
   });
 });
