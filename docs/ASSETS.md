@@ -77,7 +77,9 @@ which does not survive being recomposited into a stage.
 1. Drop the images in `apps/web/public/sprites/<pack>/`.
 2. Write a `layout.json`: `frameWidth`, `frameHeight`, `scale`, `anchorY`, and
    one `{ image, x, y, frames }` per clip. Clip names are fixed by `CLIP_NAMES`.
-3. Point `SPRITE_LAYOUT_URL` in `apps/web/src/boot.ts` at it.
+3. Point `SPRITE_LAYOUT_URLS` in `apps/web/src/startup.ts` at it. One entry per
+   agent index; the packs are swapped into an already-running fight as they
+   decode, so a pack that fails to load costs nothing but its own silhouette.
 4. Record its source, licence, and the date you read the licence above.
 
 No rendering code changes. `validateSpriteSheetLayout` rejects a layout that is

@@ -1,5 +1,5 @@
 import type { CommandLog } from '@tokenbrawl/contracts';
-import { renderApp, type HostView, type MountPoint, type MountedApp } from './main';
+import { escapeHtml, renderApp, type HostView, type MountPoint, type MountedApp } from './main';
 import { validateReasoningSidecar } from './replay/sidecar';
 import { createSpriteArtist, type FighterArtist } from './render/artist';
 import { createBackdrop, validateBackdropLayout, type Backdrop } from './render/backdrop';
@@ -99,6 +99,17 @@ export interface StartupResult {
  * somebody else's reasoning.
  */
 export function resolveSidecarUrl(logUrl: string, sidecar: string): string {
+  // The path arrives inside a *fetched document*, so it is untrusted input.
+  // `//evil.example/x.json` is protocol-relative and starts with `/`, so the
+  // rooted-path branch below would have handed it straight to `fetch` and the
+  // page would have loaded reasoning from another origin -- breaking the
+  // offline guarantee and INV-8's "no third-party host" at once. A scheme is
+  // refused for the same reason.
+  if (sidecar.startsWith('//') || /^[a-z][a-z0-9+.-]*:/i.test(sidecar)) {
+    throw new Error(
+      `resolveSidecarUrl: refusing an off-origin reasoning sidecar (${sidecar}). The site must render identically offline.`,
+    );
+  }
   if (sidecar.startsWith('/')) {
     return sidecar;
   }
@@ -197,8 +208,8 @@ async function loadSidecar(
   sidecarPath: string,
   matchId: string,
 ): Promise<void> {
-  const url = resolveSidecarUrl(logUrl, sidecarPath);
   try {
+    const url = resolveSidecarUrl(logUrl, sidecarPath);
     mounted.reasoning.adopt(validateReasoningSidecar(await fetchJson(globals, url), matchId));
   } catch (error) {
     warn('Reasoning sidecar unavailable', error);
@@ -207,13 +218,23 @@ async function loadSidecar(
   mounted.refresh();
 }
 
-/** The house-style failure card. A player that fails silently looks identical to one still loading. */
+/**
+ * The house-style failure card. A player that fails silently looks identical to
+ * one still loading.
+ *
+ * The message is escaped, and that is not decoration. `assertSchemaVersion`
+ * interpolates the *fetched document's* own `schemaVersion` into its error, so
+ * a log carrying `schemaVersion: "<img src=x onerror=…>"` would previously have
+ * put attacker-controlled markup into this page's `innerHTML`. Story 4.6 hands
+ * the log source to the visitor, which makes it live rather than theoretical.
+ */
 function renderFailure(root: MountPoint, error: unknown): void {
+  const message = escapeHtml(String(error instanceof Error ? error.message : error));
   root.innerHTML = `
     <header class="tb-masthead"><h1 class="tb-wordmark">Tokenbrawl</h1></header>
     <div class="tb-readout">
       <span class="tb-chip tb-chip--failed">Replay failed</span>
-      <span class="tb-chip tb-hash">${String(error instanceof Error ? error.message : error)}</span>
+      <span class="tb-chip tb-hash">${message}</span>
     </div>
   `;
 }

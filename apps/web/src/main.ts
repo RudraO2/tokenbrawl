@@ -281,8 +281,16 @@ export function reasoningPanel(
   return { heading: agentId, body: lookup.reasoning, modifier: 'tb-reasoning--text' };
 }
 
-/** Escapes text that came out of a log before it goes into `innerHTML`. */
-function escapeHtml(value: string): string {
+/**
+ * Escapes text that came out of a log before it goes into `innerHTML`.
+ *
+ * Every string this page displays that it did not author itself passes through
+ * here: agent ids, reasoning text, and the messages in `startup.ts`'s failure
+ * card -- `assertSchemaVersion` interpolates the fetched document's own
+ * `schemaVersion` into its error, so that path is attacker-reachable the moment
+ * Story 4.6 lets a visitor choose the log.
+ */
+export function escapeHtml(value: string): string {
   return value
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
@@ -303,12 +311,8 @@ export function renderApp(root: MountPoint, log: CommandLog, view: HostView): Mo
     <div class="tb-arena">
       <div class="tb-stage">
         <canvas class="tb-canvas"></canvas>
-        <button class="tb-fighter-target tb-fighter-target--p1" type="button" data-agent="0">
-          <span class="tb-visually-hidden">Reasoning for ${escapeHtml(log.agents[0].id)}</span>
-        </button>
-        <button class="tb-fighter-target tb-fighter-target--p2" type="button" data-agent="1">
-          <span class="tb-visually-hidden">Reasoning for ${escapeHtml(log.agents[1].id)}</span>
-        </button>
+        <button class="tb-fighter-target tb-fighter-target--p1" type="button" data-agent="0"></button>
+        <button class="tb-fighter-target tb-fighter-target--p2" type="button" data-agent="1"></button>
       </div>
       <div class="tb-reasoning" data-reasoning></div>
     </div>
@@ -325,7 +329,6 @@ export function renderApp(root: MountPoint, log: CommandLog, view: HostView): Mo
     throw new Error('renderApp: the shell did not mount.');
   }
 
-  const reasoning = createReasoningSource(log);
   // Re-bound after the guard above so the hoisted `renderPanel` sees a
   // non-nullable node: TypeScript will not carry a narrowing into a function
   // declaration, which may legally be called before the narrowing runs.
@@ -373,6 +376,10 @@ export function renderApp(root: MountPoint, log: CommandLog, view: HostView): Mo
       renderPanel();
     }
   });
+  // After `mountPlayer`, never before: this walks `log.decisions`, and
+  // `replayCommandLog` (reached through `mountPlayer`) is what establishes that
+  // the document is a version this player understands at all (AD-3).
+  const reasoning = createReasoningSource(log);
   const chip = hashChip(mounted.film);
 
   readout.innerHTML = `
@@ -382,11 +389,19 @@ export function renderApp(root: MountPoint, log: CommandLog, view: HostView): Mo
     <span class="tb-chip tb-hash">${mounted.film.finalStateHash}</span>
   `;
 
+  // The shell above is written with no field from the log in it, and the
+  // agent-derived labels are filled in only here -- after `mountPlayer` has
+  // routed the document through `replayCommandLog`, which checks the schema
+  // version before it reads anything else (AD-3). An earlier draft
+  // interpolated `log.agents[0].id` straight into the template, which read an
+  // unvalidated field first and turned a clean "unsupported schemaVersion"
+  // into an unhelpful TypeError on a malformed document.
   for (const agentIndex of [0, 1] as const) {
     const target = targets[agentIndex];
     if (target === null) {
       continue;
     }
+    target.innerHTML = `<span class="tb-visually-hidden">Reasoning for ${escapeHtml(log.agents[agentIndex].id)}</span>`;
     const select = (): void => {
       selection.agentIndex = agentIndex;
       renderPanel();

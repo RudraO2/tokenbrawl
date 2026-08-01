@@ -254,6 +254,31 @@ describe('splitting a real Match (AC3)', () => {
     expect(split.entries[0]).toMatchObject({ rawResponse: 'ummm', reasoning: 'long deliberation' });
   });
 
+  it('takes a large reasoning payload off the document playback blocks on (AC3)', async () => {
+    // The AC names the case explicitly: "a Command Log whose reasoning payload
+    // is large". A Deployment log carries a paragraph per Decision Point, so
+    // the field that grows without bound is the one the fight must not wait
+    // for. 2 KB per entry over 60 entries is a realistic Epic 3 log.
+    const original = await buildDemoLog();
+    const verbose = {
+      ...original,
+      decisions: original.decisions.map((entry) => ({
+        ...entry,
+        reasoning: 'x'.repeat(2_048),
+      })),
+    };
+
+    const { log, sidecar: split } = splitReasoning(verbose);
+
+    const before = JSON.stringify(verbose).length;
+    const after = JSON.stringify(log).length;
+    expect(before - after).toBeGreaterThan(2_048 * original.decisions.length);
+    // And it really is smaller than the log we started this story with, not
+    // merely smaller than the inflated one.
+    expect(after).toBeLessThan(JSON.stringify(original).length);
+    expect(split.entries.every((entry) => entry.reasoning?.length === 2_048)).toBe(true);
+  });
+
   it('round-trips through the reader for every Decision Point', async () => {
     const { log, sidecar: split } = splitReasoning(await buildDemoLog());
     const source = createReasoningSource(log);

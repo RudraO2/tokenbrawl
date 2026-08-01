@@ -36,6 +36,14 @@
       type="application/json"
       crossorigin
     />
+    <!--
+      An empty data URL, which is the one-line way to stop the browser
+      speculatively requesting /favicon.ico. Measured: it was a 404 on every
+      cold load, competing for the same narrow pipe as the replay. A real mark
+      belongs with the rest of the site's presentation (Story 7.4), not here,
+      and a hex literal in this file would rightly fail the token sweep.
+    -->
+    <link rel="icon" href="data:," />
     <style>
       html {
         background: #0a0a0a;

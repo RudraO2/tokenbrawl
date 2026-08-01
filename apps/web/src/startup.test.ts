@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import type { CommandLog } from '@tokenbrawl/contracts';
 import type { Canvas2D } from './render/canvas2d';
@@ -272,6 +275,21 @@ describe('startup ordering (AC1, AC3)', () => {
   it('refuses to mount into an environment with no document', async () => {
     await expect(startup({})).rejects.toThrow(/no document, window or fetch/);
   });
+
+  it('checks the schema version before it reads any other field of the log (AD-3)', async () => {
+    // Every other field is deliberately absent. If the shell read `agents` or
+    // `decisions` while building its markup -- which an earlier draft of this
+    // story did -- the page would report an unhelpful TypeError instead of the
+    // one thing a visitor can act on. A partial read of an evolved schema is
+    // the failure AD-3 exists to prevent.
+    const harness = createHarness({} as CommandLog, {
+      json: async () => ({ schemaVersion: '2.0.0' }),
+    });
+
+    await startup(harness.globals);
+
+    expect(harness.root.innerHTML).toContain('Unsupported Command Log schemaVersion: 2.0.0');
+  });
 });
 
 describe('the reasoning sidecar on the page (AC4)', () => {
@@ -354,6 +372,31 @@ describe('the reasoning sidecar on the page (AC4)', () => {
   });
 });
 
+describe("the document's own critical path (AC1)", () => {
+  const html = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'index.html'), 'utf8');
+
+  it('preloads the replay, so its request does not wait for the module graph', () => {
+    // Measured: without this line the JSON is discovered only after the bundle
+    // has downloaded and executed -- one extra serial round trip, which on a
+    // high-latency link costs more than every byte saved elsewhere. With it,
+    // the log and the script land within 3 ms of each other on Fast 3G.
+    expect(html).toMatch(/rel="preload"[\s\S]*?href="\/replays\/demo\.command-log\.json"/);
+    // `crossorigin` is what makes the preload match a plain same-origin
+    // `fetch()`. Without it the browser downloads the file twice, which is
+    // slower than not preloading at all.
+    expect(html).toMatch(/rel="preload"[\s\S]*?crossorigin/);
+  });
+
+  it('preloads nothing else, so decorations cannot crowd out the replay', () => {
+    expect(html.match(/rel="preload"/g)).toHaveLength(1);
+    expect(html).not.toContain('/sprites/');
+  });
+
+  it('declares an icon, so no speculative favicon request competes for the pipe', () => {
+    expect(html).toContain('rel="icon"');
+  });
+});
+
 describe('resolveSidecarUrl', () => {
   it('resolves a relative path against the log, so a log directory can carry both', () => {
     expect(resolveSidecarUrl('/replays/2026-08/m1.command-log.json', 'm1.reasoning.json')).toBe(
@@ -371,5 +414,46 @@ describe('resolveSidecarUrl', () => {
     expect(resolveSidecarUrl('demo.command-log.json', 'demo.reasoning.json')).toBe(
       'demo.reasoning.json',
     );
+  });
+
+  it.each([
+    ['protocol-relative', '//evil.example/reasoning.json'],
+    ['absolute https', 'https://evil.example/reasoning.json'],
+    ['absolute http', 'http://evil.example/reasoning.json'],
+    ['a data URL', 'data:application/json,{}'],
+  ])('refuses an off-origin sidecar path (%s)', (_label, path) => {
+    // The path arrives inside a fetched document, so it is untrusted input.
+    // `//evil.example/x.json` starts with `/` and would otherwise have taken
+    // the rooted-path branch straight into `fetch`, loading reasoning from a
+    // third-party host -- the offline guarantee and INV-8 broken at once.
+    expect(() => resolveSidecarUrl('/replays/demo.command-log.json', path)).toThrow(/off-origin/);
+  });
+});
+
+describe('untrusted text never reaches innerHTML unescaped', () => {
+  it('escapes the failure message, which carries a field from the fetched log', async () => {
+    // `assertSchemaVersion` interpolates the document's own `schemaVersion`
+    // into its error. Story 4.6 hands the log source to the visitor, which
+    // makes this path attacker-reachable rather than theoretical.
+    const harness = createHarness({} as CommandLog, {
+      json: async () => ({ schemaVersion: '<img src=x onerror=alert(1)>' }),
+    });
+
+    await startup(harness.globals);
+
+    expect(harness.root.innerHTML).toContain('&lt;img src=x onerror=alert(1)&gt;');
+    expect(harness.root.innerHTML).not.toContain('<img');
+  });
+
+  it('escapes an agent id, which the log also supplies', async () => {
+    const { log } = await buildDemoBundle();
+    const harness = createHarness({
+      ...log,
+      agents: [{ ...log.agents[0], id: '<script>alert(1)</script>' }, log.agents[1]],
+    } as CommandLog);
+
+    await startup(harness.globals);
+
+    expect(harness.root.innerHTML).not.toContain('<script>alert');
   });
 });

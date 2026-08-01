@@ -93,8 +93,10 @@ body {
   border: var(--tb-border-width) solid var(--tb-ink);
   box-shadow: var(--tb-shadow);
   background: var(--tb-bg);
-  width: min(100%, 960px);
-  flex: 1 1 640px;
+  /* 3:1 against the panel. Equal columns would read as a dashboard; the fight
+   * is the subject and the annotation hangs off it. */
+  flex: 3 1 640px;
+  max-width: 960px;
 }
 
 .tb-canvas {
@@ -158,12 +160,12 @@ body {
 /* --- Reasoning panel ---------------------------------------------------- */
 
 .tb-reasoning {
-  flex: 1 1 320px;
+  flex: 1 1 300px;
   border: var(--tb-border-width) solid var(--tb-ink);
   box-shadow: var(--tb-shadow);
   background: var(--tb-bg);
   padding: var(--tb-space-2);
-  min-height: 200px;
+  min-height: 160px;
 }
 
 /* A model id is data, so it is set in the mono face. See docs/DESIGN.md. */
