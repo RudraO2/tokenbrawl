@@ -101,3 +101,30 @@ export type { CacheStats } from './caching';
 
 export { isRatingEligible, ratingEligibility } from './rating-eligibility';
 export type { RatableLog, RatingEligibility, RatingExclusion } from './rating-eligibility';
+
+// ---------------------------------------------------------------------------
+// Story 7.1: mirrored seeds and side swaps. A pairing played from one side
+// only cannot tell a side advantage in the Environment apart from a skill
+// difference, so coverage is a rating precondition (AC3) and the residual
+// side advantage is measured rather than assumed away (AC4).
+// ---------------------------------------------------------------------------
+
+export {
+  MINIMUM_MATCHES_PER_PAIRING,
+  MINIMUM_MIRRORED_SEEDS_PER_PAIRING,
+  isPairingRatable,
+  summarisePairingCoverage,
+} from './pairing-coverage';
+export type { CoverageMatch, PairingCoverage, PairingExclusion } from './pairing-coverage';
+
+export {
+  NEUTRAL_SIDE_SCORE_BASIS_POINTS,
+  side0Score,
+  summariseSideAdvantage,
+} from './side-advantage';
+export type {
+  MirroredPair,
+  SideAdvantageMatch,
+  SideAdvantageParams,
+  SideAdvantageSummary,
+} from './side-advantage';

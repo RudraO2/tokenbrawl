@@ -67,21 +67,78 @@ describe('the plan is a pure function of the config (AD-8)', () => {
 });
 
 describe('planTournament', () => {
-  it('is every unordered pair, over every seed', () => {
+  it('is every unordered pair, over every seed, from both sides (7.1 AC1)', () => {
     const planned = planTournament(CONFIG);
-    // 3 agents -> 3 pairs, times 3 seeds.
-    expect(planned).toHaveLength(9);
-    expect(new Set(planned.map((match) => match.matchId)).size).toBe(9);
+    // 3 agents -> 3 pairs, times 3 seeds, times 2 side swaps.
+    expect(planned).toHaveLength(18);
+    expect(new Set(planned.map((match) => match.matchId)).size).toBe(18);
   });
 
   it('is seed-major, so an interrupted run has completed whole seeds', () => {
     const seeds = planTournament(CONFIG).map((match) => match.seed);
-    expect(seeds).toStrictEqual([4101, 4101, 4101, 4102, 4102, 4102, 4103, 4103, 4103]);
+    expect(seeds).toStrictEqual([
+      4101, 4101, 4101, 4101, 4101, 4101, 4102, 4102, 4102, 4102, 4102, 4102, 4103, 4103, 4103,
+      4103, 4103, 4103,
+    ]);
   });
 
-  it('puts the lower-declared agent on side 0 (a known bias; Story 7.1 owns side swaps)', () => {
-    const first = planTournament(CONFIG)[0];
-    expect(first.agentIds).toStrictEqual(['bot:aggressive', 'bot:spacing']);
+  it('schedules exactly two Matches per pairing per seed, in opposite array positions (AC1)', () => {
+    const bySeedAndPairing = new Map<string, string[][]>();
+    for (const match of planTournament(CONFIG)) {
+      const key = `${String(match.seed)}|${[...match.agentIds].sort().join('|')}`;
+      const orientations = bySeedAndPairing.get(key) ?? [];
+      orientations.push([...match.agentIds]);
+      bySeedAndPairing.set(key, orientations);
+    }
+
+    // 3 pairings x 3 seeds.
+    expect(bySeedAndPairing.size).toBe(9);
+    for (const orientations of bySeedAndPairing.values()) {
+      expect(orientations).toHaveLength(2);
+      const [one, other] = orientations;
+      expect(other).toStrictEqual([one[1], one[0]]);
+    }
+  });
+
+  it('gives the two sides of one pairing and seed distinct matchIds (AC1)', () => {
+    for (const match of planTournament(CONFIG)) {
+      const mirror = planMatch(match.seed, [match.agentIds[1], match.agentIds[0]]);
+      expect(mirror.matchId).not.toBe(match.matchId);
+      // And the mirror is genuinely in the plan, not merely constructible.
+      expect(planTournament(CONFIG).map((entry) => entry.matchId)).toContain(mirror.matchId);
+    }
+  });
+
+  it('emits the two orientations adjacently, so an interruption cuts between pairs', () => {
+    // AD-9 makes plan order decide what a killed segment leaves behind. A
+    // one-sided pass followed by a mirroring pass would leave a whole
+    // tournament of one-sided data on exactly the interruption the scheduled
+    // workflow makes routine.
+    const planned = planTournament(CONFIG);
+    for (let index = 0; index < planned.length; index += 2) {
+      const left = planned[index];
+      const right = planned[index + 1];
+      expect(right.seed).toBe(left.seed);
+      expect(right.agentIds).toStrictEqual([left.agentIds[1], left.agentIds[0]]);
+    }
+  });
+
+  it('puts the lower-declared agent on side 0 of the first Match of each pair', () => {
+    const planned = planTournament(CONFIG);
+    expect(planned[0].agentIds).toStrictEqual(['bot:aggressive', 'bot:spacing']);
+    expect(planned[1].agentIds).toStrictEqual(['bot:spacing', 'bot:aggressive']);
+  });
+
+  it('gives every agent an equal number of Matches on each side (AC1)', () => {
+    const onSide0 = new Map<string, number>();
+    const onSide1 = new Map<string, number>();
+    for (const match of planTournament(CONFIG)) {
+      onSide0.set(match.agentIds[0], (onSide0.get(match.agentIds[0]) ?? 0) + 1);
+      onSide1.set(match.agentIds[1], (onSide1.get(match.agentIds[1]) ?? 0) + 1);
+    }
+    for (const agent of CONFIG.agents) {
+      expect(onSide0.get(agent.id)).toBe(onSide1.get(agent.id));
+    }
   });
 
   it('never pairs an agent with itself', () => {
@@ -114,7 +171,7 @@ async function commit(io: ReturnType<typeof createMemoryIo>, match: PlannedMatch
 describe('outstandingMatches (AC4, AD-9: the committed logs ARE the state)', () => {
   it('is the whole plan when nothing has been committed', async () => {
     const io = createMemoryIo();
-    expect(await outstandingMatches(planTournament(CONFIG), io, 'replays')).toHaveLength(9);
+    expect(await outstandingMatches(planTournament(CONFIG), io, 'replays')).toHaveLength(18);
   });
 
   it('drops exactly the Matches whose logs are committed, and nothing else', async () => {
@@ -124,7 +181,7 @@ describe('outstandingMatches (AC4, AD-9: the committed logs ARE the state)', () 
     await commit(io, planned[4]);
 
     const outstanding = await outstandingMatches(planned, io, 'replays');
-    expect(outstanding).toHaveLength(7);
+    expect(outstanding).toHaveLength(16);
     expect(outstanding.map((match) => match.matchId)).not.toContain(planned[0].matchId);
     expect(outstanding.map((match) => match.matchId)).not.toContain(planned[4].matchId);
   });
@@ -180,7 +237,7 @@ describe('outstandingMatches (AC4, AD-9: the committed logs ARE the state)', () 
 
   it('ignores unrelated files in the output directory', async () => {
     const io = createMemoryIo({ files: { 'replays/README.md': 'notes', 'replays/demo.command-log.json': '{}' } });
-    expect(await outstandingMatches(planTournament(CONFIG), io, 'replays')).toHaveLength(9);
+    expect(await outstandingMatches(planTournament(CONFIG), io, 'replays')).toHaveLength(18);
   });
 
   it('reads no file at all when the directory listing has nothing matching', async () => {
