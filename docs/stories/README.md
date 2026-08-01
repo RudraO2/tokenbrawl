@@ -37,8 +37,8 @@ Stories are executed in the order below. Each is self-contained: an agent with n
 | 4.4 token bank HUD | E4 | 4.3 | |
 | 4.5 timeline scrub | E4 | 4.4 | |
 | 4.6 BYOK run your own fight | E4 | 4.5, 3.5 | |
-| 4.7 BYOK model catalogue and custom models | E4 | 4.6 | Adds an OpenRouter adapter. Read its INV-8 note first. |
-| 4.8 resilient BYOK runner | E4 | 4.6 | Waits out a rate limit. Read its INV-1 note first. |
+| 4.7 BYOK model catalogue, custom models, Advanced endpoint | E4 | 4.6 | Fixes wrong committed limits. Read its INV-8 note **and** `docs/reports/byok-provider-limits.md` first. |
+| 4.8 self-pacing, rate-limit-surviving BYOK runner | E4 | 4.6 | Paces from quota headers. Read its INV-1 note first. |
 | 5.1 local CLI | E5 | 2.4 | Parallel with E3, E4 |
 | 5.2 resumable tournament runner | E5 | 5.1 | |
 | 5.3 scheduled CI tournament | E5 | 5.2 | **Needs human: Actions secrets** |
@@ -53,5 +53,6 @@ Stories are executed in the order below. Each is self-contained: an agent with n
 
 - Story 1.4 or 2.4 failing. Both are gates. Deepening the work is the fix; weakening the test is not.
 - Any story that seems to need a contract change.
+- Any story that would let a **tournament** reach a non-free-tier endpoint. Story 4.7 opens a visitor-supplied endpoint for BYOK only, on the recorded reading that INV-8 governs *this project's* cost; tournament configuration stays locked to the free-tier allowlist and `assertFreeTierEndpoint` is not to be loosened.
 - Any story that seems to need a server, database, worker, or WebSocket — that means the precompute design was misunderstood.
 - Stories marked **needs human** — API keys and repository secrets cannot be self-served. Do not stub past them and mark the story done.
