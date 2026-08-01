@@ -1,0 +1,37 @@
+{
+  "_comment": [
+    "A worked example of a Tokenbrawl CLI run config (Story 5.1).",
+    "",
+    "Run it with:",
+    "  npm run tokenbrawl -w packages/cli -- tournament --config tokenbrawl.example.json",
+    "",
+    "There is no field for an API key and there will not be one. Each Deployment",
+    "names an ENVIRONMENT VARIABLE via apiKeyEnv; the key is read from the",
+    "environment only, never written to a log, and redacted from anything the",
+    "command prints. A config file gets committed, pasted into an issue and",
+    "copied between machines -- a key belongs in none of those.",
+    "",
+    "seedBase/seedCount define the seed range. A tournament plays every unordered",
+    "pair of the agents below once per seed, and writes one Command Log per Match",
+    "into outputDir. Re-running the same command completes only what is missing:",
+    "the committed logs ARE the progress (AD-9).",
+    "",
+    "The deployment entry is commented out by being absent rather than present:",
+    "add it back once GROQ_API_KEY is exported.",
+    "  {",
+    "    \"id\": \"groq:llama-3.1-8b-instant\",",
+    "    \"kind\": \"deployment\",",
+    "    \"provider\": \"groq\",",
+    "    \"model\": \"llama-3.1-8b-instant\",",
+    "    \"apiKeyEnv\": \"GROQ_API_KEY\"",
+    "  }"
+  ],
+  "seedBase": 20260801,
+  "seedCount": 2,
+  "outputDir": "replays",
+  "agents": [
+    { "id": "bot:aggressive", "kind": "bot", "bot": "aggressive" },
+    { "id": "bot:spacing", "kind": "bot", "bot": "spacing" },
+    { "id": "bot:random", "kind": "bot", "bot": "random" }
+  ]
+}

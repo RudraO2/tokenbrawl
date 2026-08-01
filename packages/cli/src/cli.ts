@@ -8,7 +8,18 @@ import { createNodeIo } from './node-io';
  *
  * Run it with:
  *
- *   node --experimental-strip-types packages/cli/src/cli.ts tournament --config <path>
+ *   npm run tokenbrawl -w packages/cli -- tournament --config <path>
+ *
+ * which expands to
+ *
+ *   node --experimental-strip-types --no-warnings --import ./bin/register.mjs \
+ *        src/cli.ts tournament --config <path>
+ *
+ * The `--import` shim is not optional: this repo's TypeScript is written for
+ * `moduleResolution: "Bundler"`, and a plain `node` cannot resolve the bare
+ * `@tokenbrawl/contracts` alias, an extensionless relative import, a bare Ajv
+ * subpath, or a JSON import without an attribute. `bin/register.mjs` installs
+ * the hooks that close all four.
  *
  * Deliberately the thinnest file in the package, and the only one that is not
  * directly covered by a test: everything it could get wrong is in `main`,

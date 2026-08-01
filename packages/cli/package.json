@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "test": "vitest run",
-    "tokenbrawl": "node --experimental-strip-types src/cli.ts"
+    "tokenbrawl": "node --experimental-strip-types --no-warnings --import ./bin/register.mjs src/cli.ts"
   },
   "devDependencies": {
     "vitest": "^4.1.0"
