@@ -194,7 +194,7 @@ describe('a failed key produces no Match at all (AC3)', () => {
         seed: SEED,
         fetch: transport.fetch,
       }),
-    ).rejects.toThrow(/cannot be run from a browser/);
+    ).rejects.toThrow(/is not in this picker/);
     expect(transport.calls()).toHaveLength(0);
   });
 
@@ -432,5 +432,42 @@ describe('a visitor-supplied endpoint, end to end (4.7, AC5)', () => {
       }),
     ).rejects.toThrow(/not https/);
     expect(transport.calls()).toHaveLength(0);
+  });
+});
+
+
+describe('an unknown model produces no Match at all (4.7, AC7)', () => {
+  it('rejects naming the model, and builds no log', async () => {
+    // AC7's second half. The first half -- that the visitor is told *that
+    // specific thing* -- is asserted at the client; this is the half only a
+    // whole Match can show: there is no path from a failed call to a
+    // CommandLog, so "no partially-recorded Match" is structural rather than a
+    // guard someone could forget.
+    const transport = createFakeTransport({
+      statuses: [404],
+      body: () =>
+        JSON.stringify({
+          error: { message: 'model not found', type: 'invalid_request_error', code: 'model_not_found' },
+        }),
+    });
+
+    const outcome = await runByokMatch({
+      fighters: [
+        { provider: 'groq', model: 'gpt-oss-120b', apiKey: P1_KEY },
+        { provider: 'groq', model: 'llama-3.1-8b-instant', apiKey: P2_KEY },
+      ],
+      seed: SEED,
+      fetch: transport.fetch,
+    }).then(
+      (log) => ({ log, error: null as unknown }),
+      (error: unknown) => ({ log: null, error }),
+    );
+
+    expect(outcome.log).toBeNull();
+    expect(outcome.error).toBeInstanceOf(ByokKeyError);
+    expect((outcome.error as ByokKeyError).failure).toBe('unknown-model');
+    expect((outcome.error as ByokKeyError).model).toBe('gpt-oss-120b');
+    // Distinct from a generic provider error, which is the whole of AC7.
+    expect((outcome.error as ByokKeyError).message).toMatch(/does not serve that model/);
   });
 });

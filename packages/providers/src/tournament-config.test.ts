@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { assertFreeTierEndpoint } from './free-tier';
 import { validateTournamentConfig } from './tournament-config';
 import type { TournamentDeploymentConfig } from './tournament-config';
 
@@ -95,5 +96,53 @@ describe('validateTournamentConfig, degenerate input', () => {
     const result = validateTournamentConfig([]);
     expect(Object.isFrozen(result)).toBe(true);
     expect(Object.isFrozen(result.warnings)).toBe(true);
+  });
+});
+
+
+/**
+ * Story 4.7, AC8: "given tournament configuration, when anything in this story
+ * lands, then it still refuses every non-free-tier endpoint and still refuses
+ * OpenRouter, unchanged."
+ *
+ * Story 4.7 gave a *visitor* the ability to call any endpoint they like. This
+ * block is the assertion that none of that reached tournament configuration.
+ * It is deliberately here rather than only in `free-tier.test.ts`: the two
+ * halves of AC8 are one claim, and a reader checking it should find both in
+ * one place.
+ */
+describe('Story 4.7 changed nothing about what a tournament may configure (AC8)', () => {
+  it('still refuses an OpenRouter Deployment, ranked or not', () => {
+    for (const ranked of [true, false]) {
+      expect(() =>
+        validateTournamentConfig([{ id: 'or:any-model', provider: 'openrouter', ranked }]),
+      ).toThrow(/OpenRouter/);
+    }
+  });
+
+  it('still refuses every endpoint that is not on the free-tier allowlist', () => {
+    for (const [provider, endpoint] of [
+      ['groq', 'https://api.groq.com/openai/v1/dedicated/chat/completions'],
+      ['cerebras', 'https://api.cerebras.ai/v1/dedicated/chat/completions'],
+      ['groq', 'https://openrouter.ai/api/v1/chat/completions'],
+      ['groq', 'https://api.openai.com/v1/chat/completions'],
+    ] as const) {
+      expect(() => {
+        assertFreeTierEndpoint(provider, endpoint);
+      }).toThrow(/not on the free-tier allowlist/);
+    }
+  });
+
+  it('cannot be waved through by any extra argument', () => {
+    // The shape the story warned against: a flag threaded into the existing
+    // check, one edit away from "just this once" in tournament configuration.
+    // Story 4.7's answer was a separate factory in a file the package does not
+    // export, so this call must still throw however it is invoked.
+    const waveThrough = assertFreeTierEndpoint as unknown as (...args: unknown[]) => void;
+    for (const extra of [true, 'force', { allow: true }, 1]) {
+      expect(() => {
+        waveThrough('groq', 'https://api.openai.com/v1/chat/completions', undefined, extra);
+      }).toThrow(/not on the free-tier allowlist/);
+    }
   });
 });

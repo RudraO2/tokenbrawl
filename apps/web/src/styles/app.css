@@ -680,13 +680,23 @@ body {
   padding: 0 var(--tb-space-1) var(--tb-space-2);
 }
 
-.tb-byok-advanced > .tb-byok-summary {
+/*
+ * Scoped to `[open]`, and it has to be: the padding it cancels is only there
+ * when the disclosure is open, so an unscoped negative margin pulls the closed
+ * summary 8px past its own border on both sides.
+ */
+.tb-byok-advanced[open] > .tb-byok-summary {
   margin: 0 calc(-1 * var(--tb-space-1));
 }
 
 .tb-byok-discover {
   width: 100%;
   margin-top: var(--tb-space-2);
+}
+
+/* The preset picker and the URL field are two controls, not one. */
+.tb-byok-advanced .tb-byok-select {
+  margin-bottom: var(--tb-space-1);
 }
 
 /*

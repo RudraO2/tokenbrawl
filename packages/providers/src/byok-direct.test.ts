@@ -295,3 +295,31 @@ describe('the containment that stands in for the allowlist check (INV-8)', () =>
     expect(code).not.toContain('loadFreeTierConfig');
   });
 });
+
+describe('exactly one request per call, whatever happened (INV-1)', () => {
+  /**
+   * A finding from this story's own mutation pass, and it was a finding about
+   * the *tests* rather than the code.
+   *
+   * Adding a second `httpFetch` on the non-2xx branch -- the shape a
+   * well-meaning "just retry once" edit takes -- passed the whole suite. The
+   * code was right; nothing pinned it. INV-1 forbids a retry because it hands
+   * extra compute to whichever Deployment is worst at following the format,
+   * and that reasoning does not weaken because a human is watching this one.
+   */
+  it('issues no second request on any outcome a call can have', async () => {
+    for (const status of [200, 400, 401, 403, 404, 429, 500, 503]) {
+      const transport = createTransport(status, status === 200 ? RECORDED_200 : '{"error":{}}');
+      const client = createVisitorEndpointClient({
+        baseUrl: 'https://gw.example/v1',
+        apiKey: 'k',
+        model: 'm',
+        fetch: transport.fetch,
+        sleep: () => Promise.resolve(),
+      });
+
+      await client.complete(PROMPT_REQUEST).catch(() => undefined);
+      expect(transport.calls(), `status ${String(status)} issued more than one request`).toHaveLength(1);
+    }
+  });
+});

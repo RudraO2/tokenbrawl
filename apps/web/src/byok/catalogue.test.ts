@@ -29,7 +29,7 @@ describe('the picker offers only what a browser can reach (AC5)', () => {
 
   it('marks the unoffered providers with a reason, and names where they DO work (4.7)', () => {
     for (const option of byokCatalogue().filter((entry) => entry.access === 'cli-only')) {
-      expect(option.cliOnlyReason).toMatch(/Not in this picker/);
+      expect(option.cliOnlyReason).toMatch(/no (measured )?free-tier/);
       // Story 4.7's change to this text, and it is the substantive half:
       // neither is refused by CORS and both are OpenAI-compatible, so Advanced
       // reaches them. Telling someone a thing is impossible when it is one
@@ -47,8 +47,8 @@ describe('the picker offers only what a browser can reach (AC5)', () => {
   it('refuses a CLI-only provider before any request is built', () => {
     // The whole of "rather than failing at request time": this throws during
     // construction, with no endpoint resolved and no transport touched.
-    expect(() => byokProvider('openrouter')).toThrow(/cannot be run from a browser/);
-    expect(() => byokProvider('xai')).toThrow(/cannot be run from a browser/);
+    expect(() => byokProvider('openrouter')).toThrow(/is not in this picker/);
+    expect(() => byokProvider('xai')).toThrow(/is not in this picker/);
   });
 
   it('refuses a provider that is not in the catalogue at all', () => {
@@ -126,7 +126,7 @@ describe('every offered endpoint is on the free-tier allowlist (INV-8)', () => {
     const groq = byokCatalogue(modelless).find((option) => option.id === 'groq');
     expect(groq?.access).toBe('cli-only');
     expect(groq?.cliOnlyReason).toMatch(/lists no model for this provider/);
-    expect(() => byokProvider('groq', modelless)).toThrow(/cannot be run from a browser/);
+    expect(() => byokProvider('groq', modelless)).toThrow(/is not in this picker/);
   });
 
   it('drops a provider whose free-tier entry has been removed rather than guessing an endpoint', () => {

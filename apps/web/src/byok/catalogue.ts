@@ -173,13 +173,13 @@ const CLI_ONLY_PROVIDERS: readonly { readonly id: ProviderId; readonly label: st
     id: 'openrouter',
     label: 'OpenRouter',
     reason:
-      'Not in this picker — no measured free-tier row exists for it, and its free tier is reserved for the Metering Probe. Reachable under Advanced with your own key and base URL https://openrouter.ai/api/v1',
+      'no measured free-tier row exists for it, and its free tier is reserved for the Metering Probe. Reachable under Advanced with your own key and base URL https://openrouter.ai/api/v1',
   },
   {
     id: 'xai',
     label: 'xAI',
     reason:
-      'Not in this picker — no free-tier endpoint on the allowlist. Reachable under Advanced with your own key and base URL https://api.x.ai/v1',
+      'no free-tier endpoint on the allowlist. Reachable under Advanced with your own key and base URL https://api.x.ai/v1',
   },
 ];
 
@@ -308,7 +308,7 @@ export function byokCatalogue(config: FreeTierConfig = loadFreeTierConfig()): re
           modelListFamily: entry.modelListFamily,
           models: Object.freeze([] as ByokModelOption[]),
           cliOnlyReason:
-            'Not offered — free-tier.config.json lists no model for this provider that could finish one Match.',
+            'free-tier.config.json lists no model for this provider that could finish one Match.',
         });
       }
 
@@ -359,7 +359,12 @@ export function byokProvider(
     throw new Error(`No such provider: "${id}".`);
   }
   if (option.access === 'cli-only') {
-    throw new Error(`${option.label} cannot be run from a browser. ${option.cliOnlyReason ?? ''}`.trim());
+    // Not "cannot be run from a browser" any more: Story 4.7 reaches both of
+    // these through Advanced, and a refusal that overstates itself is how a
+    // visitor concludes the feature does not exist.
+    throw new Error(
+      `${option.label} is not in this picker: ${option.cliOnlyReason ?? ''}`.trim(),
+    );
   }
   return option;
 }

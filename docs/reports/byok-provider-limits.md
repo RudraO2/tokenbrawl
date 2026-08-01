@@ -127,3 +127,22 @@ Every number here came from a dashboard, and dashboards are the only honest
 source for two of the three providers. Re-capture at the start of each epic, or
 whenever a Match starts failing on quota in a way the table does not predict.
 Update `free-tier.config.json`'s `verifiedOn` in the same commit.
+
+## Derived values used by `free-tier.config.json`
+
+Every number in the tables above came off a dashboard. Two numbers the config
+file needs are **not** on any dashboard and are derived instead. They are listed
+here so a reader can tell a measurement from an arithmetic step, and so a later
+capture knows which rows to replace and which to recompute.
+
+| Value | Where it is used | How it is derived |
+|---|---|---|
+| Cerebras `requestsPerDay` = 1,000 | `providers.cerebras` | Cerebras publishes a token-per-day ceiling (1M TPD) and no request-per-day figure. 1,000,000 TPD ÷ ~1K tokens per Match call = 1,000 calls a day. |
+| Groq `defaults` = 30 / 250 / 6K | `providers.groq.defaults` | The tightest published number in each column across the Groq table (250 RPD from `groq/compound`, 6K TPM from the 8B row). A model with no row of its own is a model nobody measured, and pacing it against the workhorse's allowance is how a day's quota goes in an hour. Story 4.7's model discovery makes that case ordinary rather than exceptional. |
+| Google `defaults` = 15 / 500 / 16K | `providers.google-ai-studio.defaults` | Same rule, over the offered Google rows. |
+
+`packages/providers/src/match-feasibility.ts` reproduces the **Matches/day** and
+**Minutes/match** columns of the tables above from these numbers, and its tests
+assert against values transcribed from this file rather than against itself. If
+a future capture changes a row here and that module's tests stay green, the
+tests are the thing that is wrong.

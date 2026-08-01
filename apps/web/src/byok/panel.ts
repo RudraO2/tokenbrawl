@@ -113,8 +113,11 @@ const DEFAULT_SEED = 4_601;
 const FIGHTER_LABELS = ['Fighter 1', 'Fighter 2'] as const;
 
 function optionMarkup(option: ByokProviderOption): string {
+  // `ADVANCED ONLY` rather than 4.6's `CLI ONLY`: Story 4.7 reaches both of
+  // these from a browser through the Advanced disclosure, so the old label was
+  // contradicted by the sentence printed underneath the picker.
   const label =
-    option.access === 'cli-only' ? `${option.label} — CLI ONLY` : option.label;
+    option.access === 'cli-only' ? `${option.label} — ADVANCED ONLY` : option.label;
   // A CLI-only provider is listed and disabled, never hidden. AC5 asks for the
   // visitor to be told the provider cannot run here; a missing row tells them
   // nothing and sends them looking for it.
@@ -136,9 +139,13 @@ export function cliOnlyNotice(catalogue: readonly ByokProviderOption[]): string 
   if (excluded.length === 0) {
     return '';
   }
+  // The lead-in used to read "Not runnable in a browser", which Story 4.7 made
+  // false in one sentence: the reasons beside it now name the base URL that
+  // works. Found by reading the built page, not by a test -- both halves were
+  // individually correct and only their juxtaposition was a lie.
   return escapeHtml(
-    `Not runnable in a browser: ${excluded
-      .map((option) => `${option.label} (${option.cliOnlyReason ?? ''})`)
+    `Not in this picker, and where each one does work: ${excluded
+      .map((option) => `${option.label} — ${option.cliOnlyReason ?? ''}`)
       .join(' ')}`,
   );
 }
@@ -511,6 +518,14 @@ export function mountByokPanel(host: ByokHost, deps: ByokPanelDeps): ByokPanel {
     if (button.disabled === true) {
       return;
     }
+    // Not while a Match is in flight. Only the run button is disabled during a
+    // Match, so this is reachable -- and it would spend a request against the
+    // very quota the Match is running on, and overwrite the live region's
+    // running message with one about models. Found by walking the branch, not
+    // by a failing test.
+    if (panelState.value === 'running') {
+      return;
+    }
     const fighter = fighterFrom(agentIndex);
     const apiKey = (keyNodes[agentIndex].value ?? '').trim();
 
@@ -536,7 +551,7 @@ export function mountByokPanel(host: ByokHost, deps: ByokPanelDeps): ByokPanel {
         catalogue.find((option) => option.id === fighter.provider),
       );
       say(
-        panelState.value === 'running' ? 'running' : 'idle',
+        'idle',
         `${FIGHTER_LABELS[agentIndex]}: ${String(discovered[agentIndex].length)} models this key can use.`,
       );
     } catch (error) {

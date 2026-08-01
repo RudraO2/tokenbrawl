@@ -103,10 +103,10 @@ function mountWithTransport(overrides: { readonly storage?: KeyStorage } = {}) {
 }
 
 describe('the picker shows what can run here, and what cannot (AC5)', () => {
-  it('lists every CLI-only provider, labelled and disabled', () => {
+  it('lists every unofferable provider, labelled and disabled', () => {
     const markup = byokMarkup(byokCatalogue());
-    expect(markup).toContain('OpenRouter — CLI ONLY');
-    expect(markup).toContain('xAI — CLI ONLY');
+    expect(markup).toContain('OpenRouter — ADVANCED ONLY');
+    expect(markup).toContain('xAI — ADVANCED ONLY');
     // Disabled, not absent. A hidden provider tells a visitor nothing.
     expect(markup).toMatch(/<option value="openrouter" disabled>/);
     expect(markup).toMatch(/<option value="xai" disabled>/);
@@ -119,7 +119,11 @@ describe('the picker shows what can run here, and what cannot (AC5)', () => {
     const notice = cliOnlyNotice(byokCatalogue());
     expect(notice).toContain('OpenRouter');
     expect(notice).toContain('xAI');
-    expect(notice).toMatch(/Not in this picker/);
+    // The lead-in and the reasons must agree: 4.7 makes both reachable under
+    // Advanced, so a notice that said 'not runnable in a browser' would be
+    // contradicted by its own parenthesis.
+    expect(notice).toMatch(/Not in this picker, and where each one does work/);
+    expect(notice).toMatch(/Advanced/);
     expect(byokMarkup(byokCatalogue())).toContain(notice);
   });
 
@@ -551,6 +555,43 @@ describe('fetch my models (4.7, AC4)', () => {
     host.node('[data-provider="0"]').value = 'cerebras';
     host.fire('[data-provider="0"]', 'change');
     expect(host.node('[data-model="0"]').innerHTML).not.toContain('a-brand-new-model');
+  });
+
+  it('refuses to fetch while a Match is in flight', async () => {
+    // Only the run button is disabled during a Match, so this is reachable --
+    // and it would spend a request against the very quota the Match is running
+    // on, and overwrite the live region's running message with one about
+    // models. Found by walking the branch rather than by a failing test.
+    const host = createHost();
+    const asked: string[] = [];
+    const gate: { release: () => void } = { release: (): void => undefined };
+    const held = new Promise<never>((_, reject) => {
+      gate.release = (): void => reject(new Error('stopped on purpose'));
+    });
+
+    const panel = mountByokPanel(host, {
+      onLog: (): void => undefined,
+      run: () => held,
+      discover: (config) => {
+        asked.push(config.provider);
+        return Promise.resolve(['a-brand-new-model']);
+      },
+    });
+    host.node('[data-key="0"]').value = 'k1';
+    host.node('[data-key="1"]').value = 'k2';
+
+    const running = panel.submit();
+    expect(panel.state()).toBe('running');
+    await panel.discover(0);
+    expect(asked).toStrictEqual([]);
+    expect(host.node('[data-model="0"]').innerHTML).not.toContain('a-brand-new-model');
+
+    gate.release();
+    await running;
+
+    // And it works again once the Match is over.
+    await panel.discover(0);
+    expect(asked).toStrictEqual(['groq']);
   });
 
   it('leaves the other fighter picker alone', async () => {

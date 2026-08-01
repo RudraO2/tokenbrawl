@@ -211,7 +211,7 @@ describe('every failure names a key and a reason (AC3)', () => {
         apiKey: KEY,
         fetch: transport.fetch,
       }),
-    ).toThrow(/cannot be run from a browser/);
+    ).toThrow(/is not in this picker/);
     expect(transport.calls()).toHaveLength(0);
   });
 
