@@ -21,11 +21,20 @@ secrets.json
 # Local Claude Code settings (machine-specific)
 .claude/settings.local.json
 
-# Vendored BMad agent skills — reinstallable tooling, ~4.8MB of noise in a
-# repo meant to showcase the product. Kept on disk, out of Git.
-# `_bmad/` (config + scripts) and `_bmad-output/` (planning artifacts) ARE committed.
+# BMad tooling and its planning artifacts — the scaffolding this project was
+# built WITH, not the project itself. Kept on disk (the sprint status and specs
+# are how work resumes between sessions) and out of Git: a repo meant to
+# showcase the product should contain the product.
+#
+# Reversed a deliberate earlier decision to commit `_bmad/` and `_bmad-output/`.
+# They were purged from history before the first push; if you need them on
+# another machine, copy the directories across rather than committing them.
 .agents/
 .claude/skills/
+_bmad/
+_bmad-output/
+PROMPT.md
+ralph-loop.md
 
 # Test and coverage output
 coverage/
