@@ -104,6 +104,23 @@ third-party host is a dependency someone else can withdraw.
 Bricolage's licence was read from the project's own `OFL.txt`, which is
 committed beside the font.
 
+### The hero's pixel font
+
+| Asset | Source | Licence | Checked |
+|---|---|---|---|
+| Tokenbrawl 5x7 hero font (`apps/web/src/hero/font.ts`) | Authored in this repo (Story 7.4) | **Repository licence** — no third-party rights | 2026-08-02 |
+
+The README hero is a GIF rasterised by this project, and a raster needs glyphs
+as pixels. Turning a `woff2` into pixels needs a font engine, which is a
+dependency `apps/web` may not take (INV-8, and its two-devDependency budget), so
+the 5x7 glyph table was written here — the same choice `createBlockArtist` made
+about fighter art, and for the same reason: an asset authored in the repository
+has no licence to verify.
+
+It is uppercase-only, it is not Departure Mono, and it is not a substitute for
+it: the page still loads the real face, and this table exists only so the hero
+can be rendered without a browser.
+
 **Departure Mono is held to a weaker standard, and the difference is
 recorded rather than smoothed over.** The distributed file ships no `OFL.txt`
 and embeds no licence string in its name table. The licence claim comes from

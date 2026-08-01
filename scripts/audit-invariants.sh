@@ -399,6 +399,61 @@ else
   skip "no packages/ yet"
 fi
 
+# --- INV-6: the README carries the ranking disclosure -----------------------
+#
+# INV-6 names this check itself: "The README contains the ranking-deployments
+# disclosure." Story 7.4 wrote the README and the hero it opens with, and every
+# claim in it is one line away from being softened by a later story with no
+# behavioural test noticing -- the disclosure deleted, a citation dropped, a
+# novelty claim added, or the hero reference left pointing at a file that no
+# longer exists.
+#
+# `packages/cli/src/docs-discipline.test.ts` runs the same checks from inside
+# the suite, for the same reason every other discipline rule in this repo is
+# checked twice.
+echo
+echo "INV-6  the README ranks Deployments, cites prior work, and claims nothing more"
+if [ ! -f README.md ]; then
+  fail "no README.md -- INV-6's disclosure has nowhere to live"
+else
+  readme_broken=""
+
+  grep -qiE 'ranks Deployments, not models' README.md \
+    || readme_broken="$readme_broken missing-ranking-deployments-disclosure"
+  grep -qiE 'quantised weights' README.md \
+    || readme_broken="$readme_broken missing-quantised-weights-disclosure"
+
+  # The bounded claim, and the vocabulary that would turn it into a novelty
+  # claim. AC3 forbids the latter outright.
+  grep -qiE 'latency-fair head-to-head harness' README.md \
+    || readme_broken="$readme_broken missing-the-bounded-claim"
+  if grep -qiE '\b(novel|novelty|unprecedented|groundbreaking|revolutionary|breakthrough|state[- ]of[- ]the[- ]art)\b' README.md; then
+    readme_broken="$readme_broken contains-a-novelty-claim"
+  fi
+
+  # Prior work, by name. Dropping one is a one-line edit that reads as tidying.
+  for citation in 'llm-colosseum' 'Win Fast or Lose Slow' 'Orak' 'TALE' 'CostBench' 'CATArena' 'CodeToPlay' 'LLM-PSRO'; do
+    grep -qF "$citation" README.md || readme_broken="$readme_broken missing-citation:${citation// /-}"
+  done
+
+  # The hero, and the honesty label that has to travel with it. A reference to
+  # a file that does not exist renders as a broken image at the top of the page.
+  hero_reference=$(grep -oE '^!\[[^]]*\]\([^)]+\)' README.md | head -1 | sed -E 's/.*\((.*)\)/\1/')
+  if [ -z "$hero_reference" ]; then
+    readme_broken="$readme_broken no-hero-image-reference"
+  elif [ ! -f "$hero_reference" ]; then
+    readme_broken="$readme_broken hero-image-missing:$hero_reference"
+  fi
+  grep -qiE 'scripted stand-in' README.md \
+    || readme_broken="$readme_broken hero-is-not-labelled-as-a-scripted-stand-in"
+
+  if [ -n "$readme_broken" ]; then
+    fail "README claims weakened:$readme_broken"
+  else
+    pass "README discloses the ranking basis, cites its prior work, labels the hero, and claims no novelty"
+  fi
+fi
+
 # --- INV-7: identical scaffolds --------------------------------------------
 #
 # Scope widened from `packages/` to `packages/ apps/` in Story 4.6, closing a
