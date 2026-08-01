@@ -62,12 +62,21 @@ class UsageError extends Error {}
  * a mistyped `--seeds 4101` that silently ran the wrong thing is worse than a
  * refusal.
  */
+/** `--help` and `-h` are commands wearing a flag's clothes, and they are what people type. */
+const HELP_TOKENS: readonly string[] = ['help', '--help', '-h'];
+
 export function parseArgs(argv: readonly string[]): ParsedArgs {
   if (argv.length === 0) {
     throw new UsageError('No command given.');
   }
 
   const [command, ...rest] = argv;
+  // Checked before the leading-dash rule below, which would otherwise reject
+  // `--help` as "an option before the command" -- and the `--help` branch in
+  // `main` would be unreachable, which is exactly what it was.
+  if (HELP_TOKENS.includes(command)) {
+    return { command: 'help', options: {} };
+  }
   if (command.startsWith('-')) {
     throw new UsageError(`Expected a command before any option, got "${command}".`);
   }
@@ -112,10 +121,21 @@ function assertKnownOptions(options: Readonly<Record<string, string>>, allowed: 
   }
 }
 
+/**
+ * The frozen schema's `seed` is an unsigned 32-bit integer, and the bound is
+ * checked *here* rather than being left to `buildCommandLog`.
+ *
+ * Without this, `--seed 5000000000` plays an entire Match -- provider calls,
+ * quota and all -- and is then rejected by schema validation on the very last
+ * line, with nothing written. The Match is the expensive part; the rejection
+ * belongs before it.
+ */
+const MAX_SEED = 4_294_967_295;
+
 function parseSeed(raw: string): number {
   const seed = Number(raw);
-  if (!Number.isSafeInteger(seed) || seed < 0) {
-    throw new UsageError(`--seed must be a whole number >= 0; got "${raw}".`);
+  if (!Number.isSafeInteger(seed) || seed < 0 || seed > MAX_SEED) {
+    throw new UsageError(`--seed must be a whole number between 0 and ${String(MAX_SEED)}; got "${raw}".`);
   }
   return seed;
 }
@@ -136,7 +156,16 @@ function parsePair(raw: string): readonly [string, string] {
 }
 
 function withOutputOverride(config: RunConfig, out: string | undefined): RunConfig {
-  return out === undefined ? config : Object.freeze({ ...config, outputDir: out });
+  if (out === undefined) {
+    return config;
+  }
+  // `--out ""` is a legal token that `parseArgs` cannot distinguish from a
+  // real directory, and it would quietly scatter Command Logs across the
+  // working directory rather than failing.
+  if (out.trim() === '') {
+    throw new UsageError('--out needs a directory name.');
+  }
+  return Object.freeze({ ...config, outputDir: out });
 }
 
 function summarise(io: CliIo, label: string, summary: RunSummary): void {
@@ -212,7 +241,7 @@ export async function main(argv: readonly string[], io: CliIo, deps: MainDeps = 
     return EXIT_USAGE;
   }
 
-  if (parsed.command === 'help' || parsed.command === '--help') {
+  if (parsed.command === 'help') {
     io.out(USAGE);
     return EXIT_OK;
   }

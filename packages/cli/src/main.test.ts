@@ -54,6 +54,18 @@ describe('parseArgs', () => {
   it('rejects an empty argv', () => {
     expect(() => parseArgs([])).toThrow(/No command given/);
   });
+
+  it('treats --help and -h as the help command, not as an option before a command', () => {
+    // The leading-dash rule used to reject these, which made `main`'s own
+    // `--help` branch unreachable -- and `--help` is what people type.
+    for (const token of ['help', '--help', '-h']) {
+      expect(parseArgs([token])).toStrictEqual({ command: 'help', options: {} });
+    }
+  });
+
+  it('tolerates whitespace around the two ids in --agents', () => {
+    expect(parseArgs(['match', '--agents', 'a, b']).options['agents']).toBe('a, b');
+  });
 });
 
 describe('main: usage and errors', () => {
@@ -101,6 +113,42 @@ describe('main: usage and errors', () => {
     );
     expect(code).toBe(EXIT_USAGE);
     expect(memory.stderr[0]).toContain('on both sides');
+  });
+
+  it('prints usage and exits 0 for --help and -h', async () => {
+    for (const token of ['--help', '-h']) {
+      const memory = io();
+      expect(await main([token], memory)).toBe(EXIT_OK);
+      expect(memory.stdout.join('\n')).toContain(USAGE);
+    }
+  });
+
+  it('exits 2 when --config is missing', async () => {
+    const memory = io();
+    expect(await main(['tournament'], memory)).toBe(EXIT_USAGE);
+    expect(memory.stderr[0]).toContain('--config is required');
+  });
+
+  it('exits 2 for a seed past the frozen schema maximum, before playing the Match', async () => {
+    const memory = io();
+    const code = await main(
+      ['match', '--config', 'run.json', '--seed', '5000000000', '--agents', 'bot:aggressive,bot:spacing'],
+      memory,
+    );
+    expect(code).toBe(EXIT_USAGE);
+    expect(memory.stderr[0]).toContain('between 0 and 4294967295');
+    // The point of checking early: nothing ran and nothing was written.
+    expect(logsIn(memory)).toHaveLength(0);
+  });
+
+  it('exits 2 for an empty --out rather than scattering logs across the working directory', async () => {
+    const memory = io();
+    const code = await main(
+      ['match', '--config', 'run.json', '--seed', '4101', '--agents', 'bot:aggressive,bot:spacing', '--out', '  '],
+      memory,
+    );
+    expect(code).toBe(EXIT_USAGE);
+    expect(logsIn(memory)).toHaveLength(0);
   });
 
   it('exits 1 when --agents names an id the config does not declare', async () => {
@@ -291,6 +339,75 @@ describe('AC3 through main', () => {
     for (const contents of memory.files.values()) {
       expect(contents).not.toContain(KEY);
     }
+  });
+
+  it('refuses to write a log the provider echoed the key into, through main itself', async () => {
+    // The guard lives in `main`, one wrapper away from every call site, and
+    // this is the test that pins it there: `run.test.ts` proves `guardSecrets`
+    // works, but only this proves `main` actually applies it to what it writes.
+    const memory = createMemoryIo({
+      files: { 'run.json': DEPLOYMENT_CONFIG },
+      env: { GROQ_API_KEY: KEY },
+    });
+    const echoing: HttpFetch = (url, request) =>
+      Promise.resolve({
+        status: 200,
+        headers: { get: () => null },
+        text: () =>
+          Promise.resolve(
+            JSON.stringify({
+              id: 'chatcmpl-1',
+              model: 'llama-3.1-8b-instant',
+              choices: [
+                {
+                  index: 0,
+                  message: {
+                    role: 'assistant',
+                    content: `ACTION: attack\n<!-- echoed ${JSON.stringify(request.headers)} ${url} -->`,
+                  },
+                  finish_reason: 'stop',
+                },
+              ],
+              usage: { prompt_tokens: 500, completion_tokens: 7, total_tokens: 507 },
+            }),
+          ),
+      });
+
+    expect(await main(['tournament', '--config', 'run.json'], memory, { fetch: echoing })).toBe(1);
+    expect(logsIn(memory)).toHaveLength(0);
+    expect(memory.stderr.join('\n')).toContain('contains a provider API key');
+  });
+
+  it('resolves every Deployment’s key before the first Match, not on first use', async () => {
+    // The roster's only Deployment appears in the *last* pairing. With lazy
+    // resolution the two bot-vs-bot Matches ahead of it would run to
+    // completion first, and a tournament against a real provider would have
+    // burned quota before saying the key was missing.
+    const memory = createMemoryIo({
+      files: {
+        'run.json': JSON.stringify({
+          seedBase: 4101,
+          seedCount: 1,
+          outputDir: 'replays',
+          agents: [
+            { id: 'bot:aggressive', kind: 'bot', bot: 'aggressive' },
+            { id: 'bot:spacing', kind: 'bot', bot: 'spacing' },
+            { id: 'bot:random', kind: 'bot', bot: 'random' },
+            {
+              id: 'groq:llama-3.1-8b-instant',
+              kind: 'deployment',
+              provider: 'groq',
+              model: 'llama-3.1-8b-instant',
+              apiKeyEnv: 'GROQ_API_KEY',
+            },
+          ],
+        }),
+      },
+    });
+
+    expect(await main(['tournament', '--config', 'run.json'], memory, { fetch: quietFetch })).toBe(1);
+    expect(logsIn(memory)).toHaveLength(0);
+    expect(memory.stderr[0]).toContain('GROQ_API_KEY');
   });
 
   it('redacts a key that reached an error message', async () => {
