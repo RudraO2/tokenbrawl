@@ -383,7 +383,10 @@ describe('the panel refuses what would fail at request time', () => {
     await panel.submit();
     expect(host.node('[data-status]').innerHTML).toContain('Fighter 2');
     expect(host.node('[data-status]').innerHTML).toContain('Cerebras');
-    expect(host.node('[data-status]').innerHTML).toContain('out of quota');
+    // The detail, verbatim. The sentence around it belongs to `failureSentence`
+    // and is asserted there -- this test is about the panel not editing either.
+    expect(host.node('[data-status]').innerHTML).toContain('quota exhausted');
+    expect(panel.state()).toBe('failed');
   });
 });
 

@@ -78,8 +78,19 @@ export interface ByokHost {
   querySelector(selectors: string): ByokNode | null;
 }
 
-/** Idle, running, and the two terminal states. Nothing here is a duration. */
-export type ByokState = 'idle' | 'running' | 'failed' | 'done';
+/**
+ * Idle, running, waiting, and the two terminal states. Nothing here is a
+ * duration, and `waiting` is the one that had to be designed rather than named.
+ *
+ * A BYOK Match meets a rate limit every time by arithmetic (Story 4.8), so a
+ * visitor *will* watch one of these. The obvious things to show -- a countdown,
+ * "retrying in 12s", "waiting for Gemini" -- are all forbidden by INV-3: the
+ * page may never hint at how long a Deployment takes. What is left is a state
+ * and a count of calls already made, which is also the only thing the visitor
+ * actually needs, because their real question is whether the thirty calls they
+ * have already paid for are about to be thrown away.
+ */
+export type ByokState = 'idle' | 'running' | 'waiting' | 'failed' | 'done';
 
 export interface ByokPanelDeps {
   /** Handed the log of a completed Match. `startup.ts` re-mounts the player with it. */
@@ -111,6 +122,15 @@ export interface ByokPanel {
 const DEFAULT_SEED = 4_601;
 
 const FIGHTER_LABELS = ['Fighter 1', 'Fighter 2'] as const;
+
+/**
+ * Said once when the Match starts and again each time a wait ends, so a visitor
+ * who looked away during a pause is not left reading the pause message. A
+ * constant because two copies of it would drift, and because the resume must
+ * announce the *same* state the run announced.
+ */
+const RUNNING_MESSAGE =
+  'Running. Every Decision Point is one call to each provider; nothing is recorded anywhere but this tab.';
 
 function optionMarkup(option: ByokProviderOption): string {
   // `ADVANCED ONLY` rather than 4.6's `CLI ONLY`: Story 4.7 reaches both of
@@ -402,6 +422,17 @@ export function mountByokPanel(host: ByokHost, deps: ByokPanelDeps): ByokPanel {
   // rendering that this function otherwise has none of.
   seedNode.value = String(DEFAULT_SEED);
 
+  /**
+   * Whether a Match is in flight, which is `running` **or** `waiting`.
+   *
+   * A predicate rather than a comparison at each site: Story 4.8 added a second
+   * in-flight state, and every `=== 'running'` guard in this file was a place
+   * where a paused Match would have looked idle -- re-runnable from the button,
+   * and open to a "fetch my models" that would spend a request against the very
+   * quota the Match is waiting on.
+   */
+  const inFlight = (): boolean => panelState.value === 'running' || panelState.value === 'waiting';
+
   const say = (state: ByokState, message: string): void => {
     panelState.value = state;
     statusNode.innerHTML = escapeHtml(message);
@@ -523,7 +554,10 @@ export function mountByokPanel(host: ByokHost, deps: ByokPanelDeps): ByokPanel {
     // very quota the Match is running on, and overwrite the live region's
     // running message with one about models. Found by walking the branch, not
     // by a failing test.
-    if (panelState.value === 'running') {
+    //
+    // `inFlight` rather than `=== 'running'`: a Match paused on a rate limit is
+    // the *worst* moment to spend another request on the same quota.
+    if (inFlight()) {
       return;
     }
     const fighter = fighterFrom(agentIndex);
@@ -581,12 +615,12 @@ export function mountByokPanel(host: ByokHost, deps: ByokPanelDeps): ByokPanel {
   });
 
   const submit = async (): Promise<void> => {
-    if (panelState.value === 'running') {
+    if (inFlight()) {
       return;
     }
     runNode.disabled = true;
     progressNode.innerHTML = '';
-    say('running', 'Running. Every Decision Point is one call to each provider; nothing is recorded anywhere but this tab.');
+    say('running', RUNNING_MESSAGE);
 
     const fighterKeys: [string, string] = [keyNodes[0].value ?? '', keyNodes[1].value ?? ''];
 
@@ -601,6 +635,22 @@ export function mountByokPanel(host: ByokHost, deps: ByokPanelDeps): ByokPanel {
           // Not a live region, and deliberately a count of calls rather than a
           // share of the Match or anything with a clock in it (INV-3).
           progressNode.innerHTML = `${String(calls)} calls made`;
+          // A completed call is what ends a wait. Announced only on the
+          // transition, so the live region is not rewritten once per call --
+          // Story 4.5 settled that a fast-cycling `aria-live` region is worse
+          // for a screen-reader user than silence.
+          if (panelState.value === 'waiting') {
+            say('running', RUNNING_MESSAGE);
+          }
+        },
+        onWait: (calls) => {
+          // AC5, and every word of it is load-bearing. A state and a count of
+          // completed calls; no seconds, no estimate, no countdown, and no
+          // mention of which provider or which fighter is waiting (INV-3).
+          say(
+            'waiting',
+            `Waiting for a provider quota to refill. ${String(calls)} calls made so far, and none of them are lost — the Match resumes at the same Decision Point.`,
+          );
         },
       });
 

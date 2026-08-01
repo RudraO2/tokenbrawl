@@ -17,6 +17,8 @@ import { requestBody } from '../../../../packages/providers/src/http';
  * scaffolding, imported only by `*.test.ts`, and never reaches the bundle.
  */
 
+const RATE_LIMITED = 429;
+
 export interface RecordedCall {
   readonly url: string;
   readonly headers: Readonly<Record<string, string>>;
@@ -63,11 +65,29 @@ function headersOf(entries: Readonly<Record<string, string>>): HttpResponse['hea
   };
 }
 
+/** A 429 body in the shape `quotaFrom`/`rateLimitMessage` read (Story 3.2). */
+export function rateLimitBody(message = 'Rate limit reached for tokens per minute (TPM).'): string {
+  return JSON.stringify({ error: { type: 'tokens', message } });
+}
+
 export interface FakeTransportConfig {
   /** Status per call, in order. The last value repeats once the list is exhausted. */
   readonly statuses?: readonly number[];
   readonly body?: (call: number) => string;
   readonly responseHeaders?: Readonly<Record<string, string>>;
+  /**
+   * Story 4.8. Call indices (0-based) that answer 429 whatever `statuses` says.
+   *
+   * A separate knob rather than a longer `statuses` array because the whole
+   * point of a repeated call is that it *shifts every later index*: writing
+   * "the fifth call is refused" as position 4 of a status list stops being true
+   * the moment position 4 is retried. This is indexed the same way, but it is
+   * the only thing the test has to keep straight, and `rateLimitAt` reads as the
+   * script it is.
+   */
+  readonly rateLimitAt?: readonly number[];
+  /** Headers per call index. Takes precedence over `responseHeaders` when given. */
+  readonly headersFor?: (call: number) => Readonly<Record<string, string>>;
   /** When set, `fetch` rejects the way a cross-origin refusal or an offline tab does. */
   readonly rejectWith?: Error;
 }
@@ -90,11 +110,14 @@ export function createFakeTransport(config: FakeTransportConfig = {}): FakeTrans
       return Promise.reject(config.rejectWith);
     }
     const index = calls.length - 1;
-    const status = statuses[Math.min(index, statuses.length - 1)];
-    const bodyText = config.body?.(index) ?? chatCompletionBody('ACTION: attack');
+    const refused = config.rateLimitAt?.includes(index) === true;
+    const status = refused ? RATE_LIMITED : statuses[Math.min(index, statuses.length - 1)];
+    const bodyText = refused
+      ? rateLimitBody()
+      : (config.body?.(index) ?? chatCompletionBody('ACTION: attack'));
     return Promise.resolve({
       status,
-      headers: headersOf(config.responseHeaders ?? {}),
+      headers: headersOf(config.headersFor?.(index) ?? config.responseHeaders ?? {}),
       text: (): Promise<string> => Promise.resolve(bodyText),
     });
   };

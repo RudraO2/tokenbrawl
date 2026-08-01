@@ -795,6 +795,27 @@ body {
   border-color: var(--tb-accent);
 }
 
+/*
+ * A Match paused on a provider quota (Story 4.8).
+ *
+ * Solid lime, ground ink: the same treatment `--done` gets, because both are
+ * states the visitor should read from across the room and neither is a failure.
+ * It is distinguished from `--done` by its words, not by a third colour -- one
+ * accent carries live/active throughout, and a decorative third would be scope
+ * creep.
+ *
+ * Deliberately static. A pulse, a shimmer or any animated "waiting" affordance
+ * would run for exactly as long as the pause, which is the page encoding a
+ * duration by another route -- INV-3 forbids that as surely as a countdown
+ * would be forbidden.
+ */
+.tb-byok-status--waiting {
+  background: var(--tb-accent);
+  color: var(--tb-bg);
+  box-shadow: var(--tb-shadow);
+  font-weight: 800;
+}
+
 .tb-byok-status--done {
   background: var(--tb-accent);
   color: var(--tb-bg);

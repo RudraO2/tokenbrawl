@@ -17,15 +17,24 @@ const GROQ_ORIGIN = 'https://api.groq.com';
 
 function groqClient(overrides: Partial<Parameters<typeof createByokClient>[0]> = {}) {
   const transport = createFakeTransport();
+  // Story 4.8: every wait this file provokes is recorded as a number instead of
+  // being served by a timer. That makes the whole pacing path run in zero time
+  // *and* makes "it did not wait" an assertion rather than an absence -- which
+  // is exactly what the 401 and daily-quota cases need to prove.
+  const waits: number[] = [];
   const client = createByokClient({
     agentIndex: 0,
     provider: 'groq',
     model: 'llama-3.1-8b-instant',
     apiKey: KEY,
     fetch: transport.fetch,
+    sleep: (milliseconds: number): Promise<void> => {
+      waits.push(milliseconds);
+      return Promise.resolve();
+    },
     ...overrides,
   });
-  return { client, transport };
+  return { client, transport, waits };
 }
 
 const REQUEST = { system: 'system', user: 'user', maxTokens: undefined };
@@ -118,10 +127,12 @@ describe('every failure names a key and a reason (AC3)', () => {
     await expect(client.complete(REQUEST)).rejects.toMatchObject({ failure: 'invalid-key' });
   });
 
-  it('calls a 429 rate-limited, and does not let it become a Parse Failure', async () => {
+  it('never lets a 429 become a Parse Failure, whichever way it ends', async () => {
     // The tournament adapter *resolves* a 429 so an unattended Match can carry
-    // on with the Fallback Action. Here that would publish a Match the
-    // visitor's quota never played, so it must reject instead.
+    // on with the Fallback Action. That has never been right here -- it would
+    // publish a Match the visitor's quota never played. Story 4.8 changed what
+    // happens *instead* (wait and repeat rather than fail outright); it did not
+    // change this, and this is the half that matters for the Command Log.
     const transport = createFakeTransport({
       statuses: [429],
       body: () => 'Rate limit reached for model llama-3.1-8b-instant',
@@ -132,9 +143,6 @@ describe('every failure names a key and a reason (AC3)', () => {
     expect(error).toBeInstanceOf(ByokKeyError);
     expect((error as ByokKeyError).failure).toBe('rate-limited');
     expect((error as ByokKeyError).detail).toContain('Rate limit reached');
-    // Exactly one request. A retry is what INV-1 forbids and what a quota
-    // failure most invites.
-    expect(transport.calls()).toHaveLength(1);
   });
 
   it('calls a rejected fetch unreachable, which is what a CORS refusal looks like', async () => {
@@ -216,9 +224,22 @@ describe('every failure names a key and a reason (AC3)', () => {
   });
 
   it('gives every failure a sentence with no status code in it', () => {
-    for (const failure of ['invalid-key', 'rate-limited', 'unreachable', 'provider-error'] as const) {
+    // Every member of the union, listed rather than derived: adding a failure
+    // and forgetting its sentence is the mistake this catches, and a list built
+    // from the switch itself would not catch it.
+    for (const failure of [
+      'invalid-key',
+      'rate-limited',
+      'unreachable',
+      'unknown-model',
+      'provider-error',
+      'daily-quota',
+      'cannot-finish',
+    ] as const) {
       expect(failureSentence(failure).length).toBeGreaterThan(20);
       expect(failureSentence(failure)).not.toMatch(/\b[45]\d\d\b/);
+      // INV-3 at the level of a sentence: no failure message may quote a wait.
+      expect(failureSentence(failure)).not.toMatch(/\b\d+\s*(ms|s|sec|second|minute|hour)/i);
     }
   });
 });

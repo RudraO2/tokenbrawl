@@ -4,8 +4,13 @@ import type {
   ProviderResponse,
 } from '../../../../packages/core/src/deployment';
 import type { FreeTierConfig } from '../../../../packages/providers/src/free-tier';
-import type { HttpFetch, HttpResponse } from '../../../../packages/providers/src/http';
-import { defaultHttpFetch } from '../../../../packages/providers/src/http';
+import type {
+  HttpFetch,
+  HttpHeaders,
+  HttpResponse,
+  Sleep,
+} from '../../../../packages/providers/src/http';
+import { defaultHttpFetch, defaultSleep } from '../../../../packages/providers/src/http';
 import { createGroqClient } from '../../../../packages/providers/src/groq';
 import { createCerebrasClient } from '../../../../packages/providers/src/cerebras';
 import { createGoogleClient } from '../../../../packages/providers/src/google';
@@ -15,8 +20,16 @@ import {
 } from '../../../../packages/providers/src/byok-direct';
 import { isUnknownModelResponse } from '../../../../packages/providers/src/model-errors';
 import type { RateLimitSignal } from '../../../../packages/providers/src/rate-limit';
-import { byokModelOption, byokProvider } from './catalogue';
+import { byokModelOption, byokProvider, modelOptionNotice } from './catalogue';
 import { redact } from './keys';
+import type { QuotaSnapshot, WaitBudget } from './pacing';
+import {
+  NO_QUOTA_REPORTED,
+  createWaitBudget,
+  isWaitable,
+  paceBeforeNextCallMs,
+  readQuotaHeaders,
+} from './pacing';
 
 /**
  * Story 4.6: the visitor's key, held in one closure, and every way a call can
@@ -60,6 +73,42 @@ import { redact } from './keys';
  * `isUnknownModelResponse` reads the status and the provider's machine-readable
  * error code and never its prose -- the same discipline that already keeps a
  * 401 from being reclassified when an adapter reworded a sentence.
+ *
+ * ---------------------------------------------------------------------------
+ * Story 4.8 reversed one of those two decisions, and only one.
+ * ---------------------------------------------------------------------------
+ *
+ * **A rate limit is no longer a failure.** It was, above, and the reasoning
+ * stands as far as it goes: a 429 absorbed into a Parse Failure publishes a
+ * Match the visitor's quota never played. But a BYOK Match does not
+ * *occasionally* meet a limit -- 60 calls worst case against 6-12K TPM meets one
+ * **every time, by arithmetic** -- so "fail the Match" meant thirty successful
+ * calls thrown away because the thirty-first arrived a second early.
+ *
+ * The 429 is now waited out and *the same call repeated*, and the boundary that
+ * makes this legal rather than an INV-1 breach is exactly one line below:
+ *
+ *     if (seen.rateLimit === null) { config.onCall?.(); return response; }
+ *
+ * INV-1 forbids re-asking a model **after it has answered**, because that would
+ * let a Match depend on how many attempts a Deployment needed. A 429 produced no
+ * answer at all: waiting for the provider to accept the *first* call is not a
+ * retry of a decision, it is the decision still being made. That `return` is
+ * therefore the guard, and it is the primary mutation target of this story --
+ * turn it into anything that loops after a success and a test must go red.
+ *
+ * Everything else follows from bounding it:
+ *
+ * - **Pacing.** Groq reports its remaining buckets on every response, so the
+ *   next call can be held until the bucket refills rather than being refused.
+ *   `pacing.ts` owns that arithmetic, and INV-3 stays intact because the delay
+ *   is derived from a *quota* header and never from how long a model thought.
+ * - **Two stop-immediately rules.** 401/403 never waits, and neither does a wait
+ *   longer than `MAX_WAIT_MS` -- a daily cap resets hours away, and a wait that
+ *   cannot succeed is worse than a failure.
+ * - **A bound.** `WaitBudget` is shared across both fighters and abandons the
+ *   Match once it is spent. Nothing partial is written, for the same structural
+ *   reason as before: `runMatch` rejects and no log is ever built.
  */
 
 /** Why one call failed, in terms the panel can turn into a sentence about a key. */
@@ -68,7 +117,11 @@ export type ByokFailure =
   | 'rate-limited'
   | 'unreachable'
   | 'unknown-model'
-  | 'provider-error';
+  | 'provider-error'
+  /** Story 4.8: a wait measured in hours, so waiting is not an option. */
+  | 'daily-quota'
+  /** Story 4.8: refused before the first call, not after the thirtieth. */
+  | 'cannot-finish';
 
 /**
  * A failure attributed to one fighter's key.
@@ -110,7 +163,14 @@ export function failureSentence(failure: ByokFailure): string {
     case 'invalid-key':
       return 'the provider rejected it. Check the key was pasted whole and is enabled for this model.';
     case 'rate-limited':
-      return 'the provider says this key is out of quota for now. Nothing was recorded.';
+      // Story 4.8 reworded this. A rate limit is now waited out and the call
+      // repeated, so reaching this sentence means the waiting itself ran out --
+      // not that a limit was met, which happens in almost every Match.
+      return 'the provider kept refusing it after every wait this Match allows. Nothing was recorded.';
+    case 'daily-quota':
+      return 'the provider will not serve this key again until its daily quota resets. Waiting that out is not something a browser tab can do, so nothing was recorded.';
+    case 'cannot-finish':
+      return 'its daily quota cannot cover one whole Match, so no call was made at all.';
     case 'unreachable':
       return 'the request never reached the provider. Check the connection, or an extension blocking the request.';
     case 'unknown-model':
@@ -142,15 +202,43 @@ export interface ByokClientConfig {
   readonly freeTier?: FreeTierConfig;
   /** Called once per completed provider call, so the panel can show progress with no timing in it (INV-3). */
   readonly onCall?: () => void;
+  /**
+   * Story 4.8: how the runner waits. Injectable so no test waits on a clock,
+   * and so the whole pacing path is exercised in milliseconds.
+   */
+  readonly sleep?: Sleep;
+  /**
+   * The Match's allowance of reactive waits. Supplied by `run.ts` so both
+   * fighters draw on one; a client built alone gets its own.
+   */
+  readonly budget?: WaitBudget;
+  /** Called when a wait begins. Carries nothing: the panel may report a state, never a duration (INV-3). */
+  readonly onWait?: () => void;
 }
+
+/** Headers before the first response, and after any wait: nothing reported. */
+const NO_HEADERS: HttpHeaders = { get: (): string | null => null };
+
+/**
+ * What a visitor is told when their quota will not refill in time.
+ *
+ * No number in it, deliberately. This is a terminal message rather than a pause
+ * report, but a page that says "six hours" once has established that the page
+ * says how long things take, and the next story writes a countdown (INV-3).
+ */
+const DAILY_QUOTA_DETAIL =
+  'The quota this key draws on refills on a daily cycle, not a per-minute one. Try again tomorrow, or pick a model with a larger daily allowance.';
 
 /**
  * Builds the upstream adapter for a provider the picker allows.
  *
- * `sleep` is an immediate resolve on purpose. Every adapter backs off once
- * before returning a rate-limited response; here the rate limit aborts the
- * Match, so the wait would buy nothing and would freeze the tab for a minute
- * before saying so.
+ * `sleep` is an immediate resolve on purpose, and Story 4.8 did not change it.
+ * Every adapter backs off once before returning a rate-limited response, and
+ * that backoff is now redundant rather than merely unhelpful: the wrapper below
+ * owns the waiting, reads the same `retry-after` the adapter did, and repeats
+ * the call afterwards. Letting the adapter sleep as well would double every
+ * wait. The adapters themselves are untouched by this story (`git diff --
+ * packages` is empty); this is the seam that made that possible.
  */
 function createUpstream(
   providerId: string,
@@ -249,7 +337,38 @@ export function createByokClient(config: ByokClientConfig): ProviderClient {
     });
   }
 
+  // Story 4.8, AC8: told before the first call, not after the thirtieth.
+  //
+  // `byokCatalogue` already filters an unrunnable model out of the picker, so
+  // this only ever fires for a *typed* or *discovered* model that inherits a
+  // provider default too small to cover a Match -- which is precisely the case
+  // 4.7 opened up and could not close from the picker alone. It costs one
+  // catalogue lookup and no request, and `run.ts` builds both clients before
+  // calling either, so the refusal lands before a single call exists.
+  //
+  // Skipped on the Advanced path: a visitor's own endpoint publishes no quota
+  // this build knows, and inventing one to refuse them by would be worse than
+  // letting the Match tell them.
+  if ((config.baseUrl?.trim() ?? '').length === 0) {
+    const option = byokModelOption(config.provider, config.model, config.freeTier);
+    if (!option.feasibility.runnable) {
+      throw new ByokKeyError({
+        agentIndex: config.agentIndex,
+        provider: label,
+        model: config.model,
+        failure: 'cannot-finish',
+        detail: modelOptionNotice(option),
+      });
+    }
+  }
+
   const baseFetch = config.fetch ?? defaultHttpFetch();
+  const sleep = config.sleep ?? defaultSleep();
+  const budget = config.budget ?? createWaitBudget();
+  // What the last response said about this key's remaining buckets. Per client,
+  // because a quota belongs to a key and the two fighters hold different ones;
+  // it survives across calls, which is exactly what `seen` below must not do.
+  const quota: { snapshot: QuotaSnapshot } = { snapshot: NO_QUOTA_REPORTED };
   // Per-call observation of the transport, so classification reads a status
   // rather than a sentence. Function-scoped and reset at the top of every call:
   // a client is reused across a whole Match and stale state here would
@@ -259,11 +378,16 @@ export function createByokClient(config: ByokClientConfig): ProviderClient {
     networkFailed: boolean;
     bodyText: string;
     rateLimit: RateLimitSignal | null;
+    // Story 4.8. The quota headers ride on *every* response, which is the whole
+    // reason pacing is possible without touching an adapter: this wrapper is
+    // already between the transport and the adapter and can simply keep them.
+    headers: HttpHeaders;
   } = {
     status: 0,
     networkFailed: false,
     bodyText: '',
     rateLimit: null,
+    headers: NO_HEADERS,
   };
 
   // Reset through a function rather than three assignments inside `complete`.
@@ -276,12 +400,14 @@ export function createByokClient(config: ByokClientConfig): ProviderClient {
     seen.networkFailed = false;
     seen.bodyText = '';
     seen.rateLimit = null;
+    seen.headers = NO_HEADERS;
   };
 
   const instrumentedFetch: HttpFetch = async (url, request): Promise<HttpResponse> => {
     try {
       const response = await baseFetch(url, request);
       seen.status = response.status;
+      seen.headers = response.headers;
 
       // The body is read here and handed on as a resolved string, because a
       // body can only be read once and the adapter downstream needs it too.
@@ -318,26 +444,87 @@ export function createByokClient(config: ByokClientConfig): ProviderClient {
       detail: redact(detail, [config.apiKey]),
     });
 
+  /**
+   * Waits, then forgets what caused the wait.
+   *
+   * The forgetting is not tidiness. A wait is sized to be exactly long enough
+   * for the bucket it read to refill, so carrying that reading into the next lap
+   * would pace a second time on a number that is stale by construction --
+   * doubling every wait, and on the reactive path turning one 429 into an
+   * endless alternation of wait and refusal.
+   */
+  const waitAndForget = async (waitMs: number): Promise<void> => {
+    config.onWait?.();
+    await sleep(waitMs);
+    quota.snapshot = NO_QUOTA_REPORTED;
+  };
+
+  /**
+   * One Decision Point's call, waited out however many times it takes.
+   *
+   * The loop has exactly two exits that matter and they are the two halves of
+   * INV-1's boundary:
+   *
+   *   `return response`  a call that produced an answer. It leaves here and is
+   *                      never issued again -- this is the guard the story asks
+   *                      to be pinned, and `client.test.ts` mutates it.
+   *   `throw fail(...)`  nothing was answered and nothing will be. No log is
+   *                      built, because `runMatch` rejects and `run.ts` never
+   *                      reaches `buildByokCommandLog`.
+   *
+   * Everything between them is a call that produced *no answer*, which is the
+   * decision still being made rather than a decision being re-asked.
+   */
   async function complete(request: ProviderRequest): Promise<ProviderResponse> {
-    forgetLastCall();
+    for (;;) {
+      // Proactive (AC1): stay inside the limit rather than waiting to be
+      // refused. Zero whenever the provider reported nothing, which is why
+      // reactive waiting below stays the floor rather than a fallback.
+      const pacedMs = paceBeforeNextCallMs(quota.snapshot);
+      if (pacedMs > 0) {
+        if (!isWaitable(pacedMs)) {
+          // The bucket that ran out refills hours from now: a daily cap, read
+          // off the headers before spending a request to be told so.
+          throw fail('daily-quota', DAILY_QUOTA_DETAIL);
+        }
+        await waitAndForget(pacedMs);
+      }
 
-    const response = await upstream.complete(request).catch((error: unknown) => {
-      throw fail(
-        classify(seen.status, seen.networkFailed, seen.bodyText),
-        error instanceof Error ? error.message : String(error),
-      );
-    });
+      forgetLastCall();
 
-    // Reached only when the adapter *resolved* a rate limit, which is the
-    // tournament behaviour (Story 3.2): the Match continues and the Decision
-    // Point becomes a Parse Failure. Here that would publish a Match the
-    // visitor's quota never played, so it is turned back into a failure.
-    if (seen.rateLimit !== null) {
-      throw fail('rate-limited', seen.rateLimit.message);
+      const response = await upstream.complete(request).catch((error: unknown) => {
+        // 401, 403, a retired model, a gateway error, an offline tab. None of
+        // these clears by waiting, and `classify` never returns a waitable
+        // failure from this branch -- the adapters resolve a 429 rather than
+        // throwing one.
+        throw fail(
+          classify(seen.status, seen.networkFailed, seen.bodyText),
+          error instanceof Error ? error.message : String(error),
+        );
+      });
+
+      quota.snapshot = readQuotaHeaders(seen.headers);
+
+      if (seen.rateLimit === null) {
+        config.onCall?.();
+        return response;
+      }
+
+      // Reached only when the adapter *resolved* a rate limit, which is the
+      // tournament behaviour (Story 3.2): there the Decision Point becomes a
+      // Parse Failure and the Match continues. Here the call is repeated
+      // instead, so the Decision Point is decided by the model rather than by
+      // the Fallback Action -- and `response` is dropped on the floor, which is
+      // what keeps a 429 body out of the Command Log.
+      const waitMs = seen.rateLimit.retryAfterMs;
+      if (!isWaitable(waitMs)) {
+        throw fail('daily-quota', seen.rateLimit.message);
+      }
+      if (!budget.spend()) {
+        throw fail('rate-limited', seen.rateLimit.message);
+      }
+      await waitAndForget(waitMs);
     }
-
-    config.onCall?.();
-    return response;
   }
 
   return Object.freeze({

@@ -5,9 +5,11 @@ import { DEFAULT_TOKEN_BANK_START } from '../../../../packages/core/src/token-ba
 import { DEFAULT_FIGHTER_CONFIG } from '../../../../packages/env-fighter/src/config';
 import { createFighterEnvironment } from '../../../../packages/env-fighter/src/environment';
 import type { FreeTierConfig } from '../../../../packages/providers/src/free-tier';
-import type { HttpFetch } from '../../../../packages/providers/src/http';
+import type { HttpFetch, Sleep } from '../../../../packages/providers/src/http';
 import { byokFighterEndpoint, createByokClient } from './client';
 import { buildByokCommandLog, byokConfigHash } from './log';
+import type { WaitBudget } from './pacing';
+import { createWaitBudget } from './pacing';
 
 /**
  * Story 4.6: one Match, played out in the visitor's own tab.
@@ -61,6 +63,25 @@ export interface ByokRunConfig {
    * which INV-3 forbids and which nothing on this page may do.
    */
   readonly onCall?: (calls: number) => void;
+  /**
+   * Story 4.8. Called when the runner starts waiting for a provider quota,
+   * with the number of calls **already completed**.
+   *
+   * A count, and only a count. Not how long the wait is, not which fighter is
+   * waiting, not which provider: a duration or a per-model wait on the page
+   * would be the UI encoding how long a Deployment takes, which INV-3 forbids
+   * outright. The count is the one honest thing to show, and it is the thing
+   * the visitor actually wants -- proof that the thirty calls already made are
+   * not being thrown away.
+   */
+  readonly onWait?: (calls: number) => void;
+  /** Injectable so a whole paced Match runs in a test in milliseconds. */
+  readonly sleep?: Sleep;
+  /**
+   * The Match's allowance of reactive waits. Defaulted here rather than in the
+   * client precisely so the two fighters share one -- see `pacing.ts`.
+   */
+  readonly budget?: WaitBudget;
 }
 
 /** The frozen schema's `agentIdentity.id` pattern is `^[a-z0-9._:-]{1,96}$`. */
@@ -123,6 +144,14 @@ export async function runByokMatch(config: ByokRunConfig): Promise<CommandLog> {
     calls.count += 1;
     config.onCall?.(calls.count);
   };
+  // One allowance for the Match, drawn on by both fighters (Story 4.8). The
+  // bound is a statement about how long nothing has been happening, and two
+  // keys stalling four times each is the same amount of that as one stalling
+  // eight.
+  const budget = config.budget ?? createWaitBudget();
+  const announceWait = (): void => {
+    config.onWait?.(calls.count);
+  };
 
   const agents = [0, 1].map((index) => {
     const agentIndex = index as 0 | 1;
@@ -138,6 +167,9 @@ export async function runByokMatch(config: ByokRunConfig): Promise<CommandLog> {
         fetch: config.fetch,
         freeTier: config.freeTier,
         onCall: countCall,
+        sleep: config.sleep,
+        budget,
+        onWait: announceWait,
       }),
     });
   });
