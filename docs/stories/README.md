@@ -46,12 +46,30 @@ Stories are executed in the order below. Each is self-contained: an agent with n
 | 7.2 ratings with confidence intervals | E7 | 7.1 | |
 | 7.3 behavioural metrics | E7 | 7.2 | |
 | 7.4 README, hero, honest claims | E7 | 7.3 | |
+| 8.1 Command Log schema v2 | E8 | 1.3 | `(v2)` Pre-authorized contract change — the only story in E8/E9 allowed to touch `docs/contracts/` |
+| 8.2 vertical axis and jump | E8 | 8.1, 2.2 | `(v2)` |
+| 8.3 zoned strikes and matched block | E8 | 8.1, 2.2 | `(v2)` |
+| 8.4 multi-hit strings and juggle state | E8 | 8.2, 8.3 | `(v2)` |
+| **8.5 v2 skill-separation re-gate** | E8 | 8.2, 8.3, 8.4 | `(v2)` **Blocks E7's v2 ranking only** — does not block E9. Escalate on failure; never lower the thresholds. |
+| 9.1 Extraction dev-reference and exclusion test | E9 | — | `(v2)` Goes first — no other E9 story touching sprites/audio lands before this |
+| 9.2 Human-vs-Baseline-Bot arcade match | E9 | 2.4, 4.1, 9.1 | `(v2)` Does not depend on E8 |
+| 9.3 AI-vs-AI Spectate and default stream | E9 | 4.2 | `(v2)` Does not depend on E8 |
+| 9.4 Deployment visual identity | E9 | 3.1 | `(v2)` Does not depend on E8 |
+| 9.5 frame-counted juice layer | E9 | 4.1, 9.1 | `(v2)` Highest translate-vs-reimplement risk — read the story's standing rule |
+| 9.6 three-bus audio layer | E9 | 4.1, 9.1 | `(v2)` |
+| 9.7 four-character custom roster | E9 | 9.1 | `(v2)` |
+| 9.8 marketing landing page | E9 | 9.2, 9.3, 9.4, 7.2 | `(v2)` Capstone — exit gate includes a live UJ-5 walkthrough, not just engineering checks |
 
 **E6 (MicroRTS) has no stories.** It is optional and deferred; revisit once E7 publishes its first tournament and the site is live.
+
+**E8 and E9 are `(v2)` — additive to the shipped E1-E7 baseline, not a replacement.** E8 (2D engine) mirrors E2's role: invisible, gated, must clear its own skill-separation re-gate (8.5) before anything downstream ranks. E9 (arcade, visual identity, landing page, juice, audio, roster) mirrors E4's role: what a visitor actually sees. Unlike v1's pattern, E9 does **not** wait on E8's gate — Arcade Matches are excluded from rating by construction (`agentIdentity.kind: "human"`, architecture AD-14), and the rest of E9 is cosmetic. E9 does depend on E8's *code* existing before it's worth building against, per the epic-design roundtable's finding — see `_bmad-output/planning-artifacts/epics.md`.
 
 ## Where to stop and ask
 
 - Story 1.4 or 2.4 failing. Both are gates. Deepening the work is the fix; weakening the test is not.
+- Story 8.5 failing. Same gate, extended engine. Deepening the bot ladder (a 4th bot per `OQ-8`) or fixing 8.2-8.4's frame data is the fix; lowering the thresholds is not.
+- Any E8/E9 story other than 8.1 that seems to need a `docs/contracts/` change. 8.1 is the one pre-authorized exception (PRD FR-33, architecture AD-13) — everything else routes back to it.
+- Any E9 story that reads Extraction's source for anything beyond frame counts, timing curves, or trigger conditions. Behavioral facts are fair game; transliterated code is not — see 9.5's standing rule.
 - Any story that seems to need a contract change.
 - Any story that would let a **tournament** reach a non-free-tier endpoint. Story 4.7 opens a visitor-supplied endpoint for BYOK only, on the recorded reading that INV-8 governs *this project's* cost; tournament configuration stays locked to the free-tier allowlist and `assertFreeTierEndpoint` is not to be loosened.
 - Any story that seems to need a server, database, worker, or WebSocket — that means the precompute design was misunderstood.
