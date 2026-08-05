@@ -1,6 +1,6 @@
 {
   "schemaVersion": "1.0.0",
-  "matchId": "0b6f8337948b2850386d317d249168d0d9700953b69f13dac9b51b00141fb258",
+  "matchId": "8450eeec9af23b20d9c24bde835f87b53a6883970746f1523338ea5408030b8f",
   "environment": {
     "id": "fighter-1v1",
     "version": "1.0.0"
@@ -9,11 +9,11 @@
   "configHash": "891e524089af5b88da76fcfb9149be945cb0d33738d2eda472498475180b48a2",
   "agents": [
     {
-      "id": "bot:ronin",
+      "id": "bot:aggressive",
       "kind": "bot"
     },
     {
-      "id": "bot:oracle",
+      "id": "bot:spacing",
       "kind": "bot"
     }
   ],
@@ -22,236 +22,243 @@
       "tick": 0,
       "agentIndex": 0,
       "action": "advance",
-      "reasoning": "320 units of empty floor. Nothing I own reaches from here.",
-      "rawResponse": "bot:ronin -> advance",
-      "provider": "scripted",
-      "endpoint": "hand-authored"
+      "provider": "bot",
+      "endpoint": "bot"
     },
     {
       "tick": 0,
       "agentIndex": 1,
       "action": "advance",
-      "reasoning": "320 units. Too far to threaten, and a threat is the only thing that makes him respect a range.",
-      "rawResponse": "bot:oracle -> advance",
-      "provider": "scripted",
-      "endpoint": "hand-authored"
+      "provider": "bot",
+      "endpoint": "bot"
     },
     {
       "tick": 30,
       "agentIndex": 0,
       "action": "advance",
-      "reasoning": "200 units of empty floor. Nothing I own reaches from here.",
-      "rawResponse": "bot:ronin -> advance",
-      "provider": "scripted",
-      "endpoint": "hand-authored"
+      "provider": "bot",
+      "endpoint": "bot"
     },
     {
       "tick": 30,
       "agentIndex": 1,
       "action": "advance",
-      "reasoning": "200 units. Too far to threaten, and a threat is the only thing that makes him respect a range.",
-      "rawResponse": "bot:oracle -> advance",
-      "provider": "scripted",
-      "endpoint": "hand-authored"
+      "provider": "bot",
+      "endpoint": "bot"
     },
     {
       "tick": 60,
       "agentIndex": 0,
       "action": "attack",
-      "reasoning": "Inside 80. I am not paid to wait.",
-      "rawResponse": "bot:ronin -> attack",
-      "provider": "scripted",
-      "endpoint": "hand-authored"
+      "provider": "bot",
+      "endpoint": "bot"
     },
     {
       "tick": 60,
       "agentIndex": 1,
       "action": "block",
-      "reasoning": "He attacks on sight inside 80 -- 3 polls, no exception. Guard absorbs 8, his fist is 7, and his recovery is 32 ticks. I take zero and he owes me a punish.",
-      "rawResponse": "bot:oracle -> block",
-      "provider": "scripted",
-      "endpoint": "hand-authored"
+      "provider": "bot",
+      "endpoint": "bot"
     },
     {
       "tick": 90,
       "agentIndex": 1,
       "action": "attack",
-      "reasoning": "He bought 10 ticks of helplessness with that swing. Punish 1; he has still not adjusted.",
-      "rawResponse": "bot:oracle -> attack",
-      "provider": "scripted",
-      "endpoint": "hand-authored"
+      "provider": "bot",
+      "endpoint": "bot"
     },
     {
       "tick": 120,
       "agentIndex": 0,
       "action": "attack",
-      "reasoning": "Recovery, 10 ticks. My startup is 4. I do not need to be clever, I need to be quick.",
-      "rawResponse": "bot:ronin -> attack",
-      "provider": "scripted",
-      "endpoint": "hand-authored"
+      "provider": "bot",
+      "endpoint": "bot"
     },
     {
       "tick": 150,
       "agentIndex": 1,
       "action": "attack",
-      "reasoning": "He bought 10 ticks of helplessness with that swing. Punish 2; he has still not adjusted.",
-      "rawResponse": "bot:oracle -> attack",
-      "provider": "scripted",
-      "endpoint": "hand-authored"
+      "provider": "bot",
+      "endpoint": "bot"
     },
     {
       "tick": 180,
       "agentIndex": 0,
       "action": "attack",
-      "reasoning": "Recovery, 10 ticks. My startup is 4. I do not need to be clever, I need to be quick.",
-      "rawResponse": "bot:ronin -> attack",
-      "provider": "scripted",
-      "endpoint": "hand-authored"
+      "provider": "bot",
+      "endpoint": "bot"
     },
     {
       "tick": 210,
       "agentIndex": 1,
       "action": "attack",
-      "reasoning": "He bought 10 ticks of helplessness with that swing. Punish 3; he has still not adjusted.",
-      "rawResponse": "bot:oracle -> attack",
-      "provider": "scripted",
-      "endpoint": "hand-authored"
+      "provider": "bot",
+      "endpoint": "bot"
     },
     {
       "tick": 240,
       "agentIndex": 0,
-      "action": "special",
-      "reasoning": "She is in recovery for 10 more ticks at 80 units. A guard is not an option she has right now, so the 16 lands whole. Punish 3.",
-      "rawResponse": "bot:ronin -> special",
-      "provider": "scripted",
-      "endpoint": "hand-authored"
+      "action": "attack",
+      "provider": "bot",
+      "endpoint": "bot"
     },
     {
       "tick": 270,
       "agentIndex": 1,
       "action": "attack",
-      "reasoning": "He bought 30 ticks of helplessness with that swing. Punish 4; he has still not adjusted.",
-      "rawResponse": "bot:oracle -> attack",
-      "provider": "scripted",
-      "endpoint": "hand-authored"
+      "provider": "bot",
+      "endpoint": "bot"
     },
     {
       "tick": 300,
       "agentIndex": 0,
       "action": "attack",
-      "reasoning": "Recovery, 10 ticks. My startup is 4. I do not need to be clever, I need to be quick.",
-      "rawResponse": "bot:ronin -> attack",
-      "provider": "scripted",
-      "endpoint": "hand-authored"
+      "provider": "bot",
+      "endpoint": "bot"
     },
     {
       "tick": 330,
       "agentIndex": 1,
       "action": "attack",
-      "reasoning": "He bought 10 ticks of helplessness with that swing. Punish 5; he has still not adjusted.",
-      "rawResponse": "bot:oracle -> attack",
-      "provider": "scripted",
-      "endpoint": "hand-authored"
+      "provider": "bot",
+      "endpoint": "bot"
     },
     {
       "tick": 360,
       "agentIndex": 0,
       "action": "attack",
-      "reasoning": "Recovery, 10 ticks. My startup is 4. I do not need to be clever, I need to be quick.",
-      "rawResponse": "bot:ronin -> attack",
-      "provider": "scripted",
-      "endpoint": "hand-authored"
+      "provider": "bot",
+      "endpoint": "bot"
     },
     {
       "tick": 390,
       "agentIndex": 1,
       "action": "attack",
-      "reasoning": "He bought 10 ticks of helplessness with that swing. Punish 6; he has still not adjusted.",
-      "rawResponse": "bot:oracle -> attack",
-      "provider": "scripted",
-      "endpoint": "hand-authored"
+      "provider": "bot",
+      "endpoint": "bot"
     },
     {
       "tick": 420,
       "agentIndex": 0,
-      "action": "special",
-      "reasoning": "She is in recovery for 10 more ticks at 80 units. A guard is not an option she has right now, so the 16 lands whole. Punish 6.",
-      "rawResponse": "bot:ronin -> special",
-      "provider": "scripted",
-      "endpoint": "hand-authored"
+      "action": "attack",
+      "provider": "bot",
+      "endpoint": "bot"
     },
     {
       "tick": 450,
       "agentIndex": 1,
-      "action": "special",
-      "reasoning": "I am 19 down and holding 100 meter. Saving it is how I lose politely. 16 into 30 ticks of recovery.",
-      "rawResponse": "bot:oracle -> special",
-      "provider": "scripted",
-      "endpoint": "hand-authored"
+      "action": "attack",
+      "provider": "bot",
+      "endpoint": "bot"
     },
     {
       "tick": 480,
       "agentIndex": 0,
       "action": "attack",
-      "reasoning": "Recovery, 30 ticks. My startup is 4. I do not need to be clever, I need to be quick.",
-      "rawResponse": "bot:ronin -> attack",
-      "provider": "scripted",
-      "endpoint": "hand-authored"
+      "provider": "bot",
+      "endpoint": "bot"
     },
     {
       "tick": 510,
       "agentIndex": 1,
-      "action": "special",
-      "reasoning": "I am 11 down and holding 68 meter. Saving it is how I lose politely. 16 into 10 ticks of recovery.",
-      "rawResponse": "bot:oracle -> special",
-      "provider": "scripted",
-      "endpoint": "hand-authored"
+      "action": "attack",
+      "provider": "bot",
+      "endpoint": "bot"
     },
     {
       "tick": 540,
       "agentIndex": 0,
       "action": "attack",
-      "reasoning": "Recovery, 30 ticks. My startup is 4. I do not need to be clever, I need to be quick.",
-      "rawResponse": "bot:ronin -> attack",
-      "provider": "scripted",
-      "endpoint": "hand-authored"
+      "provider": "bot",
+      "endpoint": "bot"
     },
     {
       "tick": 570,
       "agentIndex": 1,
       "action": "attack",
-      "reasoning": "He bought 10 ticks of helplessness with that swing. Punish 7; he has still not adjusted.",
-      "rawResponse": "bot:oracle -> attack",
-      "provider": "scripted",
-      "endpoint": "hand-authored"
+      "provider": "bot",
+      "endpoint": "bot"
     },
     {
       "tick": 600,
       "agentIndex": 0,
-      "action": "special",
-      "reasoning": "She is in recovery for 10 more ticks at 80 units. A guard is not an option she has right now, so the 16 lands whole. Punish 9.",
-      "rawResponse": "bot:ronin -> special",
-      "provider": "scripted",
-      "endpoint": "hand-authored"
+      "action": "attack",
+      "provider": "bot",
+      "endpoint": "bot"
     },
     {
       "tick": 630,
       "agentIndex": 1,
-      "action": "special",
-      "reasoning": "14 health, 30 ticks of recovery, 80 units of separation. I held this meter the whole fight for exactly this.",
-      "rawResponse": "bot:oracle -> special",
-      "provider": "scripted",
-      "endpoint": "hand-authored"
+      "action": "attack",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 660,
+      "agentIndex": 0,
+      "action": "attack",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 690,
+      "agentIndex": 1,
+      "action": "attack",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 720,
+      "agentIndex": 0,
+      "action": "attack",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 750,
+      "agentIndex": 1,
+      "action": "attack",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 780,
+      "agentIndex": 0,
+      "action": "attack",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 810,
+      "agentIndex": 1,
+      "action": "attack",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 840,
+      "agentIndex": 0,
+      "action": "attack",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 870,
+      "agentIndex": 1,
+      "action": "attack",
+      "provider": "bot",
+      "endpoint": "bot"
     }
   ],
   "result": {
     "outcome": "p2",
-    "endTick": 660,
+    "endTick": 900,
     "endReason": "ko",
     "healthRemaining": [
       0,
-      5
+      3
     ]
   },
-  "finalStateHash": "145edc60e6774f30a94b003ccdce87308a7b61a528248fa42d213a534a1c46f1"
+  "finalStateHash": "ba37a2ddbe11540489be5b12da8a8a211761712e86bdd8ebf43a71f6e947ba90",
+  "reasoningSidecar": "demo.reasoning.json"
 }
