@@ -33,7 +33,14 @@ function walk(directory: string, collected: SourceFile[]): SourceFile[] {
       // `src/testing/` is Node-only tooling that never reaches the bundle --
       // `demo-log.ts` deliberately imports `buildCommandLog`, which is exactly
       // what the checks below forbid a shipped file to do.
-      if (entry.name === 'testing') {
+      //
+      // `src/dev/` is the same kind of exemption for a different reason
+      // (Story 9.1): `local-sprites.ts` is a Vite plugin, read only by Vite's
+      // Node process via `vite.config.ts` and `apply: 'serve'` keeps it out of
+      // `vite build`'s plugin list entirely -- it is structurally absent from
+      // the bundle these checks police, the same way `testing/` is absent by
+      // convention.
+      if (entry.name === 'testing' || entry.name === 'dev') {
         continue;
       }
       walk(full, collected);

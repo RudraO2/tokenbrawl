@@ -68,3 +68,10 @@ scratch/
 # Personal BMad settings — not shared
 _bmad/config.user.yaml
 .bmad-loop/archive/
+
+# Story 9.1 / AD-16 — dev-only pointer to the local Extraction reference
+# project, populated on a developer's own machine with paths outside this
+# repository. Never committed: the .gitignore entry and the mechanism that
+# reads it land in the same change, and a test asserts this file is absent
+# from the current `git ls-files` output.
+apps/web/sprites.local.json

@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vite';
+import { localSpritesPlugin } from './src/dev/local-sprites.ts';
 
 // Only workspace using Vite (AD/story scope: apps/web is the replay player,
 // leaderboard, and BYOK panel — everything else is a plain TS package).
@@ -14,6 +15,9 @@ import { defineConfig } from 'vite';
 const here = path.dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig({
+  // Story 9.1 / AD-16: dev-only, fails soft, structurally absent from
+  // `vite build` (`apply: 'serve'`) -- see apps/web/src/dev/local-sprites.ts.
+  plugins: [localSpritesPlugin()],
   resolve: {
     alias: {
       '@tokenbrawl/contracts': path.resolve(here, '../../docs/contracts/index.ts'),
