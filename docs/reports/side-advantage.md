@@ -16,7 +16,7 @@ scores the mean of its two Matches from side 0’s point of view; a side-neutral
 Environment averages exactly 0.5000 over those pairs.
 
 - Environment: `fighter-1v1` v1.0.0
-- Frame-data config hash: `891e524089af5b88da76fcfb9149be945cb0d33738d2eda472498475180b48a2`
+- Frame-data config hash: `b2b38645b3263cabe9a127eb3e7e57f3718aaee524f7a332aa0129fa3956d344`
 - Corpus: the Baseline Bot ladder — 600 Matches over 100 seeds from seed base 20260731, every seed played from both sides (AD-12)
 - Matches in no complete mirrored pair, and therefore excluded: 0
 - Confidence interval: seeded percentile bootstrap over *pairs*, 2000 resamples, seed 20260801 (AD-5)

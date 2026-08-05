@@ -4,7 +4,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { createFighterEnvironment } from './environment';
 import type { FighterState } from './state';
-import type { LoggedAction } from '@tokenbrawl/contracts';
+import type { LoggedActionV2 } from '@tokenbrawl/contracts';
 
 /**
  * "Cross-process reproducibility" from Story 2.1's test plan, and the half of
@@ -55,8 +55,14 @@ const SEED = 12345;
  * The leading advances also let meter accrue past `specialMeterCost`, so the
  * `special` further down is a legal Action rather than one rejected for being
  * unaffordable -- both branches of AC3 are then exercised across processes.
+ *
+ * Story 8.2 adds a `jump` for each side (34 Ticks each, so each spans two
+ * Decision Points against the 30-Tick cadence): this is what makes
+ * `verticalPosition`/`airState` -- and the gravity arithmetic driving them --
+ * part of what this cross-process gate actually covers, rather than sitting
+ * outside it the way a jump-free script would leave them.
  */
-const SCRIPT: readonly (readonly [LoggedAction | null, LoggedAction | null])[] = [
+const SCRIPT: readonly (readonly [LoggedActionV2 | null, LoggedActionV2 | null])[] = [
   ['advance', 'advance'],
   ['advance', 'advance'],
   ['advance', 'advance'],
@@ -65,6 +71,8 @@ const SCRIPT: readonly (readonly [LoggedAction | null, LoggedAction | null])[] =
   ['attack', 'attack'],
   ['retreat', 'attack'],
   ['advance', 'stand'],
+  ['jump', 'attack'],
+  [null, 'jump'],
   ['attack', 'attack'],
   ['special', 'retreat'],
   [null, 'advance'],
@@ -131,7 +139,7 @@ describe('cross-process determinism (INV-2)', () => {
 
   it('still separates different Action streams across processes', () => {
     const diverged = SCRIPT.map(
-      ([, second]) => ['attack', second] as readonly [LoggedAction | null, LoggedAction | null],
+      ([, second]) => ['attack', second] as readonly [LoggedActionV2 | null, LoggedActionV2 | null],
     );
     expect(hashInChildProcess(SEED, SCRIPT)).not.toBe(hashInChildProcess(SEED, diverged));
   });

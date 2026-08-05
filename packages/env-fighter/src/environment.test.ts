@@ -1,17 +1,22 @@
-import { ACTIONS, type LoggedAction } from '@tokenbrawl/contracts';
+import { ACTIONS, type LoggedActionV2 } from '@tokenbrawl/contracts';
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_FIGHTER_CONFIG, type FighterConfig } from './config';
 import { createFighterEnvironment } from './environment';
 import {
   COMMITTED_ATTACK,
+  COMMITTED_JUMP,
   COMMITTED_NONE,
+  PHASE_IDLE,
   PHASE_RECOVERY,
+  PHASE_STARTUP,
+  jumpFallStepPerTick,
   phaseOf,
   windowTotalTicks,
 } from './frames';
+import { mixSeed, nextRngState } from './prng';
 import type { FighterState } from './state';
 
-type ActionPair = readonly [LoggedAction | null, LoggedAction | null];
+type ActionPair = readonly [LoggedActionV2 | null, LoggedActionV2 | null];
 
 const SEED = 12345;
 
@@ -35,6 +40,8 @@ function stateOf(overrides: Partial<FighterState> = {}): FighterState {
     commitmentRemaining: [0, 0],
     committedAction: [COMMITTED_NONE, COMMITTED_NONE],
     windowHitLanded: [0, 0],
+    verticalPosition: [0, 0],
+    airState: [PHASE_IDLE, PHASE_IDLE],
     ...overrides,
   };
 }
@@ -129,6 +136,9 @@ describe('reset (pure over the seed)', () => {
     // left undefined, which `hash()` would refuse to serialise.
     expect(state.committedAction).toStrictEqual([COMMITTED_NONE, COMMITTED_NONE]);
     expect(state.windowHitLanded).toStrictEqual([0, 0]);
+    // Story 8.2: both fighters start grounded, at the floor.
+    expect(state.verticalPosition).toStrictEqual([0, 0]);
+    expect(state.airState).toStrictEqual([PHASE_IDLE, PHASE_IDLE]);
   });
 });
 
@@ -268,6 +278,8 @@ describe('hash (the Final-State Hash)', () => {
   it('is insensitive to key declaration order', () => {
     const forwards = stateOf();
     const backwards: FighterState = {
+      airState: forwards.airState,
+      verticalPosition: forwards.verticalPosition,
       windowHitLanded: forwards.windowHitLanded,
       committedAction: forwards.committedAction,
       commitmentRemaining: forwards.commitmentRemaining,
@@ -300,6 +312,10 @@ describe('hash (the Final-State Hash)', () => {
       { ...base, committedAction: [base.committedAction[0], COMMITTED_ATTACK] },
       { ...base, windowHitLanded: [1, base.windowHitLanded[1]] },
       { ...base, windowHitLanded: [base.windowHitLanded[0], 1] },
+      { ...base, verticalPosition: [base.verticalPosition[0] + 1, base.verticalPosition[1]] },
+      { ...base, verticalPosition: [base.verticalPosition[0], base.verticalPosition[1] + 1] },
+      { ...base, airState: [PHASE_STARTUP, base.airState[1]] },
+      { ...base, airState: [base.airState[0], PHASE_STARTUP] },
     ];
     expect(mutations).toHaveLength(Object.keys(base).length * 2 - 2);
     for (const mutated of mutations) {
@@ -1150,6 +1166,163 @@ describe('isActionable', () => {
     const state = stateOf({ commitmentRemaining: [0, 30] });
     expect(env.isActionable(state, 0)).toBe(true);
     expect(env.isActionable(state, 1)).toBe(false);
+  });
+});
+
+describe('jump and gravity (Story 8.2)', () => {
+  const env = createFighterEnvironment();
+  const JUMP_WINDOW_TICKS = windowTotalTicks(DEFAULT_FIGHTER_CONFIG.jumpWindow);
+  const RISE_TICKS = DEFAULT_FIGHTER_CONFIG.jumpWindow.startup;
+  const APEX_TICKS = DEFAULT_FIGHTER_CONFIG.jumpWindow.active;
+  const FALL_STEP = jumpFallStepPerTick(DEFAULT_FIGHTER_CONFIG);
+
+  it('opens a Commitment Window exactly like attack/special (AC2)', () => {
+    const committed = env.step(env.reset(SEED), ['jump', 'stand']);
+    expect(committed.committedAction[0]).toBe(COMMITTED_JUMP);
+    expect(committed.commitmentRemaining[0]).toBe(
+      JUMP_WINDOW_TICKS - DEFAULT_FIGHTER_CONFIG.ticksPerDecision,
+    );
+    expect(committed.airState[0]).toBe(PHASE_RECOVERY);
+  });
+
+  it('is not polled while mid-jump, same as any other committed Action (AC3)', () => {
+    const committed = env.step(env.reset(SEED), ['jump', 'stand']);
+    expect(env.isActionable(committed, 0)).toBe(false);
+    expect(env.isActionable(committed, 1)).toBe(true);
+
+    // A non-null Action submitted for the jumping fighter is ignored, exactly
+    // like a mid-window attack -- the Harness never sends one, but honouring
+    // it would let a caller cancel the Commitment Window, which still has
+    // Ticks left (JUMP_WINDOW_TICKS exceeds one cadence), so gravity keeps
+    // running for it regardless; what must never happen is the submitted
+    // `attack` being honoured.
+    const ignored = env.step(committed, ['attack', 'stand']);
+    expect(ignored.committedAction[0]).not.toBe(COMMITTED_ATTACK);
+  });
+
+  it('rises through startup, holds at the apex through active, and falls through recovery (AC1, AC4)', () => {
+    const afterFirstStep = env.step(env.reset(SEED), ['jump', 'stand']);
+
+    // The first step() call resolves exactly `ticksPerDecision` Ticks of the
+    // jump window: rise finishes at RISE_TICKS, apex holds for APEX_TICKS more,
+    // and the rest of the step is spent falling.
+    const fallTicksSoFar = DEFAULT_FIGHTER_CONFIG.ticksPerDecision - RISE_TICKS - APEX_TICKS;
+    expect(fallTicksSoFar).toBeGreaterThan(0);
+    expect(afterFirstStep.verticalPosition[0]).toBe(
+      DEFAULT_FIGHTER_CONFIG.jumpHeight - fallTicksSoFar * FALL_STEP,
+    );
+    expect(afterFirstStep.airState[0]).toBe(PHASE_RECOVERY);
+    // The grounded side never leaves the floor.
+    expect(afterFirstStep.verticalPosition[1]).toBe(0);
+    expect(afterFirstStep.airState[1]).toBe(PHASE_IDLE);
+
+    const landed = env.step(afterFirstStep, [null, 'stand']);
+    expect(landed.verticalPosition[0]).toBe(0);
+    expect(landed.airState[0]).toBe(PHASE_IDLE);
+    expect(landed.committedAction[0]).toBe(COMMITTED_NONE);
+  });
+
+  it('never lets vertical position go below the floor on any Tick resolution (AC6)', () => {
+    let state = env.step(env.reset(SEED), ['jump', 'jump']);
+    for (let round = 0; round < 5; round += 1) {
+      state = env.step(state, [null, null]);
+      expect(state.verticalPosition[0]).toBeGreaterThanOrEqual(0);
+      expect(state.verticalPosition[1]).toBeGreaterThanOrEqual(0);
+    }
+    expect(state.verticalPosition).toStrictEqual([0, 0]);
+  });
+
+  it('reads its height and rise/fall Tick counts from FighterConfig, not a hardcoded constant (AC5)', () => {
+    const customised = createFighterEnvironment({
+      jumpWindow: { startup: 20, active: 3, recovery: 20 },
+      jumpHeight: 40,
+    });
+    const after = customised.step(customised.reset(SEED), ['jump', 'stand']);
+    expect(after.commitmentRemaining[0]).toBe(
+      20 + 3 + 20 - DEFAULT_FIGHTER_CONFIG.ticksPerDecision,
+    );
+    // Fully resolved in one step (43 Tick window, well past a 30-Tick step,
+    // but far enough into recovery that the height reached is still readable
+    // off the customised config rather than the default one).
+    expect(after.verticalPosition[0]).toBeLessThanOrEqual(40);
+  });
+
+  it('holds only safe integers through a jump (INV-2)', () => {
+    let state = env.reset(SEED);
+    state = env.step(state, ['jump', 'advance']);
+    state = env.step(state, [null, 'jump']);
+    state = env.step(state, [null, null]);
+    for (const value of [...state.verticalPosition, ...state.airState]) {
+      expect(Number.isSafeInteger(value)).toBe(true);
+    }
+  });
+});
+
+describe('jump keeps determinism intact (INV-2)', () => {
+  it('produces identical Final-State Hashes for a script that includes jump', () => {
+    const env = createFighterEnvironment();
+    const jumpScript: readonly ActionPair[] = [
+      ['jump', 'advance'],
+      [null, 'jump'],
+      ['stand', null],
+      ['attack', 'block'],
+      ['jump', 'jump'],
+      [null, null],
+      [null, null],
+    ];
+    function run(): FighterState {
+      let state = env.reset(SEED);
+      for (const actions of jumpScript) {
+        state = env.step(state, actions);
+      }
+      return state;
+    }
+    expect(env.hash(run())).toBe(env.hash(run()));
+  });
+});
+
+describe('vertical position never negative across randomised jump sequences (property test)', () => {
+  // Seeded, not the unseeded global RNG (INV-2 bans unseeded randomness in
+  // this package outright, tests included): a tiny xorshift32 stream reused
+  // from `./prng.ts`'s own generator, so the property test itself stays
+  // deterministic and replayable.
+  const CANDIDATE_ACTIONS: readonly LoggedActionV2[] = [
+    'jump',
+    'advance',
+    'retreat',
+    'attack',
+    'block',
+    'special',
+    'stand',
+  ];
+
+  function pick(rngState: number, choices: readonly LoggedActionV2[]): LoggedActionV2 {
+    const index = (rngState >>> 0) % choices.length;
+    return choices[index];
+  }
+
+  it('never goes negative across 30 seeds x 40 randomised Decision Points', () => {
+    for (let seed = 1; seed <= 30; seed += 1) {
+      const env = createFighterEnvironment();
+      let state = env.reset(seed);
+      let rngState = mixSeed(seed * 7 + 1);
+
+      for (let round = 0; round < 40; round += 1) {
+        rngState = nextRngState(rngState);
+        const p1Action = env.isActionable(state, 0) ? pick(rngState, CANDIDATE_ACTIONS) : null;
+        rngState = nextRngState(rngState);
+        const p2Action = env.isActionable(state, 1) ? pick(rngState, CANDIDATE_ACTIONS) : null;
+
+        state = env.step(state, [p1Action, p2Action]);
+
+        expect(state.verticalPosition[0]).toBeGreaterThanOrEqual(0);
+        expect(state.verticalPosition[1]).toBeGreaterThanOrEqual(0);
+
+        if (state.health[0] <= 0 || state.health[1] <= 0) {
+          break;
+        }
+      }
+    }
   });
 });
 

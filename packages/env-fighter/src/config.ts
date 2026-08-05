@@ -51,6 +51,16 @@ export interface FighterConfig {
   readonly attackWindow: CommitmentWindow;
   /** Frame data for `special`. Longer in every phase than `attack`, so it is the bigger risk. */
   readonly specialWindow: CommitmentWindow;
+  /**
+   * Frame data for `jump`: rise -> apex -> fall, in place of startup -> active
+   * -> recovery. `startup` and `recovery` double as the rise and fall Tick
+   * counts gravity divides `jumpHeight` across (Story 8.2), so both must be at
+   * least 1 -- `assertIntegerConfig` enforces it, the same way it already
+   * enforces `active >= 1` for every Commitment Window shape.
+   */
+  readonly jumpWindow: CommitmentWindow;
+  /** Vertical units at the apex of a `jump`. Integer, per AD-5 -- no float anywhere. */
+  readonly jumpHeight: number;
   /** Damage subtracted when the defender submitted `block` at the same Decision Point. */
   readonly blockDamageReduction: number;
   readonly meterOnHitLanded: number;
@@ -92,6 +102,18 @@ export const DEFAULT_FIGHTER_CONFIG: FighterConfig = {
   attackWindow: { startup: 4, active: 4, recovery: 32 },
   specialWindow: { startup: 10, active: 5, recovery: 45 },
   /**
+   * 34 Ticks total, also exceeding `ticksPerDecision` (30) for the same reason
+   * `attackWindow`/`specialWindow` do -- a fighter that jumps provably skips a
+   * Decision Point. 16 rise Ticks and 16 fall Ticks each divide `jumpHeight`
+   * (32) evenly into a 2-unit-per-Tick gravity step, so `Math.floor` in
+   * `frames.ts`'s `jumpRiseStepPerTick`/`jumpFallStepPerTick` never needs to
+   * discard a remainder -- and `step()` still floors at the ground explicitly
+   * on the Tick the window closes, so an uneven override cannot land a fighter
+   * above or below the floor either.
+   */
+  jumpWindow: { startup: 16, active: 2, recovery: 16 },
+  jumpHeight: 32,
+  /**
    * A guard absorbs a basic attack completely: `attackDamage` (7) plus the
    * largest `damageJitter` draw (1) is exactly 8.
    *
@@ -118,7 +140,7 @@ export const DEFAULT_FIGHTER_CONFIG: FighterConfig = {
 };
 
 /** Keys whose value is a nested `CommitmentWindow` rather than a scalar. */
-const WINDOW_KEYS: readonly string[] = ['attackWindow', 'specialWindow'];
+const WINDOW_KEYS: readonly string[] = ['attackWindow', 'specialWindow', 'jumpWindow'];
 
 const WINDOW_FIELDS = ['startup', 'active', 'recovery'] as const;
 
@@ -215,6 +237,7 @@ export function assertIntegerConfig(config: FighterConfig): void {
     'meterOnHitTaken',
     'maxMeter',
     'damageJitter',
+    'jumpHeight',
   ] as const;
   for (const key of NON_NEGATIVE_KEYS) {
     if (config[key] < 0) {
@@ -252,6 +275,17 @@ export function assertIntegerConfig(config: FighterConfig): void {
         `FighterConfig.${key} (${config[key]}) must exceed minSeparation (${config.minSeparation}), or the Action could never connect`,
       );
     }
+  }
+
+  // `jumpRiseStepPerTick`/`jumpFallStepPerTick` in `frames.ts` divide
+  // `jumpHeight` by these two counts; a `0` would divide by zero and a
+  // negative one is already rejected by `assertCommitmentWindow`'s Tick
+  // fields. `active >= 1` is already enforced generically, but rise and fall
+  // are the two fields no other window shape depends on for arithmetic.
+  if (config.jumpWindow.startup < 1 || config.jumpWindow.recovery < 1) {
+    throw new Error(
+      `FighterConfig.jumpWindow.startup and .recovery must each be at least 1 Tick, or gravity has nothing to divide jumpHeight across`,
+    );
   }
 
   if (config.specialMeterCost > config.maxMeter) {

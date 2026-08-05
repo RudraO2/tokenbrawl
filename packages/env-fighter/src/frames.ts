@@ -20,14 +20,23 @@ import type { CommitmentWindow, FighterConfig } from './config';
 export const COMMITTED_NONE = 0;
 export const COMMITTED_ATTACK = 1;
 export const COMMITTED_SPECIAL = 2;
-export type CommittedActionCode = 0 | 1 | 2;
+/**
+ * `jump` (Story 8.2). Occupies `config.jumpWindow` exactly the way `attack`
+ * and `special` occupy their own windows: `startup`/`active`/`recovery` read
+ * as rise/apex/fall, but the countdown machinery below does not know or care
+ * -- it is the same two integers in state and the same `windowFor`/`phaseOf`
+ * that every other committed Action uses.
+ */
+export const COMMITTED_JUMP = 3;
+export type CommittedActionCode = 0 | 1 | 2 | 3;
 
 /** Not inside a window at all -- distinct from being inside one and between phases. */
 export const PHASE_IDLE = 0;
+/** For `jump`, this is the rise phase. */
 export const PHASE_STARTUP = 1;
-/** The only phase in which an Action can connect. */
+/** The only phase in which an Action can connect. For `jump`, this is the apex. */
 export const PHASE_ACTIVE = 2;
-/** Committed, cannot act, cannot block: the punishable phase. */
+/** Committed, cannot act, cannot block: the punishable phase. For `jump`, this is the fall. */
 export const PHASE_RECOVERY = 3;
 export type PhaseCode = 0 | 1 | 2 | 3;
 
@@ -38,6 +47,9 @@ export function windowFor(config: FighterConfig, code: number): CommitmentWindow
   }
   if (code === COMMITTED_SPECIAL) {
     return config.specialWindow;
+  }
+  if (code === COMMITTED_JUMP) {
+    return config.jumpWindow;
   }
   return null;
 }
@@ -100,6 +112,23 @@ export function damageForCode(config: FighterConfig, code: number): number {
     return config.specialDamage;
   }
   throw new Error(`damageForCode: no damage for committed Action code ${code}`);
+}
+
+/**
+ * Fixed-point integer gravity: how many vertical units a rising fighter gains
+ * per Tick, so `jumpHeight` is reached (bar remainder, which `step()` clamps
+ * away) exactly `config.jumpWindow.startup` Ticks after `jump` is committed.
+ * `Math.floor` of two safe integers is always a safe integer -- no float ever
+ * enters this arithmetic (AD-5), and `assertIntegerConfig` rejects a
+ * `jumpWindow.startup` of `0` before this could divide by it.
+ */
+export function jumpRiseStepPerTick(config: FighterConfig): number {
+  return Math.floor(config.jumpHeight / config.jumpWindow.startup);
+}
+
+/** The fall's counterpart to `jumpRiseStepPerTick`, over `jumpWindow.recovery` Ticks. */
+export function jumpFallStepPerTick(config: FighterConfig): number {
+  return Math.floor(config.jumpHeight / config.jumpWindow.recovery);
 }
 
 /**

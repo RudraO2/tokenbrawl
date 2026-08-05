@@ -1,7 +1,7 @@
 import {
   FALLBACK_ACTION,
   type EnvironmentAdapter,
-  type LoggedAction,
+  type LoggedActionV2,
   type Observation,
   type TerminalResult,
 } from '@tokenbrawl/contracts';
@@ -9,10 +9,16 @@ import { canonicalStringify } from './canonical';
 import { assertIntegerConfig, DEFAULT_FIGHTER_CONFIG, type FighterConfig } from './config';
 import {
   COMMITTED_ATTACK,
+  COMMITTED_JUMP,
   COMMITTED_NONE,
   COMMITTED_SPECIAL,
   PHASE_ACTIVE,
+  PHASE_IDLE,
+  PHASE_RECOVERY,
+  PHASE_STARTUP,
   damageForCode,
+  jumpFallStepPerTick,
+  jumpRiseStepPerTick,
   legalActionsFor,
   phaseOf,
   rangeForCode,
@@ -55,9 +61,9 @@ function clamp(value: number, low: number, high: number): number {
  */
 function legaliseAction(
   config: FighterConfig,
-  submitted: LoggedAction,
+  submitted: LoggedActionV2,
   meter: number,
-): LoggedAction {
+): LoggedActionV2 {
   if (submitted === 'special' && meter < config.specialMeterCost) {
     return FALLBACK_ACTION;
   }
@@ -86,6 +92,8 @@ export function createFighterEnvironment(
         commitmentRemaining: [0, 0],
         committedAction: [COMMITTED_NONE, COMMITTED_NONE],
         windowHitLanded: [0, 0],
+        verticalPosition: [0, 0],
+        airState: [PHASE_IDLE, PHASE_IDLE],
       };
     },
 
@@ -151,7 +159,7 @@ export function createFighterEnvironment(
      */
     step(
       state: FighterState,
-      actions: readonly [LoggedAction | null, LoggedAction | null],
+      actions: readonly [LoggedActionV2 | null, LoggedActionV2 | null],
     ): FighterState {
       // Already terminal on entry: the whole Decision Point is frozen. Nothing
       // is committed, no Tick is simulated, and no PRNG draw is consumed --
@@ -183,6 +191,11 @@ export function createFighterEnvironment(
         state.commitmentRemaining[1],
       ];
       const hitLanded: [number, number] = [state.windowHitLanded[0], state.windowHitLanded[1]];
+      const verticalPosition: [number, number] = [
+        state.verticalPosition[0],
+        state.verticalPosition[1],
+      ];
+      const airState: [number, number] = [state.airState[0], state.airState[1]];
       const moveIntent: [number, number] = [MOVE_NONE, MOVE_NONE];
       /** `block` is a stance held for this Decision Point's ticks only -- it never survives into the next. */
       const blocking: [boolean, boolean] = [false, false];
@@ -216,6 +229,16 @@ export function createFighterEnvironment(
             // meter, which is what makes throwing one a real decision.
             meter[agentIndex] -= config.specialMeterCost;
           }
+        } else if (action === 'jump') {
+          // Story 8.2: opens a Commitment Window exactly like attack/special --
+          // no legality gate (unlike `special`, nothing is spent to commit),
+          // and no `hitLanded` semantics of its own since a whiffed or landed
+          // hit is not a concept jump has (air-attacks are Story 8.4's).
+          // Rise/apex/fall progress is driven Tick-by-Tick below, from the same
+          // `committed`/`remaining` pair every other window uses.
+          committed[agentIndex] = COMMITTED_JUMP;
+          remaining[agentIndex] = windowTotalTicks(config.jumpWindow);
+          hitLanded[agentIndex] = 0;
         }
         // `stand` -- the Fallback Action, and what a rejected `special` becomes
         // -- is inert by construction: no intent, no stance, nothing committed.
@@ -292,6 +315,13 @@ export function createFighterEnvironment(
             continue;
           }
           const code = committed[agentIndex];
+          // `jump` has no range band or damage of its own (Story 8.2 is
+          // rise-and-land only; air-attacks are Story 8.4's), so it is excluded
+          // here rather than letting `rangeForCode`/`damageForCode` throw for a
+          // code neither function recognises.
+          if (code !== COMMITTED_ATTACK && code !== COMMITTED_SPECIAL) {
+            continue;
+          }
           if (phaseOf(config, code, remaining[agentIndex]) !== PHASE_ACTIVE) {
             continue;
           }
@@ -321,6 +351,47 @@ export function createFighterEnvironment(
           );
         }
 
+        // Gravity (Story 8.2, AC4). Read against `remaining` before this Tick's
+        // countdown below, exactly like the hit resolution above -- the phase a
+        // fighter is judged to be in for a given Tick is the one it was in
+        // *entering* that Tick. A fixed-point integer step per Tick, never a
+        // delta-time multiply: `jumpRiseStepPerTick`/`jumpFallStepPerTick` are
+        // themselves pure integer division (AD-5).
+        for (const agentIndex of AGENT_INDICES) {
+          const code = committed[agentIndex];
+          if (code !== COMMITTED_JUMP) {
+            // Grounded, or committed to something that is not `jump`: no air
+            // state and no vertical motion. `verticalPosition` is left as-is
+            // rather than force-zeroed here so a state fed to `step()` cannot
+            // be silently "corrected" mid-Match; the window-close branch below
+            // is the one place a landing is enforced.
+            airState[agentIndex] = PHASE_IDLE;
+            continue;
+          }
+
+          const phase = phaseOf(config, code, remaining[agentIndex]);
+          airState[agentIndex] = phase;
+          if (phase === PHASE_STARTUP) {
+            verticalPosition[agentIndex] = Math.min(
+              config.jumpHeight,
+              verticalPosition[agentIndex] + jumpRiseStepPerTick(config),
+            );
+          } else if (phase === PHASE_ACTIVE) {
+            // Apex: held rather than left to drift, so a fighter is exactly at
+            // `jumpHeight` for the whole hang time regardless of any rise-phase
+            // remainder.
+            verticalPosition[agentIndex] = config.jumpHeight;
+          } else if (phase === PHASE_RECOVERY) {
+            // Floored every Tick (AC6), not only when the window closes: a
+            // caller stepping from a hand-built mid-fall state must never see
+            // this go negative either.
+            verticalPosition[agentIndex] = Math.max(
+              0,
+              verticalPosition[agentIndex] - jumpFallStepPerTick(config),
+            );
+          }
+        }
+
         // Window countdown: exactly one tick, so a Match can never stall and
         // `terminal()`'s timeout branch always stays reachable.
         for (const agentIndex of AGENT_INDICES) {
@@ -329,8 +400,16 @@ export function createFighterEnvironment(
           }
           remaining[agentIndex] -= 1;
           if (remaining[agentIndex] === 0) {
+            const wasJump = committed[agentIndex] === COMMITTED_JUMP;
             committed[agentIndex] = COMMITTED_NONE;
             hitLanded[agentIndex] = 0;
+            if (wasJump) {
+              // Land exactly on the floor: a rise/fall Tick count that does not
+              // divide `jumpHeight` evenly would otherwise leave a 1-or-2-unit
+              // remainder airborne forever (AC6).
+              verticalPosition[agentIndex] = 0;
+              airState[agentIndex] = PHASE_IDLE;
+            }
           }
         }
       }
@@ -344,6 +423,8 @@ export function createFighterEnvironment(
         commitmentRemaining: [remaining[0], remaining[1]],
         committedAction: [committed[0], committed[1]],
         windowHitLanded: [hitLanded[0], hitLanded[1]],
+        verticalPosition: [verticalPosition[0], verticalPosition[1]],
+        airState: [airState[0], airState[1]],
       };
     },
 

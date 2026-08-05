@@ -6,7 +6,7 @@ recomputes this file from a fresh ladder run on every `npm test` and fails if it
 Result: **PASS**
 
 - Environment: `fighter-1v1` v1.0.0
-- Frame-data config hash: `891e524089af5b88da76fcfb9149be945cb0d33738d2eda472498475180b48a2`
+- Frame-data config hash: `b2b38645b3263cabe9a127eb3e7e57f3718aaee524f7a332aa0129fa3956d344`
 - Matches: 600 across 3 pairings (100 seeds x 2 side swaps each, AD-12)
 - Distinct match ids: 600
 - Confidence intervals: seeded percentile bootstrap, 2000 resamples, seed 987654321, 0.9500 coverage (AD-5)

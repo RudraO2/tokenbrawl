@@ -21,11 +21,11 @@
  * where `<script>` is Decision Points separated by `,` and the two Agents'
  * Actions separated by `:`, with `-` meaning "submitted nothing".
  */
-import type { LoggedAction } from '@tokenbrawl/contracts';
+import type { LoggedActionV2 } from '@tokenbrawl/contracts';
 import { createFighterEnvironment } from '../environment';
 
-function parseAction(token: string): LoggedAction | null {
-  return token === '-' ? null : (token as LoggedAction);
+function parseAction(token: string): LoggedActionV2 | null {
+  return token === '-' ? null : (token as LoggedActionV2);
 }
 
 const seed = Number(process.argv[2]);

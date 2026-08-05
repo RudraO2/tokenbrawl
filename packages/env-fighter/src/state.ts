@@ -36,4 +36,21 @@ export interface FighterState {
    * Cleared when the window closes, so an idle fighter always reads `0`.
    */
   readonly windowHitLanded: readonly [number, number];
+  /**
+   * Integer units above the floor along the vertical axis. `0` is grounded.
+   * Story 8.2: driven by `jump`'s Commitment Window (rise -> apex -> fall) and
+   * gravity in `environment.ts`'s `step()`, never set directly elsewhere.
+   * Floored at `0` on every Tick resolution -- it can never go negative.
+   */
+  readonly verticalPosition: readonly [number, number];
+  /**
+   * Which phase of a `jump` a fighter is in, as one of `frames.ts`'s
+   * `PHASE_*` codes (`PHASE_IDLE` when grounded or mid-*any other* Commitment
+   * Window). A projection of `committedAction`/`commitmentRemaining` rather
+   * than an independent state machine -- reusing `phaseOf` is what "no
+   * parallel window system" (Story 8.2) means in practice -- but stored
+   * rather than recomputed on read, so Story 8.4's air-attack and juggle work
+   * can consume it without threading `committedAction` through as well.
+   */
+  readonly airState: readonly [number, number];
 }

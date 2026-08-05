@@ -8,7 +8,7 @@ only within a table, and only as far as the two Agents met comparable opposition
 opponent count and the full per-opponent breakdown are published with every row.
 
 - Environment: `fighter-1v1` v1.0.0
-- Frame-data config hash: `891e524089af5b88da76fcfb9149be945cb0d33738d2eda472498475180b48a2`
+- Frame-data config hash: `b2b38645b3263cabe9a127eb3e7e57f3718aaee524f7a332aa0129fa3956d344`
 - Corpus: the Baseline Bot ladder — 600 Matches over 100 seeds from seed base 20260731, every seed played from both sides (AD-12)
 - Matches: 600 total, 600 rated, 0 excluded
 - Confidence interval: seeded percentile bootstrap, 2000 resamples, seed 20260802, 0.9500 coverage (AD-5)

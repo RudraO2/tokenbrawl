@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { DEFAULT_FIGHTER_CONFIG, type FighterConfig } from './config';
 import {
   COMMITTED_ATTACK,
+  COMMITTED_JUMP,
   COMMITTED_NONE,
   COMMITTED_SPECIAL,
   PHASE_ACTIVE,
@@ -10,6 +11,8 @@ import {
   PHASE_RECOVERY,
   PHASE_STARTUP,
   damageForCode,
+  jumpFallStepPerTick,
+  jumpRiseStepPerTick,
   legalActionsFor,
   phaseOf,
   rangeForCode,
@@ -34,10 +37,15 @@ describe('windowFor', () => {
     expect(windowFor(DEFAULT_FIGHTER_CONFIG, COMMITTED_NONE)).toBeNull();
   });
 
+  it('returns the jump window for COMMITTED_JUMP (AC1, Story 8.2)', () => {
+    expect(windowFor(DEFAULT_FIGHTER_CONFIG, COMMITTED_JUMP)).toBe(DEFAULT_FIGHTER_CONFIG.jumpWindow);
+  });
+
   it('returns null for an unrecognised code, rather than defaulting to a window', () => {
     // A stray code (a bit-flip, a bad migration) must read as "no window
-    // open", not silently fall through to attack's or special's frame data.
-    expect(windowFor(DEFAULT_FIGHTER_CONFIG, 3)).toBeNull();
+    // open", not silently fall through to attack's, special's or jump's frame
+    // data. 99 rather than 3: 3 is now COMMITTED_JUMP (Story 8.2).
+    expect(windowFor(DEFAULT_FIGHTER_CONFIG, 99)).toBeNull();
     expect(windowFor(DEFAULT_FIGHTER_CONFIG, -1)).toBeNull();
   });
 });
@@ -108,6 +116,14 @@ describe('phaseOf', () => {
     );
   });
 
+  it('walks the jump window through rise, apex, fall in order (AC1, Story 8.2)', () => {
+    // Same machinery, same assertion shape as attack/special above: jump opens
+    // no parallel window system, so it must walk through phaseOf identically.
+    expect(walkedPhases(DEFAULT_FIGHTER_CONFIG, COMMITTED_JUMP)).toStrictEqual(
+      expectedPhases(DEFAULT_FIGHTER_CONFIG, COMMITTED_JUMP),
+    );
+  });
+
   it('is PHASE_IDLE once remaining reaches 0, for both windows', () => {
     expect(phaseOf(DEFAULT_FIGHTER_CONFIG, COMMITTED_ATTACK, 0)).toBe(PHASE_IDLE);
     expect(phaseOf(DEFAULT_FIGHTER_CONFIG, COMMITTED_SPECIAL, 0)).toBe(PHASE_IDLE);
@@ -125,6 +141,34 @@ describe('phaseOf', () => {
     expect(phaseOf(DEFAULT_FIGHTER_CONFIG, COMMITTED_NONE, 0)).toBe(PHASE_IDLE);
     expect(phaseOf(DEFAULT_FIGHTER_CONFIG, COMMITTED_NONE, 40)).toBe(PHASE_IDLE);
     expect(phaseOf(DEFAULT_FIGHTER_CONFIG, COMMITTED_NONE, -5)).toBe(PHASE_IDLE);
+  });
+});
+
+describe('jump gravity step (AC4, Story 8.2)', () => {
+  it('divides jumpHeight evenly across the rise and fall Tick counts by default', () => {
+    // The default config was chosen so 32 / 16 has no remainder -- pinned here
+    // so a future recalibration that reintroduces one is a visible, deliberate
+    // choice rather than a silent drift into a Tick that idles.
+    expect(jumpRiseStepPerTick(DEFAULT_FIGHTER_CONFIG)).toBe(2);
+    expect(jumpFallStepPerTick(DEFAULT_FIGHTER_CONFIG)).toBe(2);
+    expect(jumpRiseStepPerTick(DEFAULT_FIGHTER_CONFIG) * DEFAULT_FIGHTER_CONFIG.jumpWindow.startup).toBe(
+      DEFAULT_FIGHTER_CONFIG.jumpHeight,
+    );
+    expect(jumpFallStepPerTick(DEFAULT_FIGHTER_CONFIG) * DEFAULT_FIGHTER_CONFIG.jumpWindow.recovery).toBe(
+      DEFAULT_FIGHTER_CONFIG.jumpHeight,
+    );
+  });
+
+  it('floors an uneven division rather than producing a float (AD-5)', () => {
+    const uneven: FighterConfig = {
+      ...DEFAULT_FIGHTER_CONFIG,
+      jumpHeight: 10,
+      jumpWindow: { startup: 3, active: 1, recovery: 4 },
+    };
+    expect(jumpRiseStepPerTick(uneven)).toBe(3);
+    expect(jumpFallStepPerTick(uneven)).toBe(2);
+    expect(Number.isInteger(jumpRiseStepPerTick(uneven))).toBe(true);
+    expect(Number.isInteger(jumpFallStepPerTick(uneven))).toBe(true);
   });
 });
 
