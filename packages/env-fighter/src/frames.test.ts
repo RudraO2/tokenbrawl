@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { DEFAULT_FIGHTER_CONFIG, type FighterConfig } from './config';
 import {
   COMMITTED_ATTACK,
+  COMMITTED_HITSTUN,
   COMMITTED_JUMP,
   COMMITTED_NONE,
   COMMITTED_SPECIAL,
@@ -11,11 +12,15 @@ import {
   PHASE_RECOVERY,
   PHASE_STARTUP,
   damageForCode,
+  juggleChainTicksElapsed,
+  juggleDamageFor,
+  juggleHitstunFor,
   jumpFallStepPerTick,
   jumpRiseStepPerTick,
   legalActionsFor,
   phaseOf,
   rangeForCode,
+  scaleByJuggleTable,
   windowFor,
   windowTotalTicks,
 } from './frames';
@@ -47,6 +52,14 @@ describe('windowFor', () => {
     // data. 99 rather than 3: 3 is now COMMITTED_JUMP (Story 8.2).
     expect(windowFor(DEFAULT_FIGHTER_CONFIG, 99)).toBeNull();
     expect(windowFor(DEFAULT_FIGHTER_CONFIG, -1)).toBeNull();
+  });
+
+  it('returns null for COMMITTED_HITSTUN (Story 8.4) -- hitstun has no phase shape', () => {
+    // Hitstun locks a defender out the same way a real Commitment Window
+    // does, but it is not one: it has no startup/active/recovery breakdown
+    // and attacks nothing, so `phaseOf`/`rangeForCode`/`damageForCode` must
+    // never be handed this code.
+    expect(windowFor(DEFAULT_FIGHTER_CONFIG, COMMITTED_HITSTUN)).toBeNull();
   });
 });
 
@@ -229,5 +242,66 @@ describe('legalActionsFor', () => {
   it('always includes special when specialMeterCost is 0', () => {
     const freeSpecial: FighterConfig = { ...DEFAULT_FIGHTER_CONFIG, specialMeterCost: 0 };
     expect(legalActionsFor(freeSpecial, 0)).toStrictEqual(ACTIONS);
+  });
+});
+
+describe('juggle scaling table (Story 8.4)', () => {
+  const TABLE = [100, 80, 40, 0];
+
+  it('scales by the percentage at the exact index', () => {
+    expect(scaleByJuggleTable(10, TABLE, 0)).toBe(10);
+    expect(scaleByJuggleTable(10, TABLE, 1)).toBe(8);
+    expect(scaleByJuggleTable(10, TABLE, 2)).toBe(4);
+    expect(scaleByJuggleTable(10, TABLE, 3)).toBe(0);
+  });
+
+  it('clamps a Juggle Count past the table to its last entry, rather than throwing', () => {
+    expect(scaleByJuggleTable(10, TABLE, 4)).toBe(0);
+    expect(scaleByJuggleTable(10, TABLE, 999)).toBe(0);
+  });
+
+  it('clamps a negative Juggle Count to the table\'s first entry', () => {
+    expect(scaleByJuggleTable(10, TABLE, -1)).toBe(10);
+  });
+
+  it('floors an uneven scale rather than producing a float (AD-5)', () => {
+    const result = scaleByJuggleTable(7, [50], 0);
+    expect(result).toBe(3);
+    expect(Number.isInteger(result)).toBe(true);
+  });
+
+  it('juggleDamageFor and juggleHitstunFor read from their own configured tables', () => {
+    const config: FighterConfig = {
+      ...DEFAULT_FIGHTER_CONFIG,
+      hitstunTicks: 20,
+      juggleDamageScalePercent: [100, 50],
+      juggleHitstunScalePercent: [100, 25],
+    };
+    expect(juggleDamageFor(config, 8, 0)).toBe(8);
+    expect(juggleDamageFor(config, 8, 1)).toBe(4);
+    expect(juggleHitstunFor(config, 0)).toBe(20);
+    expect(juggleHitstunFor(config, 1)).toBe(5);
+  });
+
+  it('juggleChainTicksElapsed sums hitstun across the chain so far, excluding the hit at juggleCount', () => {
+    const config: FighterConfig = {
+      ...DEFAULT_FIGHTER_CONFIG,
+      hitstunTicks: 10,
+      juggleHitstunScalePercent: [100, 100, 50, 0],
+    };
+    expect(juggleChainTicksElapsed(config, 0)).toBe(0);
+    expect(juggleChainTicksElapsed(config, 1)).toBe(10);
+    expect(juggleChainTicksElapsed(config, 2)).toBe(20);
+    expect(juggleChainTicksElapsed(config, 3)).toBe(25);
+    expect(juggleChainTicksElapsed(config, 4)).toBe(25);
+  });
+
+  it("the default config's juggleTickCap is exactly the sum its own table produces", () => {
+    // Pinned so a future recalibration of either table drifts the cap along
+    // with it rather than silently falling out of sync (config.ts's comment
+    // states this as a provable property, not a coincidence).
+    expect(juggleChainTicksElapsed(DEFAULT_FIGHTER_CONFIG, DEFAULT_FIGHTER_CONFIG.juggleMaxCount)).toBe(
+      DEFAULT_FIGHTER_CONFIG.juggleTickCap,
+    );
   });
 });

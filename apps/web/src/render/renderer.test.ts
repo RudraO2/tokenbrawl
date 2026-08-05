@@ -80,6 +80,7 @@ function stateWith(overrides: Partial<FighterState> = {}): FighterState {
     verticalPosition: [0, 0],
     airState: [PHASE_IDLE, PHASE_IDLE],
     committedZone: [ZONE_NONE, ZONE_NONE],
+    juggleCount: [0, 0],
     ...overrides,
   };
 }

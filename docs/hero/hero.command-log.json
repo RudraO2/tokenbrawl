@@ -1,12 +1,12 @@
 {
   "schemaVersion": "1.0.0",
-  "matchId": "8ff3366ef888d9c78d681c1b8145dc5091d8d17f57cc3dae8cff792adf8396fe",
+  "matchId": "1fbb282ea5518f00a38fc1bd887a0ac2fec898b21a107fc7f6bc8ee97a4fbc61",
   "environment": {
     "id": "fighter-1v1",
     "version": "1.0.0"
   },
   "seed": 7404,
-  "configHash": "b2b38645b3263cabe9a127eb3e7e57f3718aaee524f7a332aa0129fa3956d344",
+  "configHash": "24f5f97e1c88a3f3a9b66405c569c076ba30994ac93dbc69429c3b8780bdc0f7",
   "tokenBankStart": 4000,
   "agents": [
     {
@@ -100,7 +100,7 @@
       "endpoint": "bot"
     },
     {
-      "tick": 120,
+      "tick": 150,
       "agentIndex": 0,
       "action": "block",
       "tokensSpent": 401,
@@ -114,6 +114,15 @@
     },
     {
       "tick": 150,
+      "agentIndex": 1,
+      "action": "block",
+      "reasoning": null,
+      "rawResponse": "spacing:block",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 180,
       "agentIndex": 0,
       "action": "retreat",
       "tokensSpent": 424,
@@ -126,7 +135,7 @@
       "endpoint": "https://scripted-stand-in.invalid/v1/chat/completions"
     },
     {
-      "tick": 150,
+      "tick": 180,
       "agentIndex": 1,
       "action": "block",
       "reasoning": null,
@@ -135,7 +144,7 @@
       "endpoint": "bot"
     },
     {
-      "tick": 180,
+      "tick": 210,
       "agentIndex": 0,
       "action": "attack",
       "tokensSpent": 447,
@@ -148,7 +157,7 @@
       "endpoint": "https://scripted-stand-in.invalid/v1/chat/completions"
     },
     {
-      "tick": 180,
+      "tick": 210,
       "agentIndex": 1,
       "action": "advance",
       "reasoning": null,
@@ -157,7 +166,7 @@
       "endpoint": "bot"
     },
     {
-      "tick": 210,
+      "tick": 240,
       "agentIndex": 1,
       "action": "attack",
       "reasoning": null,
@@ -166,7 +175,7 @@
       "endpoint": "bot"
     },
     {
-      "tick": 240,
+      "tick": 300,
       "agentIndex": 0,
       "action": "advance",
       "tokensSpent": 433,
@@ -175,41 +184,6 @@
       "reflexMode": false,
       "reasoning": "Bank is getting thin. Closing distance now while I can still afford to think about the read.",
       "rawResponse": "Bank is getting thin. Closing distance now while I can still afford to think about the read.\nACTION: advance",
-      "provider": "byok",
-      "endpoint": "https://scripted-stand-in.invalid/v1/chat/completions"
-    },
-    {
-      "tick": 270,
-      "agentIndex": 0,
-      "action": "special",
-      "tokensSpent": 489,
-      "reasoningTokens": 318,
-      "bankRemaining": 530,
-      "reflexMode": false,
-      "reasoning": "Meter is full and they are cornered. Special is 60 ticks of commitment, which is only survivable when they have nowhere to walk to.",
-      "rawResponse": "Meter is full and they are cornered. Special is 60 ticks of commitment, which is only survivable when they have nowhere to walk to.\nACTION: special",
-      "provider": "byok",
-      "endpoint": "https://scripted-stand-in.invalid/v1/chat/completions"
-    },
-    {
-      "tick": 270,
-      "agentIndex": 1,
-      "action": "block",
-      "reasoning": null,
-      "rawResponse": "spacing:block",
-      "provider": "bot",
-      "endpoint": "bot"
-    },
-    {
-      "tick": 300,
-      "agentIndex": 0,
-      "action": "advance",
-      "tokensSpent": 412,
-      "reasoningTokens": 260,
-      "bankRemaining": 118,
-      "reflexMode": false,
-      "reasoning": "Opening at max range with a full bank. Walking in costs nothing and forces the spacing bot to commit first.",
-      "rawResponse": "Opening at max range with a full bank. Walking in costs nothing and forces the spacing bot to commit first.\nACTION: advance",
       "provider": "byok",
       "endpoint": "https://scripted-stand-in.invalid/v1/chat/completions"
     },
@@ -225,13 +199,13 @@
     {
       "tick": 330,
       "agentIndex": 0,
-      "action": "advance",
-      "tokensSpent": 396,
-      "reasoningTokens": 244,
-      "bankRemaining": 0,
+      "action": "special",
+      "tokensSpent": 489,
+      "reasoningTokens": 318,
+      "bankRemaining": 530,
       "reflexMode": false,
-      "reasoning": "Still outside attack range. Another step closes the gap without opening a Commitment Window I would have to sit through.",
-      "rawResponse": "Still outside attack range. Another step closes the gap without opening a Commitment Window I would have to sit through.\nACTION: advance",
+      "reasoning": "Meter is full and they are cornered. Special is 60 ticks of commitment, which is only survivable when they have nowhere to walk to.",
+      "rawResponse": "Meter is full and they are cornered. Special is 60 ticks of commitment, which is only survivable when they have nowhere to walk to.\nACTION: special",
       "provider": "byok",
       "endpoint": "https://scripted-stand-in.invalid/v1/chat/completions"
     },
@@ -247,13 +221,13 @@
     {
       "tick": 360,
       "agentIndex": 0,
-      "action": "attack",
-      "tokensSpent": 8,
-      "reasoningTokens": 0,
-      "bankRemaining": 0,
-      "reflexMode": true,
-      "reasoning": "Reflex Mode: bank empty, call capped at 8 tokens. No frames read, no spacing check - just swing.",
-      "rawResponse": "Reflex Mode: bank empty, call capped at 8 tokens. No frames read, no spacing check - just swing.\nACTION: attack",
+      "action": "advance",
+      "tokensSpent": 412,
+      "reasoningTokens": 260,
+      "bankRemaining": 118,
+      "reflexMode": false,
+      "reasoning": "Opening at max range with a full bank. Walking in costs nothing and forces the spacing bot to commit first.",
+      "rawResponse": "Opening at max range with a full bank. Walking in costs nothing and forces the spacing bot to commit first.\nACTION: advance",
       "provider": "byok",
       "endpoint": "https://scripted-stand-in.invalid/v1/chat/completions"
     },
@@ -268,10 +242,23 @@
     },
     {
       "tick": 390,
+      "agentIndex": 0,
+      "action": "advance",
+      "tokensSpent": 396,
+      "reasoningTokens": 244,
+      "bankRemaining": 0,
+      "reflexMode": false,
+      "reasoning": "Still outside attack range. Another step closes the gap without opening a Commitment Window I would have to sit through.",
+      "rawResponse": "Still outside attack range. Another step closes the gap without opening a Commitment Window I would have to sit through.\nACTION: advance",
+      "provider": "byok",
+      "endpoint": "https://scripted-stand-in.invalid/v1/chat/completions"
+    },
+    {
+      "tick": 390,
       "agentIndex": 1,
-      "action": "attack",
+      "action": "block",
       "reasoning": null,
-      "rawResponse": "spacing:attack",
+      "rawResponse": "spacing:block",
       "provider": "bot",
       "endpoint": "bot"
     },
@@ -289,6 +276,15 @@
       "endpoint": "https://scripted-stand-in.invalid/v1/chat/completions"
     },
     {
+      "tick": 420,
+      "agentIndex": 1,
+      "action": "block",
+      "reasoning": null,
+      "rawResponse": "spacing:block",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
       "tick": 450,
       "agentIndex": 1,
       "action": "attack",
@@ -298,7 +294,7 @@
       "endpoint": "bot"
     },
     {
-      "tick": 480,
+      "tick": 510,
       "agentIndex": 0,
       "action": "attack",
       "tokensSpent": 8,
@@ -313,27 +309,14 @@
     {
       "tick": 510,
       "agentIndex": 1,
-      "action": "attack",
+      "action": "block",
       "reasoning": null,
-      "rawResponse": "spacing:attack",
+      "rawResponse": "spacing:block",
       "provider": "bot",
       "endpoint": "bot"
     },
     {
       "tick": 540,
-      "agentIndex": 0,
-      "action": "attack",
-      "tokensSpent": 8,
-      "reasoningTokens": 0,
-      "bankRemaining": 0,
-      "reflexMode": true,
-      "reasoning": "Reflex Mode: bank empty, call capped at 8 tokens. No frames read, no spacing check - just swing.",
-      "rawResponse": "Reflex Mode: bank empty, call capped at 8 tokens. No frames read, no spacing check - just swing.\nACTION: attack",
-      "provider": "byok",
-      "endpoint": "https://scripted-stand-in.invalid/v1/chat/completions"
-    },
-    {
-      "tick": 570,
       "agentIndex": 1,
       "action": "attack",
       "reasoning": null,
@@ -355,6 +338,15 @@
       "endpoint": "https://scripted-stand-in.invalid/v1/chat/completions"
     },
     {
+      "tick": 600,
+      "agentIndex": 1,
+      "action": "block",
+      "reasoning": null,
+      "rawResponse": "spacing:block",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
       "tick": 630,
       "agentIndex": 1,
       "action": "attack",
@@ -364,7 +356,7 @@
       "endpoint": "bot"
     },
     {
-      "tick": 660,
+      "tick": 690,
       "agentIndex": 0,
       "action": "attack",
       "tokensSpent": 8,
@@ -379,27 +371,14 @@
     {
       "tick": 690,
       "agentIndex": 1,
-      "action": "attack",
+      "action": "block",
       "reasoning": null,
-      "rawResponse": "spacing:attack",
+      "rawResponse": "spacing:block",
       "provider": "bot",
       "endpoint": "bot"
     },
     {
       "tick": 720,
-      "agentIndex": 0,
-      "action": "attack",
-      "tokensSpent": 8,
-      "reasoningTokens": 0,
-      "bankRemaining": 0,
-      "reflexMode": true,
-      "reasoning": "Reflex Mode: bank empty, call capped at 8 tokens. No frames read, no spacing check - just swing.",
-      "rawResponse": "Reflex Mode: bank empty, call capped at 8 tokens. No frames read, no spacing check - just swing.\nACTION: attack",
-      "provider": "byok",
-      "endpoint": "https://scripted-stand-in.invalid/v1/chat/completions"
-    },
-    {
-      "tick": 750,
       "agentIndex": 1,
       "action": "attack",
       "reasoning": null,
@@ -421,6 +400,15 @@
       "endpoint": "https://scripted-stand-in.invalid/v1/chat/completions"
     },
     {
+      "tick": 780,
+      "agentIndex": 1,
+      "action": "block",
+      "reasoning": null,
+      "rawResponse": "spacing:block",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
       "tick": 810,
       "agentIndex": 1,
       "action": "attack",
@@ -430,7 +418,7 @@
       "endpoint": "bot"
     },
     {
-      "tick": 840,
+      "tick": 870,
       "agentIndex": 0,
       "action": "attack",
       "tokensSpent": 8,
@@ -445,27 +433,14 @@
     {
       "tick": 870,
       "agentIndex": 1,
-      "action": "attack",
+      "action": "block",
       "reasoning": null,
-      "rawResponse": "spacing:attack",
+      "rawResponse": "spacing:block",
       "provider": "bot",
       "endpoint": "bot"
     },
     {
       "tick": 900,
-      "agentIndex": 0,
-      "action": "attack",
-      "tokensSpent": 8,
-      "reasoningTokens": 0,
-      "bankRemaining": 0,
-      "reflexMode": true,
-      "reasoning": "Reflex Mode: bank empty, call capped at 8 tokens. No frames read, no spacing check - just swing.",
-      "rawResponse": "Reflex Mode: bank empty, call capped at 8 tokens. No frames read, no spacing check - just swing.\nACTION: attack",
-      "provider": "byok",
-      "endpoint": "https://scripted-stand-in.invalid/v1/chat/completions"
-    },
-    {
-      "tick": 930,
       "agentIndex": 1,
       "action": "attack",
       "reasoning": null,
@@ -487,7 +462,78 @@
       "endpoint": "https://scripted-stand-in.invalid/v1/chat/completions"
     },
     {
+      "tick": 960,
+      "agentIndex": 1,
+      "action": "block",
+      "reasoning": null,
+      "rawResponse": "spacing:block",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
       "tick": 990,
+      "agentIndex": 1,
+      "action": "attack",
+      "reasoning": null,
+      "rawResponse": "spacing:attack",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 1050,
+      "agentIndex": 0,
+      "action": "attack",
+      "tokensSpent": 8,
+      "reasoningTokens": 0,
+      "bankRemaining": 0,
+      "reflexMode": true,
+      "reasoning": "Reflex Mode: bank empty, call capped at 8 tokens. No frames read, no spacing check - just swing.",
+      "rawResponse": "Reflex Mode: bank empty, call capped at 8 tokens. No frames read, no spacing check - just swing.\nACTION: attack",
+      "provider": "byok",
+      "endpoint": "https://scripted-stand-in.invalid/v1/chat/completions"
+    },
+    {
+      "tick": 1050,
+      "agentIndex": 1,
+      "action": "block",
+      "reasoning": null,
+      "rawResponse": "spacing:block",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 1080,
+      "agentIndex": 1,
+      "action": "attack",
+      "reasoning": null,
+      "rawResponse": "spacing:attack",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 1140,
+      "agentIndex": 0,
+      "action": "attack",
+      "tokensSpent": 8,
+      "reasoningTokens": 0,
+      "bankRemaining": 0,
+      "reflexMode": true,
+      "reasoning": "Reflex Mode: bank empty, call capped at 8 tokens. No frames read, no spacing check - just swing.",
+      "rawResponse": "Reflex Mode: bank empty, call capped at 8 tokens. No frames read, no spacing check - just swing.\nACTION: attack",
+      "provider": "byok",
+      "endpoint": "https://scripted-stand-in.invalid/v1/chat/completions"
+    },
+    {
+      "tick": 1140,
+      "agentIndex": 1,
+      "action": "block",
+      "reasoning": null,
+      "rawResponse": "spacing:block",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 1170,
       "agentIndex": 1,
       "action": "attack",
       "reasoning": null,
@@ -498,12 +544,12 @@
   ],
   "result": {
     "outcome": "p2",
-    "endTick": 1020,
-    "endReason": "ko",
+    "endTick": 1200,
+    "endReason": "timeout",
     "healthRemaining": [
-      0,
-      29
+      16,
+      100
     ]
   },
-  "finalStateHash": "2b7977388aaecb98d1def05841eb86d05962767efeb8fc2a051de6aa91d190b5"
+  "finalStateHash": "2945a5e7a93a5a8f542e262de2cf8600a9dfcfb8b5948dc07cfde5b723c170b7"
 }

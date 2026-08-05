@@ -143,7 +143,17 @@ describe('skill separation gate (FR-3, the gate on E3/E4/E5/E7)', () => {
       seed: LADDER_BOOTSTRAP_SEED,
     });
     expect(raised.passed).toBe(false);
-    expect(raised.failures.length).toBeGreaterThanOrEqual(3);
+    // Story 8.4 (multi-hit strings and juggle state) changed fight dynamics
+    // enough that spacing-aware now clears both of its pairings with a 100%
+    // lower bound, so raising the threshold to that same 100% no longer fails
+    // those two -- only the third pairing does. That still proves the
+    // evaluator compares against the threshold rather than rubber-stamping
+    // every pairing (the property this case exists for): at least one
+    // genuine failure appears, and it is `passed: false` overall. Story 8.5
+    // (v2 skill-separation re-gate) owns recalibrating the ladder itself; this
+    // assertion tracks the evaluator's real behaviour under the current game,
+    // not a target this test should hold the game to.
+    expect(raised.failures.length).toBeGreaterThanOrEqual(1);
   });
 
   it('reproduces the identical ladder from the identical seeds (INV-2)', async () => {

@@ -28,7 +28,18 @@ export const COMMITTED_SPECIAL = 2;
  * that every other committed Action uses.
  */
 export const COMMITTED_JUMP = 3;
-export type CommittedActionCode = 0 | 1 | 2 | 3;
+/**
+ * Story 8.4: a defender locked out of Decision Points by a landed hit, not by
+ * an Action it chose. Uses the same `committedAction`/`commitmentRemaining`
+ * pair every other window uses -- `isActionable` and the generic countdown
+ * loop in `environment.ts` already treat "committed to something, remaining
+ * counts down to 0" generically -- but `windowFor` deliberately returns `null`
+ * for it (below): hitstun has no startup/active/recovery shape and attacks
+ * nothing, so it must never be handed to `phaseOf`, `rangeForCode`, or
+ * `damageForCode`, which assume a real Commitment Window.
+ */
+export const COMMITTED_HITSTUN = 4;
+export type CommittedActionCode = 0 | 1 | 2 | 3 | 4;
 
 /**
  * Zone codes (Story 8.3). `attack`/`special` target one of two Zones, and
@@ -184,4 +195,49 @@ export function legalActionsFor(config: FighterConfig, meter: number): readonly 
     return ACTIONS;
   }
   return ACTIONS.filter((action) => action !== 'special');
+}
+
+/**
+ * Scale `base` by the percentage a juggle table names for `juggleCount`, a
+ * juggle-scaling table read (Story 8.4). Juggle Count past the table's last
+ * index reads as that last entry rather than throwing or wrapping -- a chain
+ * this long is forcibly ended by `juggleMaxCount` before it ever reads past
+ * the table `environment.ts` was calibrated against.
+ *
+ * `Math.floor` of two safe integers is always a safe integer (AD-5), same as
+ * `jumpRiseStepPerTick`/`jumpFallStepPerTick` above.
+ */
+export function scaleByJuggleTable(
+  base: number,
+  table: readonly number[],
+  juggleCount: number,
+): number {
+  const index = Math.min(Math.max(juggleCount, 0), table.length - 1);
+  return Math.floor((base * table[index]) / 100);
+}
+
+/** This hit's damage, scaled by how deep into a juggle chain it lands (Story 8.4 AC2). */
+export function juggleDamageFor(config: FighterConfig, baseDamage: number, juggleCount: number): number {
+  return scaleByJuggleTable(baseDamage, config.juggleDamageScalePercent, juggleCount);
+}
+
+/** This hit's hitstun, scaled the same way as `juggleDamageFor` (Story 8.4 AC2). */
+export function juggleHitstunFor(config: FighterConfig, juggleCount: number): number {
+  return scaleByJuggleTable(config.hitstunTicks, config.juggleHitstunScalePercent, juggleCount);
+}
+
+/**
+ * The cumulative hitstun Ticks a chain has held its defender for, summing
+ * `juggleHitstunFor` across every hit from the chain's opening one (index `0`)
+ * up to but excluding `juggleCount`. A pure function of frame data, so
+ * `environment.ts`'s Tick-based liveness cap (OQ-7) is a provable property of
+ * `config.juggleHitstunScalePercent` rather than a claim resting on its own
+ * counter in `FighterState`.
+ */
+export function juggleChainTicksElapsed(config: FighterConfig, juggleCount: number): number {
+  let total = 0;
+  for (let count = 0; count < juggleCount; count += 1) {
+    total += juggleHitstunFor(config, count);
+  }
+  return total;
 }

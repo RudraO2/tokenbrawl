@@ -1,6 +1,6 @@
 {
   "schemaVersion": "1.0.0",
-  "matchId": "874992382d518add81ed4f61fc8a7089bba2482b35842cd5db4b51057c8540c9",
+  "matchId": "2eeb96221299a26cccfe5a7f991fac35a5cacd4291e97ce3f9cb75f4df90f453",
   "entries": [
     {
       "tick": 0,
@@ -59,7 +59,7 @@
       "parseFailure": false
     },
     {
-      "tick": 120,
+      "tick": 150,
       "agentIndex": 0,
       "reasoning": null,
       "rawResponse": "aggressive:attack",
@@ -70,20 +70,12 @@
       "tick": 150,
       "agentIndex": 1,
       "reasoning": null,
-      "rawResponse": "spacing:attack",
+      "rawResponse": "spacing:block",
       "reflexMode": false,
       "parseFailure": false
     },
     {
       "tick": 180,
-      "agentIndex": 0,
-      "reasoning": null,
-      "rawResponse": "aggressive:attack",
-      "reflexMode": false,
-      "parseFailure": false
-    },
-    {
-      "tick": 210,
       "agentIndex": 1,
       "reasoning": null,
       "rawResponse": "spacing:attack",
@@ -99,6 +91,14 @@
       "parseFailure": false
     },
     {
+      "tick": 240,
+      "agentIndex": 1,
+      "reasoning": null,
+      "rawResponse": "spacing:block",
+      "reflexMode": false,
+      "parseFailure": false
+    },
+    {
       "tick": 270,
       "agentIndex": 1,
       "reasoning": null,
@@ -107,7 +107,7 @@
       "parseFailure": false
     },
     {
-      "tick": 300,
+      "tick": 330,
       "agentIndex": 0,
       "reasoning": null,
       "rawResponse": "aggressive:attack",
@@ -118,20 +118,12 @@
       "tick": 330,
       "agentIndex": 1,
       "reasoning": null,
-      "rawResponse": "spacing:attack",
+      "rawResponse": "spacing:block",
       "reflexMode": false,
       "parseFailure": false
     },
     {
       "tick": 360,
-      "agentIndex": 0,
-      "reasoning": null,
-      "rawResponse": "aggressive:attack",
-      "reflexMode": false,
-      "parseFailure": false
-    },
-    {
-      "tick": 390,
       "agentIndex": 1,
       "reasoning": null,
       "rawResponse": "spacing:attack",
@@ -147,6 +139,14 @@
       "parseFailure": false
     },
     {
+      "tick": 420,
+      "agentIndex": 1,
+      "reasoning": null,
+      "rawResponse": "spacing:block",
+      "reflexMode": false,
+      "parseFailure": false
+    },
+    {
       "tick": 450,
       "agentIndex": 1,
       "reasoning": null,
@@ -155,7 +155,7 @@
       "parseFailure": false
     },
     {
-      "tick": 480,
+      "tick": 510,
       "agentIndex": 0,
       "reasoning": null,
       "rawResponse": "aggressive:attack",
@@ -166,20 +166,12 @@
       "tick": 510,
       "agentIndex": 1,
       "reasoning": null,
-      "rawResponse": "spacing:attack",
+      "rawResponse": "spacing:block",
       "reflexMode": false,
       "parseFailure": false
     },
     {
       "tick": 540,
-      "agentIndex": 0,
-      "reasoning": null,
-      "rawResponse": "aggressive:attack",
-      "reflexMode": false,
-      "parseFailure": false
-    },
-    {
-      "tick": 570,
       "agentIndex": 1,
       "reasoning": null,
       "rawResponse": "spacing:attack",
@@ -195,6 +187,14 @@
       "parseFailure": false
     },
     {
+      "tick": 600,
+      "agentIndex": 1,
+      "reasoning": null,
+      "rawResponse": "spacing:block",
+      "reflexMode": false,
+      "parseFailure": false
+    },
+    {
       "tick": 630,
       "agentIndex": 1,
       "reasoning": null,
@@ -203,7 +203,7 @@
       "parseFailure": false
     },
     {
-      "tick": 660,
+      "tick": 690,
       "agentIndex": 0,
       "reasoning": null,
       "rawResponse": "aggressive:attack",
@@ -214,20 +214,12 @@
       "tick": 690,
       "agentIndex": 1,
       "reasoning": null,
-      "rawResponse": "spacing:attack",
+      "rawResponse": "spacing:block",
       "reflexMode": false,
       "parseFailure": false
     },
     {
       "tick": 720,
-      "agentIndex": 0,
-      "reasoning": null,
-      "rawResponse": "aggressive:attack",
-      "reflexMode": false,
-      "parseFailure": false
-    },
-    {
-      "tick": 750,
       "agentIndex": 1,
       "reasoning": null,
       "rawResponse": "spacing:attack",
@@ -243,6 +235,14 @@
       "parseFailure": false
     },
     {
+      "tick": 780,
+      "agentIndex": 1,
+      "reasoning": null,
+      "rawResponse": "spacing:block",
+      "reflexMode": false,
+      "parseFailure": false
+    },
+    {
       "tick": 810,
       "agentIndex": 1,
       "reasoning": null,
@@ -251,7 +251,7 @@
       "parseFailure": false
     },
     {
-      "tick": 840,
+      "tick": 870,
       "agentIndex": 0,
       "reasoning": null,
       "rawResponse": "aggressive:attack",
@@ -260,6 +260,86 @@
     },
     {
       "tick": 870,
+      "agentIndex": 1,
+      "reasoning": null,
+      "rawResponse": "spacing:block",
+      "reflexMode": false,
+      "parseFailure": false
+    },
+    {
+      "tick": 900,
+      "agentIndex": 1,
+      "reasoning": null,
+      "rawResponse": "spacing:attack",
+      "reflexMode": false,
+      "parseFailure": false
+    },
+    {
+      "tick": 960,
+      "agentIndex": 0,
+      "reasoning": null,
+      "rawResponse": "aggressive:attack",
+      "reflexMode": false,
+      "parseFailure": false
+    },
+    {
+      "tick": 960,
+      "agentIndex": 1,
+      "reasoning": null,
+      "rawResponse": "spacing:block",
+      "reflexMode": false,
+      "parseFailure": false
+    },
+    {
+      "tick": 990,
+      "agentIndex": 1,
+      "reasoning": null,
+      "rawResponse": "spacing:attack",
+      "reflexMode": false,
+      "parseFailure": false
+    },
+    {
+      "tick": 1050,
+      "agentIndex": 0,
+      "reasoning": null,
+      "rawResponse": "aggressive:attack",
+      "reflexMode": false,
+      "parseFailure": false
+    },
+    {
+      "tick": 1050,
+      "agentIndex": 1,
+      "reasoning": null,
+      "rawResponse": "spacing:block",
+      "reflexMode": false,
+      "parseFailure": false
+    },
+    {
+      "tick": 1080,
+      "agentIndex": 1,
+      "reasoning": null,
+      "rawResponse": "spacing:attack",
+      "reflexMode": false,
+      "parseFailure": false
+    },
+    {
+      "tick": 1140,
+      "agentIndex": 0,
+      "reasoning": null,
+      "rawResponse": "aggressive:attack",
+      "reflexMode": false,
+      "parseFailure": false
+    },
+    {
+      "tick": 1140,
+      "agentIndex": 1,
+      "reasoning": null,
+      "rawResponse": "spacing:block",
+      "reflexMode": false,
+      "parseFailure": false
+    },
+    {
+      "tick": 1170,
       "agentIndex": 1,
       "reasoning": null,
       "rawResponse": "spacing:attack",

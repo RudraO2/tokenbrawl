@@ -5,8 +5,8 @@ recomputes this file from a fresh ladder run on every `npm test` and fails if it
 
 Verdict: **no side advantage detected**
 
-Side 0 (P1) scores 0.4900 across 300 mirrored pairs, an advantage of **-0.0100** against the side-neutral 0.5000.
-The 0.9500 interval is 0.4683 – 0.5116, which contains 0.5000.
+Side 0 (P1) scores 0.5025 across 300 mirrored pairs, an advantage of **+0.0025** against the side-neutral 0.5000.
+The 0.9500 interval is 0.4950 – 0.5100, which contains 0.5000.
 
 ## How this is measured
 
@@ -16,7 +16,7 @@ scores the mean of its two Matches from side 0’s point of view; a side-neutral
 Environment averages exactly 0.5000 over those pairs.
 
 - Environment: `fighter-1v1` v1.0.0
-- Frame-data config hash: `b2b38645b3263cabe9a127eb3e7e57f3718aaee524f7a332aa0129fa3956d344`
+- Frame-data config hash: `24f5f97e1c88a3f3a9b66405c569c076ba30994ac93dbc69429c3b8780bdc0f7`
 - Corpus: the Baseline Bot ladder — 600 Matches over 100 seeds from seed base 20260731, every seed played from both sides (AD-12)
 - Matches in no complete mirrored pair, and therefore excluded: 0
 - Confidence interval: seeded percentile bootstrap over *pairs*, 2000 resamples, seed 20260801 (AD-5)

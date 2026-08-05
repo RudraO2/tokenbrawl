@@ -69,4 +69,14 @@ export interface FighterState {
    * window closes, so a stale value can never leak into the next commitment.
    */
   readonly committedZone: readonly [number, number];
+  /**
+   * Story 8.4: consecutive hits landed on this Agent while it has not
+   * regained a real Decision Point -- reset to `0` the moment it lands its
+   * own hit, blocks successfully, or its hitstun window closes without a
+   * further hit ("returns to neutral"). Read by `frames.ts`'s juggle-scaling
+   * lookups so damage and hitstun shrink as a chain gets longer, and by
+   * `environment.ts`'s liveness cap so no chain can hold a defender past a
+   * configured limit. An integer count, never a float (INV-2, AD-5).
+   */
+  readonly juggleCount: readonly [number, number];
 }

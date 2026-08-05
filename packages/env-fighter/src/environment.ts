@@ -9,6 +9,7 @@ import { canonicalStringify } from './canonical';
 import { assertIntegerConfig, DEFAULT_FIGHTER_CONFIG, type FighterConfig } from './config';
 import {
   COMMITTED_ATTACK,
+  COMMITTED_HITSTUN,
   COMMITTED_JUMP,
   COMMITTED_NONE,
   COMMITTED_SPECIAL,
@@ -18,6 +19,9 @@ import {
   PHASE_STARTUP,
   ZONE_NONE,
   damageForCode,
+  juggleChainTicksElapsed,
+  juggleDamageFor,
+  juggleHitstunFor,
   jumpFallStepPerTick,
   jumpRiseStepPerTick,
   legalActionsFor,
@@ -124,6 +128,7 @@ export function createFighterEnvironment(
         verticalPosition: [0, 0],
         airState: [PHASE_IDLE, PHASE_IDLE],
         committedZone: [ZONE_NONE, ZONE_NONE],
+        juggleCount: [0, 0],
       };
     },
 
@@ -238,6 +243,8 @@ export function createFighterEnvironment(
       ];
       const airState: [number, number] = [state.airState[0], state.airState[1]];
       const committedZone: [number, number] = [state.committedZone[0], state.committedZone[1]];
+      /** Story 8.4: consecutive hits landed on each Agent while it has not regained a Decision Point. */
+      const juggleCount: [number, number] = [state.juggleCount[0], state.juggleCount[1]];
       const moveIntent: [number, number] = [MOVE_NONE, MOVE_NONE];
       /** `block` is a stance held for this Decision Point's ticks only -- it never survives into the next. */
       const blocking: [boolean, boolean] = [false, false];
@@ -361,6 +368,21 @@ export function createFighterEnvironment(
         const separation = Math.abs(position[0] - position[1]);
         const damageTaken: [number, number] = [0, 0];
         const meterGained: [number, number] = [0, 0];
+        // Story 8.4: which committed code each Agent entered *this* Tick with,
+        // read once before any hit below can change it. A mutual trade must
+        // judge both hits against the same pre-Tick chain state -- reading a
+        // just-mutated `committed[opponentIndex]` inside this same loop would
+        // let whichever agentIndex resolves first corrupt the other's chain
+        // continuation, exactly the failure mode the rest of this function's
+        // pre-Tick snapshots (`separationBefore`, `blocking`) already avoid.
+        const preHitCommitted: readonly [number, number] = [committed[0], committed[1]];
+        /** Deferred juggle/hitstun effects, applied in one pass after both hits are judged. */
+        const blockedSuccessfully: [boolean, boolean] = [false, false];
+        const attackerLandedThisTick: [boolean, boolean] = [false, false];
+        const chainForceEnded: [boolean, boolean] = [false, false];
+        const hitstunApplied: [boolean, boolean] = [false, false];
+        const hitstunRemaining: [number, number] = [0, 0];
+        const nextJuggleCount: [number, number] = [juggleCount[0], juggleCount[1]];
 
         for (const agentIndex of AGENT_INDICES) {
           if (hitLanded[agentIndex] === 1) {
@@ -387,19 +409,65 @@ export function createFighterEnvironment(
           // the same full-damage outcome (AC3). `ZONE_NONE === ZONE_NONE`
           // (neither side named a Zone) still matches, which is what keeps a
           // Zone-naive `block` behaving exactly as it did before this story.
-          const reduction =
-            blocking[opponentIndex] && blockZone[opponentIndex] === committedZone[agentIndex]
-              ? config.blockDamageReduction
-              : 0;
-          damageTaken[opponentIndex] += Math.max(
-            0,
-            damageForCode(config, code) + jitter[agentIndex] - reduction,
-          );
+          const blockedMatch =
+            blocking[opponentIndex] && blockZone[opponentIndex] === committedZone[agentIndex];
           meterGained[agentIndex] += config.meterOnHitLanded;
           meterGained[opponentIndex] += config.meterOnHitTaken;
           // Only this fighter's own flag: one hit per Commitment Window, and
           // setting it cannot influence the other fighter's resolution above.
           hitLanded[agentIndex] = 1;
+          attackerLandedThisTick[agentIndex] = true;
+
+          if (blockedMatch) {
+            // A successful block ends any juggle chain against its defender
+            // (AC3) and never opens hitstun -- Story 8.4 does not scale a
+            // blocked hit's chip damage, which stays exactly Story 8.3's rule.
+            damageTaken[opponentIndex] += Math.max(
+              0,
+              damageForCode(config, code) + jitter[agentIndex] - config.blockDamageReduction,
+            );
+            blockedSuccessfully[opponentIndex] = true;
+            continue;
+          }
+
+          // Chain continuation: this hit lands on a defender already in
+          // hitstun from a prior hit *this same chain* (AC1) only if that was
+          // true entering this Tick -- `preHitCommitted`, not `committed`,
+          // which the other agentIndex's iteration this same Tick may already
+          // have overwritten.
+          const juggleForThisHit =
+            preHitCommitted[opponentIndex] === COMMITTED_HITSTUN
+              ? juggleCount[opponentIndex] + 1
+              : 0;
+          damageTaken[opponentIndex] += Math.max(
+            0,
+            juggleDamageFor(config, damageForCode(config, code), juggleForThisHit) +
+              jitter[agentIndex],
+          );
+
+          // AC4/OQ-7: a hit-count cap and a Tick cap, either of which forcibly
+          // ends the chain and returns the defender to actionable immediately,
+          // "regardless of further attacker input" -- checked before opening
+          // (or re-opening) hitstun rather than after, so the defender is
+          // never even briefly locked past either limit.
+          const cumulativeTicks = juggleChainTicksElapsed(config, juggleForThisHit + 1);
+          const scaledHitstun = juggleHitstunFor(config, juggleForThisHit);
+          // A scaled hitstun of `0` (the table's floor) is the same "no window
+          // to hold the defender open" outcome as either cap above -- opening
+          // `COMMITTED_HITSTUN` with `0` Ticks remaining would leave it
+          // uncleared forever, since the window-close branch below only fires
+          // on the Tick a positive countdown reaches zero.
+          if (
+            juggleForThisHit >= config.juggleMaxCount ||
+            cumulativeTicks > config.juggleTickCap ||
+            scaledHitstun <= 0
+          ) {
+            chainForceEnded[opponentIndex] = true;
+          } else {
+            hitstunApplied[opponentIndex] = true;
+            hitstunRemaining[opponentIndex] = scaledHitstun;
+            nextJuggleCount[opponentIndex] = juggleForThisHit;
+          }
         }
 
         for (const agentIndex of AGENT_INDICES) {
@@ -409,6 +477,29 @@ export function createFighterEnvironment(
             0,
             config.maxMeter,
           );
+          // Story 8.4: apply this Tick's juggle/hitstun effects in priority
+          // order -- being hit this Tick (forced end or a fresh/continued
+          // chain) always wins over merely having landed one's own hit or
+          // blocked successfully, so a mutual-trade Tick still tracks each
+          // side as its own victim state rather than clobbering it with the
+          // other role's reset. `hitLanded` is deliberately left untouched
+          // here: a `COMMITTED_HITSTUN` code always short-circuits past every
+          // `hitLanded`-gated branch in the hit-resolution loop (hitstun is
+          // never `COMMITTED_ATTACK`/`COMMITTED_SPECIAL`), so this flag has no
+          // reader while hitstun is open. Zeroing it here would instead erase
+          // a same-Tick mutual trade's *own* attack having connected -- the
+          // window-close branch below already clears it once hitstun ends.
+          if (chainForceEnded[agentIndex]) {
+            committed[agentIndex] = COMMITTED_NONE;
+            remaining[agentIndex] = 0;
+            juggleCount[agentIndex] = 0;
+          } else if (hitstunApplied[agentIndex]) {
+            committed[agentIndex] = COMMITTED_HITSTUN;
+            remaining[agentIndex] = hitstunRemaining[agentIndex];
+            juggleCount[agentIndex] = nextJuggleCount[agentIndex];
+          } else if (attackerLandedThisTick[agentIndex] || blockedSuccessfully[agentIndex]) {
+            juggleCount[agentIndex] = 0;
+          }
         }
 
         // Gravity (Story 8.2, AC4). Read against `remaining` before this Tick's
@@ -461,9 +552,18 @@ export function createFighterEnvironment(
           remaining[agentIndex] -= 1;
           if (remaining[agentIndex] === 0) {
             const wasJump = committed[agentIndex] === COMMITTED_JUMP;
+            // Story 8.4 AC3: a hitstun window that closes without the Agent
+            // having been hit again this same Tick is "returns to neutral" --
+            // a re-hit this Tick already overwrote `committed`/`remaining`
+            // above (to a fresh hitstun window or `COMMITTED_NONE` on a forced
+            // end), so this branch only ever sees the untouched, expired one.
+            const wasHitstun = committed[agentIndex] === COMMITTED_HITSTUN;
             committed[agentIndex] = COMMITTED_NONE;
             hitLanded[agentIndex] = 0;
             committedZone[agentIndex] = ZONE_NONE;
+            if (wasHitstun) {
+              juggleCount[agentIndex] = 0;
+            }
             if (wasJump) {
               // Land exactly on the floor: a rise/fall Tick count that does not
               // divide `jumpHeight` evenly would otherwise leave a 1-or-2-unit
@@ -487,6 +587,7 @@ export function createFighterEnvironment(
         verticalPosition: [verticalPosition[0], verticalPosition[1]],
         airState: [airState[0], airState[1]],
         committedZone: [committedZone[0], committedZone[1]],
+        juggleCount: [juggleCount[0], juggleCount[1]],
       };
     },
 

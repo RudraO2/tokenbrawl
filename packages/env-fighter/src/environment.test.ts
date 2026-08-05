@@ -4,6 +4,7 @@ import { DEFAULT_FIGHTER_CONFIG, type FighterConfig } from './config';
 import { createFighterEnvironment } from './environment';
 import {
   COMMITTED_ATTACK,
+  COMMITTED_HITSTUN,
   COMMITTED_JUMP,
   COMMITTED_NONE,
   PHASE_IDLE,
@@ -12,6 +13,8 @@ import {
   ZONE_HIGH,
   ZONE_LOW,
   ZONE_NONE,
+  juggleChainTicksElapsed,
+  juggleHitstunFor,
   jumpFallStepPerTick,
   phaseOf,
   windowTotalTicks,
@@ -46,6 +49,7 @@ function stateOf(overrides: Partial<FighterState> = {}): FighterState {
     verticalPosition: [0, 0],
     airState: [PHASE_IDLE, PHASE_IDLE],
     committedZone: [ZONE_NONE, ZONE_NONE],
+    juggleCount: [0, 0],
     ...overrides,
   };
 }
@@ -282,6 +286,7 @@ describe('hash (the Final-State Hash)', () => {
   it('is insensitive to key declaration order', () => {
     const forwards = stateOf();
     const backwards: FighterState = {
+      juggleCount: forwards.juggleCount,
       committedZone: forwards.committedZone,
       airState: forwards.airState,
       verticalPosition: forwards.verticalPosition,
@@ -323,6 +328,8 @@ describe('hash (the Final-State Hash)', () => {
       { ...base, airState: [base.airState[0], PHASE_STARTUP] },
       { ...base, committedZone: [ZONE_HIGH, base.committedZone[1]] },
       { ...base, committedZone: [base.committedZone[0], ZONE_HIGH] },
+      { ...base, juggleCount: [base.juggleCount[0] + 1, base.juggleCount[1]] },
+      { ...base, juggleCount: [base.juggleCount[0], base.juggleCount[1] + 1] },
     ];
     expect(mutations).toHaveLength(Object.keys(base).length * 2 - 2);
     for (const mutated of mutations) {
@@ -668,7 +675,10 @@ describe('special and Commitment Windows', () => {
       SPECIAL_WINDOW_TICKS - DEFAULT_FIGHTER_CONFIG.ticksPerDecision,
     );
     expect(env.isActionable(state, 0)).toBe(false);
-    expect(env.isActionable(state, 1)).toBe(true);
+    // Story 8.4: this `env` is `CLOSE_QUARTERS`, so the connecting `special`
+    // also opens hitstun on p2 -- p2 is locked out too, not because of its own
+    // Commitment Window (it has none) but because it was just hit.
+    expect(env.isActionable(state, 1)).toBe(false);
 
     state = env.step(state, [null, 'stand']);
     expect(env.isActionable(state, 0)).toBe(true);
@@ -699,7 +709,10 @@ describe('attack Commitment Windows (AC1)', () => {
     expect(committed.committedAction[0]).toBe(COMMITTED_ATTACK);
     expect(committed.commitmentRemaining[0]).toBe(ATTACK_TICKS_AFTER_ONE_STEP);
     expect(env.isActionable(committed, 0)).toBe(false);
-    expect(env.isActionable(committed, 1)).toBe(true);
+    // Story 8.4: `CLOSE_QUARTERS` means the connecting `attack` also opens
+    // hitstun on p2, so p2 is locked out too -- not by its own Commitment
+    // Window (it has none) but because it was just hit.
+    expect(env.isActionable(committed, 1)).toBe(false);
 
     const released = env.step(committed, [null, 'stand']);
     expect(env.isActionable(released, 0)).toBe(true);
@@ -1517,5 +1530,223 @@ describe('config validation', () => {
   it('accepts an integer override and applies it', () => {
     const env = createFighterEnvironment({ initialHealth: 42 });
     expect(env.reset(SEED).health).toStrictEqual([42, 42]);
+  });
+
+  it('rejects a juggleMaxCount of 0, which would forbid every chain from ever opening', () => {
+    expect(() => createFighterEnvironment({ juggleMaxCount: 0 })).toThrow(
+      /juggleMaxCount must be at least 1/,
+    );
+  });
+
+  it('rejects a non-integer or out-of-range percentage in a juggle scaling table', () => {
+    expect(() =>
+      createFighterEnvironment({ juggleDamageScalePercent: [100, 50.5] }),
+    ).toThrow(/juggleDamageScalePercent\[1\] must be a safe integer/);
+    expect(() =>
+      createFighterEnvironment({ juggleHitstunScalePercent: [100, 150] }),
+    ).toThrow(/juggleHitstunScalePercent\[1\] must be a percentage between 0 and 100/);
+  });
+
+  it('rejects an empty juggle scaling table', () => {
+    expect(() => createFighterEnvironment({ juggleDamageScalePercent: [] })).toThrow(
+      /juggleDamageScalePercent must be a non-empty array/,
+    );
+  });
+});
+
+/** Story 8.4: multi-hit strings end naturally instead of stunlocking the defender. */
+describe('multi-hit strings and juggle state (Story 8.4)', () => {
+  const FAIR = { ...CLOSE_QUARTERS, damageJitter: 0 };
+
+  /**
+   * `commitmentRemaining[0]` for a hand-crafted attacker whose active phase's
+   * *first* Tick falls on the very last Tick this `step()` call simulates.
+   * `hitstunTicks` (34) deliberately outlives one Decision Point the same way
+   * `attackWindow`/`specialWindow` do, but a hit landing early in a 30-Tick
+   * step still leaves ~26 further Ticks to decrement whatever hitstun it
+   * opens -- enough to fully expire a scaled-down continuation before this
+   * `step()` call returns. Landing the hit on the last Tick leaves exactly
+   * one countdown decrement (the window-close pass later in that same Tick),
+   * so the returned state reflects this hit's effect directly rather than
+   * however many further Ticks happened to run after it.
+   */
+  const HIT_LANDS_ON_LAST_TICK =
+    windowTotalTicks(DEFAULT_FIGHTER_CONFIG.attackWindow) -
+    DEFAULT_FIGHTER_CONFIG.attackWindow.startup +
+    (DEFAULT_FIGHTER_CONFIG.ticksPerDecision - 1);
+
+  /**
+   * A defender's hitstun `commitmentRemaining`, chosen so it is still
+   * strictly positive (still mid-chain) by the last Tick this `step()` call
+   * simulates -- comfortably more than `ticksPerDecision` Ticks of countdown
+   * budget, so it survives every earlier Tick without closing prematurely.
+   */
+  const DEFENDER_STILL_STUNNED_AT_LAST_TICK = DEFAULT_FIGHTER_CONFIG.ticksPerDecision + 3;
+
+  /** A defender pre-loaded with a Juggle Count, hit by an attacker landing on this step's last Tick. */
+  function stepOneLastTickHit(defender: {
+    committedAction: number;
+    commitmentRemaining: number;
+    juggleCount: number;
+  }): FighterState {
+    const env = createFighterEnvironment(FAIR);
+    const state = stateOf({
+      position: CLOSE_QUARTERS.startPosition,
+      committedAction: [COMMITTED_ATTACK, defender.committedAction],
+      commitmentRemaining: [HIT_LANDS_ON_LAST_TICK, defender.commitmentRemaining],
+      juggleCount: [0, defender.juggleCount],
+    });
+    return env.step(state, [null, null]);
+  }
+
+  it('a hit on a neutral defender opens hitstun but does not increment Juggle Count', () => {
+    const after = stepOneLastTickHit({
+      committedAction: COMMITTED_NONE,
+      commitmentRemaining: 0,
+      juggleCount: 0,
+    });
+
+    expect(after.committedAction[1]).toBe(COMMITTED_HITSTUN);
+    expect(after.juggleCount[1]).toBe(0);
+    // One decrement (the countdown pass on this same, last Tick) after the
+    // hit opens hitstun.
+    expect(after.commitmentRemaining[1]).toBe(juggleHitstunFor(DEFAULT_FIGHTER_CONFIG, 0) - 1);
+    expect(after.health[1]).toBe(
+      DEFAULT_FIGHTER_CONFIG.initialHealth - DEFAULT_FIGHTER_CONFIG.attackDamage,
+    );
+  });
+
+  it('a hit landing while the defender is already in hitstun increments Juggle Count (AC1)', () => {
+    const after = stepOneLastTickHit({
+      committedAction: COMMITTED_HITSTUN,
+      commitmentRemaining: DEFENDER_STILL_STUNNED_AT_LAST_TICK,
+      juggleCount: 2,
+    });
+
+    expect(after.committedAction[1]).toBe(COMMITTED_HITSTUN);
+    expect(after.juggleCount[1]).toBe(3);
+  });
+
+  it('damage and hitstun scale down past the configured threshold, from the data table (AC2)', () => {
+    const after = stepOneLastTickHit({
+      committedAction: COMMITTED_HITSTUN,
+      commitmentRemaining: DEFENDER_STILL_STUNNED_AT_LAST_TICK,
+      juggleCount: 2,
+    });
+    const taken = DEFAULT_FIGHTER_CONFIG.initialHealth - after.health[1];
+    const scaledDamage = Math.floor(
+      (DEFAULT_FIGHTER_CONFIG.attackDamage * DEFAULT_FIGHTER_CONFIG.juggleDamageScalePercent[3]) /
+        100,
+    );
+
+    expect(scaledDamage).toBeLessThan(DEFAULT_FIGHTER_CONFIG.attackDamage);
+    expect(taken).toBe(scaledDamage);
+    expect(after.commitmentRemaining[1]).toBe(juggleHitstunFor(DEFAULT_FIGHTER_CONFIG, 3) - 1);
+    expect(after.commitmentRemaining[1]).toBeLessThan(DEFAULT_FIGHTER_CONFIG.hitstunTicks);
+  });
+
+  it('resets Juggle Count to zero once the defender lands, blocks successfully, or returns to neutral (AC3)', () => {
+    const env = createFighterEnvironment(FAIR);
+
+    // Blocks successfully: a matched-Zone block never accumulates a chain.
+    const blocked = env.step(
+      stateOf({ juggleCount: [0, 3] }),
+      ['attack', 'block'],
+      ['high', 'high'],
+    );
+    expect(blocked.juggleCount[1]).toBe(0);
+
+    // Lands its own hit: the attacker's own chain (if any) ends.
+    const landed = env.step(stateOf({ juggleCount: [3, 0] }), ['attack', 'stand']);
+    expect(landed.juggleCount[0]).toBe(0);
+
+    // Returns to neutral: a hitstun window that closes without a further hit.
+    const far = createFighterEnvironment({ damageJitter: 0 });
+    const closing = far.step(
+      stateOf({
+        position: DEFAULT_FIGHTER_CONFIG.startPosition,
+        committedAction: [COMMITTED_NONE, COMMITTED_HITSTUN],
+        commitmentRemaining: [0, 1],
+        juggleCount: [0, 2],
+      }),
+      [null, null],
+    );
+    expect(closing.committedAction[1]).toBe(COMMITTED_NONE);
+    expect(closing.juggleCount[1]).toBe(0);
+  });
+
+  it('forcibly ends the chain and frees the defender once Juggle Count would reach the configured maximum (AC4)', () => {
+    const after = stepOneLastTickHit({
+      committedAction: COMMITTED_HITSTUN,
+      commitmentRemaining: DEFENDER_STILL_STUNNED_AT_LAST_TICK,
+      juggleCount: DEFAULT_FIGHTER_CONFIG.juggleMaxCount - 2,
+    });
+
+    // The hit still connects -- the default table's last entry (this hit's
+    // index) scales both damage and hitstun to 0%, so health is unaffected
+    // here, but the chain still ends rather than opening a 0-Tick hitstun
+    // window: the defender is actionable at the very next Decision Point,
+    // "regardless of further attacker input" (AC4).
+    expect(after.health[1]).toBeLessThanOrEqual(DEFAULT_FIGHTER_CONFIG.initialHealth);
+    expect(after.committedAction[1]).toBe(COMMITTED_NONE);
+    expect(after.commitmentRemaining[1]).toBe(0);
+    expect(after.juggleCount[1]).toBe(0);
+    expect(createFighterEnvironment(FAIR).isActionable(after, 1)).toBe(true);
+  });
+
+  it('never scales damage/hitstun or reads the table past juggleMaxCount (a chain cannot out-live its own cap)', () => {
+    // Property-style sweep (OQ-7): every Juggle Count from 0 up through well
+    // past the configured maximum either opens a bounded hitstun window or
+    // forces the chain to end -- there is no input that leaves the defender
+    // uncleared or holds it for more Ticks than the table can produce.
+    for (let priorCount = 0; priorCount <= DEFAULT_FIGHTER_CONFIG.juggleMaxCount + 3; priorCount += 1) {
+      const after = stepOneLastTickHit({
+        committedAction: COMMITTED_HITSTUN,
+        commitmentRemaining: DEFENDER_STILL_STUNNED_AT_LAST_TICK,
+        juggleCount: priorCount,
+      });
+      const thisHitCount = priorCount + 1;
+
+      if (
+        thisHitCount >= DEFAULT_FIGHTER_CONFIG.juggleMaxCount ||
+        juggleChainTicksElapsed(DEFAULT_FIGHTER_CONFIG, thisHitCount) >
+          DEFAULT_FIGHTER_CONFIG.juggleTickCap ||
+        juggleHitstunFor(DEFAULT_FIGHTER_CONFIG, thisHitCount) <= 0
+      ) {
+        expect(after.committedAction[1]).toBe(COMMITTED_NONE);
+        expect(after.commitmentRemaining[1]).toBe(0);
+      } else {
+        expect(after.committedAction[1]).toBe(COMMITTED_HITSTUN);
+        expect(after.commitmentRemaining[1]).toBeGreaterThan(0);
+        expect(after.commitmentRemaining[1]).toBeLessThan(DEFAULT_FIGHTER_CONFIG.hitstunTicks);
+      }
+      // Either way, the defender is never left uncleared: it is either
+      // holding a strictly positive, bounded countdown or fully free.
+      expect(after.juggleCount[1]).toBeLessThan(DEFAULT_FIGHTER_CONFIG.juggleMaxCount);
+    }
+  });
+
+  it('a mutual trade tracks each side as its own victim, not clobbered by the other role', () => {
+    // Both fighters attack and connect in the same Tick: each is an attacker
+    // (landing its own hit) and a defender (taking one) simultaneously. Each
+    // side's resulting Juggle Count/hitstun must come from its own hit, not
+    // from the "I also attacked" reset stepping on it.
+    const env = createFighterEnvironment(FAIR);
+    const after = env.step(env.reset(SEED), ['attack', 'attack']);
+
+    expect(after.committedAction[0]).toBe(COMMITTED_HITSTUN);
+    expect(after.committedAction[1]).toBe(COMMITTED_HITSTUN);
+    expect(after.juggleCount[0]).toBe(0);
+    expect(after.juggleCount[1]).toBe(0);
+  });
+
+  it("is included in the Final-State Hash and never mutates the input state's juggleCount", () => {
+    const env = createFighterEnvironment(FAIR);
+    const before = env.reset(SEED);
+    const hashBefore = env.hash(before);
+
+    env.step(before, ['attack', 'stand']);
+    expect(env.hash(before)).toBe(hashBefore);
+    expect(before.juggleCount).toStrictEqual([0, 0]);
   });
 });

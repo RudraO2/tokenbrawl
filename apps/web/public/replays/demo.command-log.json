@@ -1,12 +1,12 @@
 {
   "schemaVersion": "1.0.0",
-  "matchId": "874992382d518add81ed4f61fc8a7089bba2482b35842cd5db4b51057c8540c9",
+  "matchId": "2eeb96221299a26cccfe5a7f991fac35a5cacd4291e97ce3f9cb75f4df90f453",
   "environment": {
     "id": "fighter-1v1",
     "version": "1.0.0"
   },
   "seed": 4101,
-  "configHash": "b2b38645b3263cabe9a127eb3e7e57f3718aaee524f7a332aa0129fa3956d344",
+  "configHash": "24f5f97e1c88a3f3a9b66405c569c076ba30994ac93dbc69429c3b8780bdc0f7",
   "agents": [
     {
       "id": "bot:aggressive",
@@ -68,7 +68,7 @@
       "endpoint": "bot"
     },
     {
-      "tick": 120,
+      "tick": 150,
       "agentIndex": 0,
       "action": "attack",
       "provider": "bot",
@@ -77,19 +77,12 @@
     {
       "tick": 150,
       "agentIndex": 1,
-      "action": "attack",
+      "action": "block",
       "provider": "bot",
       "endpoint": "bot"
     },
     {
       "tick": 180,
-      "agentIndex": 0,
-      "action": "attack",
-      "provider": "bot",
-      "endpoint": "bot"
-    },
-    {
-      "tick": 210,
       "agentIndex": 1,
       "action": "attack",
       "provider": "bot",
@@ -103,6 +96,13 @@
       "endpoint": "bot"
     },
     {
+      "tick": 240,
+      "agentIndex": 1,
+      "action": "block",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
       "tick": 270,
       "agentIndex": 1,
       "action": "attack",
@@ -110,7 +110,7 @@
       "endpoint": "bot"
     },
     {
-      "tick": 300,
+      "tick": 330,
       "agentIndex": 0,
       "action": "attack",
       "provider": "bot",
@@ -119,19 +119,12 @@
     {
       "tick": 330,
       "agentIndex": 1,
-      "action": "attack",
+      "action": "block",
       "provider": "bot",
       "endpoint": "bot"
     },
     {
       "tick": 360,
-      "agentIndex": 0,
-      "action": "attack",
-      "provider": "bot",
-      "endpoint": "bot"
-    },
-    {
-      "tick": 390,
       "agentIndex": 1,
       "action": "attack",
       "provider": "bot",
@@ -145,6 +138,13 @@
       "endpoint": "bot"
     },
     {
+      "tick": 420,
+      "agentIndex": 1,
+      "action": "block",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
       "tick": 450,
       "agentIndex": 1,
       "action": "attack",
@@ -152,7 +152,7 @@
       "endpoint": "bot"
     },
     {
-      "tick": 480,
+      "tick": 510,
       "agentIndex": 0,
       "action": "attack",
       "provider": "bot",
@@ -161,19 +161,12 @@
     {
       "tick": 510,
       "agentIndex": 1,
-      "action": "attack",
+      "action": "block",
       "provider": "bot",
       "endpoint": "bot"
     },
     {
       "tick": 540,
-      "agentIndex": 0,
-      "action": "attack",
-      "provider": "bot",
-      "endpoint": "bot"
-    },
-    {
-      "tick": 570,
       "agentIndex": 1,
       "action": "attack",
       "provider": "bot",
@@ -187,6 +180,13 @@
       "endpoint": "bot"
     },
     {
+      "tick": 600,
+      "agentIndex": 1,
+      "action": "block",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
       "tick": 630,
       "agentIndex": 1,
       "action": "attack",
@@ -194,7 +194,7 @@
       "endpoint": "bot"
     },
     {
-      "tick": 660,
+      "tick": 690,
       "agentIndex": 0,
       "action": "attack",
       "provider": "bot",
@@ -203,19 +203,12 @@
     {
       "tick": 690,
       "agentIndex": 1,
-      "action": "attack",
+      "action": "block",
       "provider": "bot",
       "endpoint": "bot"
     },
     {
       "tick": 720,
-      "agentIndex": 0,
-      "action": "attack",
-      "provider": "bot",
-      "endpoint": "bot"
-    },
-    {
-      "tick": 750,
       "agentIndex": 1,
       "action": "attack",
       "provider": "bot",
@@ -229,6 +222,13 @@
       "endpoint": "bot"
     },
     {
+      "tick": 780,
+      "agentIndex": 1,
+      "action": "block",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
       "tick": 810,
       "agentIndex": 1,
       "action": "attack",
@@ -236,7 +236,7 @@
       "endpoint": "bot"
     },
     {
-      "tick": 840,
+      "tick": 870,
       "agentIndex": 0,
       "action": "attack",
       "provider": "bot",
@@ -245,6 +245,76 @@
     {
       "tick": 870,
       "agentIndex": 1,
+      "action": "block",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 900,
+      "agentIndex": 1,
+      "action": "attack",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 960,
+      "agentIndex": 0,
+      "action": "attack",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 960,
+      "agentIndex": 1,
+      "action": "block",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 990,
+      "agentIndex": 1,
+      "action": "attack",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 1050,
+      "agentIndex": 0,
+      "action": "attack",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 1050,
+      "agentIndex": 1,
+      "action": "block",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 1080,
+      "agentIndex": 1,
+      "action": "attack",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 1140,
+      "agentIndex": 0,
+      "action": "attack",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 1140,
+      "agentIndex": 1,
+      "action": "block",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 1170,
+      "agentIndex": 1,
       "action": "attack",
       "provider": "bot",
       "endpoint": "bot"
@@ -252,13 +322,13 @@
   ],
   "result": {
     "outcome": "p2",
-    "endTick": 900,
-    "endReason": "ko",
+    "endTick": 1200,
+    "endReason": "timeout",
     "healthRemaining": [
-      0,
-      3
+      3,
+      100
     ]
   },
-  "finalStateHash": "66f67b51cb2b3fe9ab93bde84e5527449634b411e09213c675e9909afdc5bfde",
+  "finalStateHash": "72330a8aec6636377c4ddc4e82ae1338ffd0956d35aa6fc0ee3db7c2816b0579",
   "reasoningSidecar": "demo.reasoning.json"
 }

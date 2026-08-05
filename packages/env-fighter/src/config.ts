@@ -68,6 +68,38 @@ export interface FighterConfig {
   readonly maxMeter: number;
   /** Per-side integer damage jitter drawn from the Match PRNG: adds 0 or this much. */
   readonly damageJitter: number;
+  /**
+   * Story 8.4: Ticks a hit's defender is locked out of Decision Points before
+   * any juggle scaling is applied -- the un-scaled base every entry of
+   * `juggleHitstunScalePercent` is a percentage of.
+   */
+  readonly hitstunTicks: number;
+  /**
+   * Integer percentages (`0..100`), indexed by Juggle Count, that a landed
+   * hit's base damage is scaled by. Index `0` is the opening hit of a chain
+   * (never yet in hitstun); an index past the array's end reads as its last
+   * entry, so the table only needs one row per distinct scale rather than one
+   * per `juggleMaxCount` step. A data table rather than a formula so the exit
+   * gate's "never a magic number inline" reads literally.
+   */
+  readonly juggleDamageScalePercent: readonly number[];
+  /** Same shape and indexing as `juggleDamageScalePercent`, scaling `hitstunTicks` instead. */
+  readonly juggleHitstunScalePercent: readonly number[];
+  /**
+   * Juggle Count at which a chain is forcibly ended (AC4): the hit that would
+   * push the count to this value instead drops the defender straight back to
+   * `COMMITTED_NONE`, actionable next Tick, and the count resets to `0`.
+   */
+  readonly juggleMaxCount: number;
+  /**
+   * Cumulative hitstun Ticks (per `juggleHitstunFor`, summed over the chain so
+   * far) a chain may hold a defender for before it is forcibly ended -- the
+   * Tick-based liveness cap (OQ-7) alongside `juggleMaxCount`'s hit-count cap.
+   * Computed from frame data alone (`juggleChainTicksElapsed`), so this is a
+   * provable property of the table rather than a claim that needs its own
+   * counter in `FighterState`.
+   */
+  readonly juggleTickCap: number;
 }
 
 /**
@@ -137,12 +169,67 @@ export const DEFAULT_FIGHTER_CONFIG: FighterConfig = {
   meterOnHitTaken: 6,
   maxMeter: 100,
   damageJitter: 1,
+  /**
+   * Story 8.4. `hitstunTicks` (34) deliberately exceeds `ticksPerDecision`
+   * (30), for the same reason `attackWindow`/`specialWindow`/`jumpWindow`
+   * already do: a hitstun window shorter than the cadence would close inside
+   * the very step that opened it, so a defender could never actually be
+   * polled again mid-chain and "regains a real Decision Point" (this story's
+   * liveness property) would be true only by the window having already
+   * evaporated rather than by the cap or table doing any work.
+   *
+   * `juggleDamageScalePercent`/`juggleHitstunScalePercent` share one table
+   * shape: full scale for the opening two hits (index `0`, the fresh hit, and
+   * index `1`, the first continuation), then a step down every hit after,
+   * bottoming out at `0` rather than negative damage or a window that never
+   * closes. `juggleMaxCount` (6) matches the table's length exactly, so the
+   * chain forcibly ends the Tick after the table's last real entry rather than
+   * clamping into a repeated `0` scale indefinitely. `juggleTickCap` (118) is
+   * the exact sum of `hitstunTicks` (34) scaled by every entry up to
+   * `juggleMaxCount` -- 34+34+25+17+8+0 -- so it is a provable property of the
+   * table above rather than an independently chosen number that could drift
+   * out of sync with it.
+   */
+  hitstunTicks: 34,
+  juggleDamageScalePercent: [100, 100, 75, 50, 25, 0],
+  juggleHitstunScalePercent: [100, 100, 75, 50, 25, 0],
+  juggleMaxCount: 6,
+  juggleTickCap: 118,
 };
 
 /** Keys whose value is a nested `CommitmentWindow` rather than a scalar. */
 const WINDOW_KEYS: readonly string[] = ['attackWindow', 'specialWindow', 'jumpWindow'];
 
 const WINDOW_FIELDS = ['startup', 'active', 'recovery'] as const;
+
+/** Keys whose value is a percentage table (Story 8.4) rather than a scalar. */
+const PERCENT_TABLE_KEYS: readonly string[] = [
+  'juggleDamageScalePercent',
+  'juggleHitstunScalePercent',
+];
+
+/**
+ * Validate one juggle scaling table: every entry a safe integer percentage
+ * `0..100`, and at least one entry -- an empty table would leave
+ * `scalePercent`'s `table.length - 1` index at `-1`.
+ */
+function assertPercentTable(key: string, value: unknown): void {
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new Error(`FighterConfig.${key} must be a non-empty array of percentages`);
+  }
+  for (const [index, entry] of value.entries()) {
+    if (typeof entry !== 'number' || !Number.isSafeInteger(entry)) {
+      throw new Error(
+        `FighterConfig.${key}[${index}] must be a safe integer, received: ${String(entry)}`,
+      );
+    }
+    if (entry < 0 || entry > 100) {
+      throw new Error(
+        `FighterConfig.${key}[${index}] must be a percentage between 0 and 100, received: ${entry}`,
+      );
+    }
+  }
+}
 
 /**
  * Validate one Commitment Window.
@@ -205,6 +292,10 @@ export function assertIntegerConfig(config: FighterConfig): void {
       assertCommitmentWindow(key, value);
       continue;
     }
+    if (PERCENT_TABLE_KEYS.includes(key)) {
+      assertPercentTable(key, value);
+      continue;
+    }
     if (typeof value !== 'number' || !Number.isSafeInteger(value)) {
       throw new Error(`FighterConfig.${key} must be a safe integer, received: ${String(value)}`);
     }
@@ -238,11 +329,24 @@ export function assertIntegerConfig(config: FighterConfig): void {
     'maxMeter',
     'damageJitter',
     'jumpHeight',
+    'hitstunTicks',
+    'juggleMaxCount',
+    'juggleTickCap',
   ] as const;
   for (const key of NON_NEGATIVE_KEYS) {
     if (config[key] < 0) {
       throw new Error(`FighterConfig.${key} must not be negative, received: ${config[key]}`);
     }
+  }
+
+  // A `juggleMaxCount` of `0` would force every chain to end before its
+  // opening hit is even recorded, which is indistinguishable from the
+  // mechanic not existing at all -- `assertCommitmentWindow`'s `active < 1`
+  // rejection above is the same shape of guard for the same reason.
+  if (config.juggleMaxCount < 1) {
+    throw new Error(
+      `FighterConfig.juggleMaxCount must be at least 1, received: ${config.juggleMaxCount}`,
+    );
   }
 
   // A Commitment Window no longer than the cadence unwinds completely inside
