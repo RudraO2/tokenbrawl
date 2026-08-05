@@ -1,11 +1,16 @@
 import {
   ACTIONS,
+  ACTIONS_V2,
   assertSchemaVersion,
+  assertSchemaVersionV2,
   FALLBACK_ACTION,
   type CommandLog,
+  type CommandLogV2,
   type DecisionEntry,
+  type DecisionEntryV2,
   type EnvironmentAdapter,
   type LoggedAction,
+  type LoggedActionV2,
   type TerminalResult,
 } from '@tokenbrawl/contracts';
 
@@ -70,6 +75,9 @@ export interface ReplayResult {
  * the enum is exactly how a replayer and a writer drift apart.
  */
 const LOGGED_ACTIONS: ReadonlySet<string> = new Set<string>([...ACTIONS, FALLBACK_ACTION]);
+
+/** The v2 sibling of `LOGGED_ACTIONS`: the six v2 Actions plus the Fallback Action. */
+const LOGGED_ACTIONS_V2: ReadonlySet<string> = new Set<string>([...ACTIONS_V2, FALLBACK_ACTION]);
 
 /** The frozen schema's bound on `seed` (`{type: integer, minimum: 0, maximum: 4294967295}`). */
 const MAX_UINT32 = 0xffff_ffff;
@@ -374,6 +382,225 @@ export function replayCommandLog<TState>(
     }
 
     state = env.step(state, actionsForStep);
+    tick += env.ticksPerDecision;
+    terminalResult = env.terminal(state);
+  }
+
+  for (const [key, entry] of byKey) {
+    if (!consumed.has(key)) {
+      reportDivergence(
+        `tick ${entry.tick}, agentIndex ${entry.agentIndex}: log entry lies outside the replayed Match (action "${entry.action}"); entry ignored.`,
+      );
+    }
+  }
+
+  if (suppressedDivergences > 0) {
+    divergences.push(
+      `... and ${suppressedDivergences} further divergences, not reported individually (capped at ${MAX_REPORTED_DIVERGENCES}).`,
+    );
+  }
+
+  const finalStateHash = env.hash(state);
+
+  return {
+    finalStateHash,
+    result: terminalResult,
+    ticksReplayed: tick,
+    matchesRecordedHash: finalStateHash === log.finalStateHash,
+    matchesRecordedResult: recordedResultMatches(terminalResult, (log as { result?: unknown }).result),
+    divergences,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Story 9.2 (closing the gap flagged there): the v2 sibling of everything
+// above. Schema v2 is additive-only (Story 8.1), so this is a straight
+// mirror of `replayCommandLog` -- same structure, same guards, same
+// divergence-reporting -- with only the schema-version assertion, the
+// action-string allowlist, and the top-level types swapped for their v2
+// counterparts. `ReplayResult`, `recordedResultMatches`, `decisionKey`,
+// `MAX_REPORTED_DIVERGENCES`, `MAX_UINT32` and `SHA256_HEX` are shared
+// unchanged: none of them read a schema-version-specific field.
+//
+// A v1 document handed to this function fails `assertSchemaVersionV2`
+// before any other field is read, exactly as a v2 document handed to
+// `replayCommandLog` fails `assertSchemaVersion` -- the two readers can
+// never accidentally accept each other's documents.
+// ---------------------------------------------------------------------------
+
+/** The v2 sibling of `assertDecisionEntry`, validating against `LOGGED_ACTIONS_V2`. */
+function assertDecisionEntryV2(entry: unknown, index: number): asserts entry is DecisionEntryV2 {
+  if (typeof entry !== 'object' || entry === null) {
+    throw new Error(`Malformed Command Log: decision entry ${index} is not an object.`);
+  }
+
+  const { tick, agentIndex, action } = entry as Record<string, unknown>;
+
+  if (typeof tick !== 'number' || !Number.isSafeInteger(tick) || tick < 0) {
+    throw new Error(`Malformed Command Log: decision entry ${index} has a non-integer tick (${String(tick)}).`);
+  }
+
+  if (agentIndex !== 0 && agentIndex !== 1) {
+    throw new Error(`Malformed Command Log: decision entry ${index} has agentIndex ${String(agentIndex)}, which is neither 0 nor 1.`);
+  }
+
+  if (typeof action !== 'string' || !LOGGED_ACTIONS_V2.has(action)) {
+    throw new Error(
+      `Malformed Command Log: decision entry ${index} (tick ${tick}, agentIndex ${agentIndex}) has unknown action "${String(action)}".`,
+    );
+  }
+}
+
+/** The v2 sibling of `indexDecisions`. Same ordering and duplicate-key rules. */
+function indexDecisionsV2(decisions: unknown): Map<string, DecisionEntryV2> {
+  if (!Array.isArray(decisions)) {
+    throw new Error(
+      `Malformed Command Log: decisions must be an array, got ${decisions === null ? 'null' : typeof decisions}.`,
+    );
+  }
+
+  const byKey = new Map<string, DecisionEntryV2>();
+  let previous: DecisionEntryV2 | undefined;
+
+  for (const [index, candidate] of decisions.entries()) {
+    assertDecisionEntryV2(candidate, index);
+    const entry: DecisionEntryV2 = candidate;
+    const key = decisionKey(entry.tick, entry.agentIndex);
+    if (byKey.has(key)) {
+      throw new Error(
+        `Malformed Command Log: duplicate decision entry for tick ${entry.tick}, agentIndex ${entry.agentIndex}.`,
+      );
+    }
+    if (
+      previous !== undefined &&
+      (entry.tick < previous.tick ||
+        (entry.tick === previous.tick && entry.agentIndex <= previous.agentIndex))
+    ) {
+      throw new Error(
+        `Malformed Command Log: decision entry ${index} (tick ${entry.tick}, agentIndex ${entry.agentIndex}) ` +
+          `does not follow entry ${index - 1} (tick ${previous.tick}, agentIndex ${previous.agentIndex}); ` +
+          'the schema requires decisions ordered by tick ascending, then agentIndex ascending.',
+      );
+    }
+    byKey.set(key, entry);
+    previous = entry;
+  }
+
+  return byKey;
+}
+
+/**
+ * The v2 sibling of `replayCommandLog`. See that function's docblock for the
+ * reasoning behind every guard here -- this is the same function, replaying
+ * a `CommandLogV2` against the same `EnvironmentAdapter` contract.
+ */
+export function replayCommandLogV2<TState>(
+  candidate: unknown,
+  env: EnvironmentAdapter<TState>,
+): ReplayResult {
+  if (typeof candidate !== 'object' || candidate === null || Array.isArray(candidate)) {
+    throw new Error(
+      `replayCommandLogV2: expected a Command Log object, got ${
+        candidate === null ? 'null' : Array.isArray(candidate) ? 'array' : typeof candidate
+      }`,
+    );
+  }
+
+  // Before ANY other field is read, and never the v1 assertion: a v1 document
+  // must fail here, not be silently accepted as v2.
+  const versioned = candidate as VersionedCandidate;
+  assertSchemaVersionV2(versioned);
+  const log: CommandLogV2 = versioned;
+
+  const environment = (log as { environment?: unknown }).environment;
+  if (typeof environment !== 'object' || environment === null || Array.isArray(environment)) {
+    throw new Error('Malformed Command Log: the environment block is missing or is not an object.');
+  }
+
+  if (!Number.isSafeInteger(log.seed) || log.seed < 0 || log.seed > MAX_UINT32) {
+    throw new Error(`Malformed Command Log: seed must be a uint32, got ${String(log.seed)}.`);
+  }
+
+  if (typeof log.finalStateHash !== 'string' || !SHA256_HEX.test(log.finalStateHash)) {
+    throw new Error(
+      `Malformed Command Log: finalStateHash must be a lowercase 64-character hex digest, got ${String(log.finalStateHash)}.`,
+    );
+  }
+
+  if (env.id !== log.environment.id || env.version !== log.environment.version) {
+    throw new Error(
+      `Environment mismatch: log records ${log.environment.id}@${log.environment.version} ` +
+        `but the supplied adapter is ${env.id}@${env.version}.`,
+    );
+  }
+
+  const byKey = indexDecisionsV2(log.decisions);
+  const consumed = new Set<string>();
+  const divergences: string[] = [];
+  let suppressedDivergences = 0;
+
+  const reportDivergence = (note: string): void => {
+    if (divergences.length < MAX_REPORTED_DIVERGENCES) {
+      divergences.push(note);
+      return;
+    }
+    suppressedDivergences += 1;
+  };
+
+  if (!Number.isSafeInteger(env.ticksPerDecision) || env.ticksPerDecision <= 0) {
+    throw new Error(`Unusable adapter: ticksPerDecision must be a positive integer, got ${String(env.ticksPerDecision)}.`);
+  }
+  if (!Number.isSafeInteger(env.maxTicks) || env.maxTicks <= 0) {
+    throw new Error(`Unusable adapter: maxTicks must be a positive integer, got ${String(env.maxTicks)}.`);
+  }
+  const decisionPointBudget = Math.ceil(env.maxTicks / env.ticksPerDecision) + 1;
+
+  let state = env.reset(log.seed);
+  let tick = 0;
+  let decisionPoints = 0;
+  let terminalResult = env.terminal(state);
+
+  while (terminalResult === null) {
+    decisionPoints += 1;
+    if (decisionPoints > decisionPointBudget) {
+      throw new Error(
+        `Replay exceeded its Decision-Point budget (${decisionPointBudget}) at tick ${tick} without reaching a terminal state.`,
+      );
+    }
+
+    // `LoggedActionV2` here, not `LoggedAction` -- the v1 alias `env.step`
+    // (the v1 fighter engine) accepts is a strict subset, so any v2 log this
+    // engine itself produced (no `'jump'`, no vertical-axis fields) still
+    // steps it cleanly. A v2 engine's own adapter would accept the full v2
+    // grammar in the same slot.
+    const actionsForStep: [LoggedActionV2 | null, LoggedActionV2 | null] = [null, null];
+
+    for (const agentIndex of [0, 1] as const) {
+      const key = decisionKey(tick, agentIndex);
+      const entry = byKey.get(key);
+
+      if (!env.isActionable(state, agentIndex)) {
+        if (entry !== undefined) {
+          consumed.add(key);
+          reportDivergence(
+            `tick ${tick}, agentIndex ${agentIndex}: log records action "${entry.action}" but the environment reports the Agent as non-actionable; entry ignored.`,
+          );
+        }
+        continue;
+      }
+
+      if (entry === undefined) {
+        reportDivergence(
+          `tick ${tick}, agentIndex ${agentIndex}: the environment reports the Agent as actionable but the log has no entry; replayed as no action.`,
+        );
+        continue;
+      }
+
+      consumed.add(key);
+      actionsForStep[agentIndex] = entry.action;
+    }
+
+    state = env.step(state, actionsForStep as Parameters<typeof env.step>[1]);
     tick += env.ticksPerDecision;
     terminalResult = env.terminal(state);
   }

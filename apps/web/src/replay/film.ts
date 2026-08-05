@@ -1,5 +1,5 @@
-import type { EnvironmentAdapter, TerminalResult } from '@tokenbrawl/contracts';
-import { replayCommandLog } from '../../../../packages/core/src/replay';
+import { SCHEMA_VERSION_V2, type EnvironmentAdapter, type TerminalResult } from '@tokenbrawl/contracts';
+import { replayCommandLog, replayCommandLogV2 } from '../../../../packages/core/src/replay';
 import type { FighterState } from '../../../../packages/env-fighter/src/state';
 
 /**
@@ -169,20 +169,52 @@ function toFrames(states: readonly FighterState[]): readonly RenderFrame[] {
 }
 
 /**
- * Builds the film for a Command Log.
+ * Whether `candidate` carries schema v2's `schemaVersion`.
  *
- * `replayCommandLog` runs first and runs unconditionally: it is the module
- * that validates the document (schema version before any other field, AD-3;
- * seed range; hash shape; adapter identity; decision ordering), and routing
- * every log through it means the player inherits all of that rather than
- * reimplementing a weaker version. If it throws, the film does not exist,
- * which is the correct outcome for a log the player cannot honestly render.
+ * A structural sniff, not a validation -- the same spirit as `startup.ts`'s
+ * "cast, not validation" for the fetched demo document. The real
+ * schema-version enforcement happens one line later, inside whichever of
+ * `replayCommandLog`/`replayCommandLogV2` this dispatches to: both hard-fail
+ * on an unrecognised or mismatched version before any other field is read
+ * (AD-3), so a candidate that merely *looks* v2 but is otherwise malformed
+ * still fails loudly -- this function only decides which of the two frozen
+ * checks gets to run.
+ */
+function isSchemaV2(candidate: unknown): boolean {
+  return (
+    typeof candidate === 'object' &&
+    candidate !== null &&
+    (candidate as { readonly schemaVersion?: unknown }).schemaVersion === SCHEMA_VERSION_V2
+  );
+}
+
+/**
+ * Builds the film for a Command Log, v1 or v2.
+ *
+ * `replayCommandLog`/`replayCommandLogV2` run first and run unconditionally:
+ * one of them is the module that validates the document (schema version
+ * before any other field, AD-3; seed range; hash shape; adapter identity;
+ * decision ordering), and routing every log through it means the player
+ * inherits all of that rather than reimplementing a weaker version. If it
+ * throws, the film does not exist, which is the correct outcome for a log
+ * the player cannot honestly render.
+ *
+ * Story 9.2 added the v2 branch: a Command Log carrying a `'human'` Agent
+ * (arcade Mode) or any other Epic 8/9 v2 field has nowhere to go in v1's
+ * frozen shape, and `assertSchemaVersion`'s exact-match check means a v2
+ * document handed to `replayCommandLog` was always a hard failure, never a
+ * silent downgrade. Dispatching on `schemaVersion` here -- rather than
+ * forking this whole module, or teaching the arcade panel its own replay
+ * path -- is what keeps every Command Log, whichever schema version wrote
+ * it, going through exactly one player.
  */
 export function buildReplayFilm(
   candidate: unknown,
   env: EnvironmentAdapter<FighterState>,
 ): ReplayFilm {
-  const verdict = replayCommandLog(candidate, env);
+  const verdict = isSchemaV2(candidate)
+    ? replayCommandLogV2(candidate, env)
+    : replayCommandLog(candidate, env);
   const log = candidate as Parameters<typeof simulate>[0];
 
   const states = simulate(log, env);

@@ -288,8 +288,12 @@ export function decisionPointCount(film: ReplayFilm): number {
  * runs against a leaderboard.
  */
 export function exclusionChip(log: RatableLog): PanelChip | null {
-  return ratingEligibility(log).eligible
-    ? null
+  const eligibility = ratingEligibility(log);
+  if (eligibility.eligible) {
+    return null;
+  }
+  return eligibility.exclusion === 'human'
+    ? { label: 'Arcade · not rated', modifier: 'tb-chip--byok' }
     : { label: 'BYOK · not rated', modifier: 'tb-chip--byok' };
 }
 

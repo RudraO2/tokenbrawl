@@ -191,3 +191,11 @@ export type {
   DecisionEntryV2,
   LoggedActionV2,
 } from '@tokenbrawl/contracts';
+
+// ---------------------------------------------------------------------------
+// Story 9.2: the v2 sibling of the replay determinism gate, so a v2 Command
+// Log (including one with a `'human'` Agent) can be replayed the same way a
+// v1 log always has been.
+// ---------------------------------------------------------------------------
+
+export { replayCommandLogV2 } from './replay';

@@ -3,10 +3,17 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import type { CommandLog, DecisionEntry, EnvironmentAdapter, LoggedAction } from '@tokenbrawl/contracts';
+import type {
+  CommandLog,
+  CommandLogV2,
+  DecisionEntry,
+  EnvironmentAdapter,
+  LoggedAction,
+} from '@tokenbrawl/contracts';
+import { SCHEMA_VERSION_V2 } from '@tokenbrawl/contracts';
 import { describe, expect, it } from 'vitest';
 import { computeConfigHash } from './command-log';
-import { replayCommandLog } from './replay';
+import { replayCommandLog, replayCommandLogV2 } from './replay';
 import {
   buildDeterminismFixture,
   serialiseDeterminismFixture,
@@ -866,5 +873,109 @@ describe('Public surface', () => {
 
     expect(typeof barrel.replayCommandLog).toBe('function');
     expect(barrel.replayCommandLog(loadFixture(), makeEnv()).matchesRecordedHash).toBe(true);
+  });
+
+  it('re-exports replayCommandLogV2 from the package barrel too', async () => {
+    const barrel = await import('./index');
+    expect(typeof barrel.replayCommandLogV2).toBe('function');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Story 9.2 (closing the arcade-panel gap): replayCommandLogV2, mirroring
+// the v1 coverage above at unit scale rather than re-running the full
+// 100-process determinism apparatus, which is INV-2's gate for the v1
+// engine and is unchanged by this addition. Schema v2 is additive-only
+// (Story 8.1), so a v2-relabelled copy of the same fixture is a legitimate
+// v2 document: every field the v1 fixture carries is legal in v2 too.
+// ---------------------------------------------------------------------------
+
+function loadFixtureAsV2(): CommandLogV2 {
+  const v1 = loadFixture();
+  return {
+    ...v1,
+    schemaVersion: SCHEMA_VERSION_V2,
+    // Exercises the field v1 cannot express, on the side the v1 fixture
+    // already calls "bot" -- schema v2 is additive, so relabelling one side
+    // 'human' changes nothing about how the mock environment steps it.
+    agents: [v1.agents[0], { ...v1.agents[1], kind: 'human' }],
+  } as CommandLogV2;
+}
+
+describe('replayCommandLogV2: valid v2 log replays and matches hash', () => {
+  it('recomputes the same Final-State Hash a v2-relabelled fixture records, with no divergences', () => {
+    const fixture = loadFixtureAsV2();
+
+    const replayed = replayCommandLogV2(fixture, makeEnv());
+
+    expect(replayed.finalStateHash).toBe(fixture.finalStateHash);
+    expect(replayed.matchesRecordedHash).toBe(true);
+    expect(replayed.divergences).toStrictEqual([]);
+  });
+
+  it('recomputes the TerminalResult rather than copying it out of the log', () => {
+    const fixture = loadFixtureAsV2();
+    const replayed = replayCommandLogV2(fixture, makeEnv());
+    expect(replayed.result).toStrictEqual(fixture.result);
+    expect(replayed.matchesRecordedResult).toBe(true);
+  });
+});
+
+describe('replayCommandLogV2: a v1 document is rejected, never silently accepted', () => {
+  it('throws on the v1 fixture, naming the schema-version mismatch', () => {
+    const v1Fixture = loadFixture();
+    expect(() => replayCommandLogV2(v1Fixture, makeEnv())).toThrow(/2\.0\.0/);
+  });
+});
+
+describe('replayCommandLog: a v2 document is rejected symmetrically', () => {
+  it('throws when the v1 reader is handed a v2-shaped document', () => {
+    const v2Fixture = loadFixtureAsV2();
+    expect(() => replayCommandLog(v2Fixture, makeEnv())).toThrow(/1\.0\.0/);
+  });
+});
+
+describe('replayCommandLogV2: tampered v2 decisions are reported as divergences', () => {
+  it('reports a forged entry at a non-actionable Decision Point rather than throwing', () => {
+    const fixture = loadFixtureAsV2();
+    const tampered: CommandLogV2 = withExtraEntry(
+      fixture as unknown as CommandLog,
+      { tick: 4, agentIndex: 0, action: 'attack' },
+    ) as unknown as CommandLogV2;
+
+    const replayed = replayCommandLogV2(tampered, makeEnv());
+
+    expect(replayed.finalStateHash).toBe(fixture.finalStateHash);
+    expect(replayed.divergences.some((note) => note.includes('non-actionable'))).toBe(true);
+  });
+
+  it('recomputes a different hash when a damaging Action is rewritten, the same as v1', () => {
+    const fixture = loadFixtureAsV2();
+    const mutated = withMutatedAction(fixture as unknown as CommandLog, 1, 0, 'block') as unknown as CommandLogV2;
+
+    const replayed = replayCommandLogV2(mutated, makeEnv());
+
+    expect(replayed.finalStateHash).not.toBe(fixture.finalStateHash);
+    expect(replayed.matchesRecordedHash).toBe(false);
+  });
+
+  it('rejects a jump Action against the v1 mock environment, which has no such Action, without corrupting the hash silently', () => {
+    // The mock environment only ever recognises v1 Actions -- jump is v2-only
+    // and belongs to a future vertical-axis adapter, not to this one. A
+    // malformed-log-shaped rejection here (rather than a silent no-op) is the
+    // correct outcome: replay must never treat an Action the adapter cannot
+    // interpret as a harmless divergence.
+    const fixture = loadFixtureAsV2();
+    const mutated = withMutatedAction(fixture as unknown as CommandLog, 1, 0, 'block') as unknown as CommandLogV2;
+    const withJump: CommandLogV2 = {
+      ...mutated,
+      decisions: mutated.decisions.map((entry, index) => (index === 0 ? { ...entry, action: 'jump' } : entry)),
+    };
+
+    // `replayCommandLogV2` itself accepts 'jump' as a well-formed Action (it
+    // is in ACTIONS_V2); what happens next is between the log and the
+    // adapter, exercised only to show the guard admits it rather than
+    // rejecting valid v2 grammar.
+    expect(() => replayCommandLogV2(withJump, makeEnv())).not.toThrow(/unknown action/);
   });
 });

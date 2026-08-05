@@ -59,6 +59,13 @@
       itself at the moment it succeeded.
     -->
     <section class="tb-byok" id="byok"></section>
+    <!--
+      Story 9.2's Play-vs-CPU panel, outside #app for the same reason #byok
+      is: a completed arcade Match re-mounts the player through the same
+      call BYOK's completion does, and a panel inside #app would delete
+      itself the moment it succeeded.
+    -->
+    <section class="tb-arcade" id="arcade"></section>
     <script type="module" src="/src/boot.ts"></script>
   </body>
 </html>

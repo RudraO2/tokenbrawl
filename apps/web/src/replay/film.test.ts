@@ -133,10 +133,29 @@ describe('the replay film', () => {
   });
 
   it('rejects an unknown schemaVersion before reading any other field (AD-3)', () => {
+    // Not '2.0.0': Story 9.2 made that a real, dispatched-to version (see the
+    // v1/v2 dispatch cases below), so a truly unrecognised one is needed to
+    // exercise "neither reader accepts this".
     const env = createFighterEnvironment();
-    expect(() => buildReplayFilm({ ...log, schemaVersion: '2.0.0' }, env)).toThrow(
+    expect(() => buildReplayFilm({ ...log, schemaVersion: '9.9.9' }, env)).toThrow(
       /Unsupported Command Log schemaVersion/,
     );
+  });
+
+  it('dispatches a v1 schemaVersion to the v1 reader, unchanged from before Story 9.2', () => {
+    const env = createFighterEnvironment();
+    const film = buildReplayFilm(log, env);
+    expect(film.matchesRecordedHash).toBe(true);
+  });
+
+  it('dispatches a v2 schemaVersion to replayCommandLogV2, not to the v1-only reader (Story 9.2)', () => {
+    const env = createFighterEnvironment();
+    // A v2-relabelled copy of the same faithful log: schema v2 is additive
+    // (Story 8.1), so every field the v1 demo log carries is legal in v2 too.
+    const v2Log = { ...log, schemaVersion: '2.0.0' as const };
+    const film = buildReplayFilm(v2Log, env);
+    expect(film.matchesRecordedHash).toBe(true);
+    expect(film.divergences).toStrictEqual([]);
   });
 
   it('rejects a log replayed through the wrong adapter', () => {

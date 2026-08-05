@@ -1,4 +1,5 @@
 import type { CommandLog } from '@tokenbrawl/contracts';
+import { mountArcadePanel, type ArcadeHost, type ArcadePanel } from './arcade/panel';
 import { mountByokPanel, type ByokHost, type ByokPanel } from './byok/panel';
 import type { KeyStorage } from './byok/keys';
 import { escapeHtml, renderApp, type HostView, type MountPoint, type MountedApp } from './main';
@@ -101,6 +102,11 @@ export interface StartupResult {
    * Exposed so a test can drive a whole Match through the real wiring.
    */
   readonly byok: ByokPanel | null;
+  /**
+   * The Play-vs-CPU panel, or `null` when the page has no `#arcade` host
+   * (Story 9.2). Exposed for the same reason `byok` is.
+   */
+  readonly arcade: ArcadePanel | null;
   /** The player currently on screen. Changes when a BYOK Match replaces the demo. */
   readonly current: () => MountedApp;
   /**
@@ -298,6 +304,50 @@ function mountByok(
 }
 
 /**
+ * Mounts the Play-vs-CPU panel, or returns `null` when this page has no host
+ * for it. Mirrors `mountByok` exactly, including the warn-not-throw failure
+ * mode: the replay is the page's claim and the panel is an offer.
+ *
+ * `buildArcadeCommandLog` produces a v2 `CommandLogV2` -- a human `Agent`
+ * has nowhere to go in the frozen v1 `AgentIdentity` shape -- so the value
+ * handed to `mount` here is cast, the same way `startup()` below casts the
+ * fetched demo document rather than re-validating it. This is no longer a
+ * lie: `mount()` calls `renderApp`, which calls `mountPlayer`, which builds
+ * the film through `buildReplayFilm` -- and that function now dispatches on
+ * `schemaVersion`, routing a v2 document to `replayCommandLogV2` instead of
+ * hard-failing it the way the v1-only reader once did. A v2 arcade log
+ * therefore replays through exactly the same player a v1 log does, with no
+ * arcade-specific branch anywhere in `main.ts` or `film.ts`'s public shape.
+ */
+function mountArcade(
+  globals: BrowserGlobals,
+  mount: (log: CommandLog) => MountedApp,
+): ArcadePanel | null {
+  const host = globals.document?.querySelector('#arcade');
+  if (host == null) {
+    return null;
+  }
+  try {
+    return mountArcadePanel(host as unknown as ArcadeHost, {
+      onLog: (log) => {
+        // `mount` routes through `buildReplayFilm`, which can throw (e.g. an
+        // unrecognised schema version). Left unwrapped, that throw escaped
+        // `onLog` as an unhandled rejection instead of reaching the page's
+        // usual failure card (P1).
+        try {
+          mount(log as unknown as CommandLog);
+        } catch (error) {
+          warn('Arcade Match could not be replayed', error);
+        }
+      },
+    });
+  } catch (error) {
+    warn('Arcade panel unavailable', error);
+    return null;
+  }
+}
+
+/**
  * The house-style failure card. A player that fails silently looks identical to
  * one still loading.
  *
@@ -418,6 +468,7 @@ export async function startup(globals: BrowserGlobals): Promise<StartupResult | 
       // not results, and every upgrade already handles its own failure.
       dressed: Promise.all(upgrades).then(() => undefined),
       byok: mountByok(globals, mount),
+      arcade: mountArcade(globals, mount),
       current: (): MountedApp => player.mounted,
       showLog: mount,
     };

@@ -156,6 +156,8 @@ interface Harness {
   readonly root: FakeRoot;
   /** The `#byok` host, which is a separate element from `#app` on the real page. */
   readonly byokHost: FakeRoot;
+  /** The `#arcade` host (Story 9.2), separate from `#app` for the same reason `#byok` is. */
+  readonly arcadeHost: FakeRoot;
   readonly painted: () => readonly string[];
   readonly frames: () => number;
   readonly runFrames: (count: number) => void;
@@ -170,10 +172,13 @@ function createHarness(
     readonly json?: (url: string) => Promise<unknown>;
     /** A page with no BYOK panel at all -- which must still play the replay. */
     readonly noByokHost?: boolean;
+    /** A page with no arcade panel at all -- which must still play the replay. */
+    readonly noArcadeHost?: boolean;
   } = {},
 ): Harness {
   const root = createRoot();
   const byokHost = createRoot();
+  const arcadeHost = createRoot();
   const queue: (() => void)[] = [];
   const requested: string[] = [];
 
@@ -194,14 +199,22 @@ function createHarness(
   };
 
   const globals: BrowserGlobals = {
-    // Two hosts, because the page has two (Story 4.6). `#byok` is a separate
-    // element outside `#app` precisely so that re-mounting the player on a BYOK
-    // Match does not delete the panel that produced it -- a fake that answered
-    // both lookups with one node would have the panel and the player writing
-    // over each other, which is the defect the split exists to prevent.
+    // Three hosts, because the page has three (Story 4.6, Story 9.2). `#byok`
+    // and `#arcade` are separate elements outside `#app` precisely so that
+    // re-mounting the player on a BYOK or an arcade Match does not delete the
+    // panel that produced it -- a fake that answered every lookup with one
+    // node would have a panel and the player writing over each other, which
+    // is the defect the split exists to prevent.
     document: {
-      querySelector: (selector: string) =>
-        selector === '#byok' ? (options.noByokHost === true ? null : byokHost) : root,
+      querySelector: (selector: string) => {
+        if (selector === '#byok') {
+          return options.noByokHost === true ? null : byokHost;
+        }
+        if (selector === '#arcade') {
+          return options.noArcadeHost === true ? null : arcadeHost;
+        }
+        return root;
+      },
     },
     window: {
       requestAnimationFrame: (callback) => {
@@ -225,6 +238,7 @@ function createHarness(
     globals,
     root,
     byokHost,
+    arcadeHost,
     painted: () => root.painted(),
     frames: () => queue.length,
     runFrames: (count: number): void => {
@@ -329,13 +343,18 @@ describe('startup ordering (AC1, AC3)', () => {
     // story did -- the page would report an unhelpful TypeError instead of the
     // one thing a visitor can act on. A partial read of an evolved schema is
     // the failure AD-3 exists to prevent.
+    //
+    // Not '2.0.0': Story 9.2 made that a real, dispatched-to version (see
+    // `film.test.ts`'s dispatch coverage), so an unrecognised one is needed
+    // here to exercise "the demo endpoint itself serves nothing this page
+    // understands at all".
     const harness = createHarness({} as CommandLog, {
-      json: async () => ({ schemaVersion: '2.0.0' }),
+      json: async () => ({ schemaVersion: '9.9.9' }),
     });
 
     await startup(harness.globals);
 
-    expect(harness.root.innerHTML).toContain('Unsupported Command Log schemaVersion: 2.0.0');
+    expect(harness.root.innerHTML).toContain('Unsupported Command Log schemaVersion: 9.9.9');
   });
 });
 
@@ -1144,5 +1163,216 @@ describe('the BYOK panel and the player it replaces (Story 4.6)', () => {
 
     expect(result?.byok).toBeNull();
     expect(result?.mounted.clock.isRunning()).toBe(true);
+  });
+});
+
+/**
+ * Story 9.2's wiring, mirroring the BYOK coverage above: its own host, its
+ * own re-mount of the player through the same `showLog`/`mount` mechanism,
+ * and graceful absence when the page has no `#arcade` host.
+ *
+ * Driving a whole arcade Match to completion (rather than only asserting the
+ * panel mounted) needs `fire` to carry a `key`, which `FakeRoot.fire`'s type
+ * does not declare -- it was written for `ShellEvent`'s `pointerType` only.
+ * Cast through `unknown` at the call site rather than widening that shared
+ * type for one caller.
+ */
+describe('the arcade panel and the player it replaces (Story 9.2)', () => {
+  const KEYS = ['ArrowRight', 'z', 'x', 'c', 'ArrowLeft'] as const;
+
+  function fireKey(host: FakeRoot, selector: string, key: string): void {
+    (host.fire as unknown as (selector: string, type: string, event?: { key?: string }) => void)(
+      selector,
+      'keydown',
+      { key },
+    );
+  }
+
+  it('mounts the panel into its own host, outside the player shell', async () => {
+    const { log } = await buildDemoBundle();
+    const harness = createHarness(log);
+
+    const result = await startup(harness.globals);
+
+    expect(result?.arcade).not.toBeNull();
+    expect(harness.arcadeHost.innerHTML).toContain('Play vs CPU');
+    // Neither the player's shell nor the BYOK panel is touched by it.
+    expect(harness.root.innerHTML).not.toContain('Play vs CPU');
+    expect(harness.root.innerHTML).toContain('tb-canvas');
+    expect(harness.byokHost.innerHTML).not.toContain('Play vs CPU');
+  });
+
+  it('leaves the player alone when the page has no arcade host at all', async () => {
+    const { log } = await buildDemoBundle();
+    const harness = createHarness(log, { noArcadeHost: true });
+
+    const result = await startup(harness.globals);
+
+    expect(result?.arcade).toBeNull();
+    expect(result?.mounted.clock.isRunning()).toBe(true);
+  });
+
+  /**
+   * A completed arcade Match's Command Log is schema v2 (`AgentIdentityV2`
+   * carries `kind: 'human'`, which the frozen v1 `AgentIdentity` cannot
+   * express). `buildReplayFilm` (`replay/film.ts`) now dispatches on
+   * `schemaVersion`, routing a v2 document to `packages/core`'s
+   * `replayCommandLogV2` -- added alongside `replayCommandLog` rather than
+   * replacing it -- so this Match replays through the very same
+   * `renderApp`/`mountPlayer` call any other Match does, with no
+   * arcade-specific branch in either.
+   */
+  it('replays a completed arcade Match through the same player, hash verified (AC1, AC4)', async () => {
+    const { log } = await buildDemoBundle();
+    const harness = createHarness(log);
+    const result = await startup(harness.globals);
+    const demo = result?.mounted;
+
+    harness.arcadeHost.fire('[data-arcade-play]', 'click');
+
+    let index = 0;
+    let iterations = 0;
+    while (result?.current() === demo && iterations < 5_000) {
+      fireKey(harness.arcadeHost, '[data-arcade-keys]', KEYS[index % KEYS.length]);
+      index += 1;
+      iterations += 1;
+      await Promise.resolve();
+    }
+
+    const mounted = result?.current();
+    expect(mounted).not.toBe(demo);
+    expect(mounted?.film.matchesRecordedHash).toBe(true);
+    expect(mounted?.clock.isRunning()).toBe(true);
+  });
+
+  it('stops the previous clock, so two fights never run at once', async () => {
+    const { log } = await buildDemoBundle();
+    const harness = createHarness(log);
+    const result = await startup(harness.globals);
+    const demo = result?.mounted;
+
+    harness.arcadeHost.fire('[data-arcade-play]', 'click');
+    let index = 0;
+    let iterations = 0;
+    while (result?.current() === demo && iterations < 5_000) {
+      fireKey(harness.arcadeHost, '[data-arcade-keys]', KEYS[index % KEYS.length]);
+      index += 1;
+      iterations += 1;
+      await Promise.resolve();
+    }
+
+    expect(demo?.clock.isRunning()).toBe(false);
+    expect(result?.current().clock.isRunning()).toBe(true);
+  });
+
+  it('marks the arcade Match as excluded from ratings, the same as BYOK (AD-11, AD-14)', async () => {
+    const { log } = await buildDemoBundle();
+    const harness = createHarness(log);
+    const result = await startup(harness.globals);
+    const demo = result?.mounted;
+
+    expect(harness.root.html()).not.toContain('not rated');
+
+    harness.arcadeHost.fire('[data-arcade-play]', 'click');
+    let index = 0;
+    let iterations = 0;
+    while (result?.current() === demo && iterations < 5_000) {
+      fireKey(harness.arcadeHost, '[data-arcade-keys]', KEYS[index % KEYS.length]);
+      index += 1;
+      iterations += 1;
+      await Promise.resolve();
+    }
+
+    expect(harness.root.html()).toContain('not rated');
+  });
+
+  it('catches a mount() throw during onLog and reports it rather than leaving an unhandled rejection (P1)', async () => {
+    // `mount`'s remount path (`renderApp`) requests an animation frame as
+    // part of starting the new player's clock. Failing precisely that second
+    // request -- the first belongs to the demo player mounted by `startup`
+    // itself -- reaches `mount` with a real, generically-caused throw, which
+    // is exactly what P1's wrapping must catch regardless of its cause.
+    const { log } = await buildDemoBundle();
+    const harness = createHarness(log);
+    let rafCalls = 0;
+    const globals = {
+      ...harness.globals,
+      window: {
+        ...harness.globals.window,
+        requestAnimationFrame: (callback: () => void): number => {
+          rafCalls += 1;
+          if (rafCalls > 1) {
+            throw new Error('remount blew up');
+          }
+          return harness.globals.window?.requestAnimationFrame(callback) ?? 0;
+        },
+      },
+    } as unknown as BrowserGlobals;
+
+    const consoleWarn = console.warn;
+    const warnings: unknown[][] = [];
+    console.warn = (...args: unknown[]): void => {
+      warnings.push(args);
+    };
+
+    try {
+      const result = await startup(globals);
+      const demo = result?.mounted;
+
+      expect(() => {
+        harness.arcadeHost.fire('[data-arcade-play]', 'click');
+      }).not.toThrow();
+
+      let index = 0;
+      let iterations = 0;
+      // Drive the real Match to completion; onLog fires when it does, and the
+      // throw above happens inside it rather than escaping as an unhandled
+      // rejection.
+      while (iterations < 5_000) {
+        (
+          harness.arcadeHost.fire as unknown as (
+            selector: string,
+            type: string,
+            event?: { key?: string },
+          ) => void
+        )('[data-arcade-keys]', 'keydown', { key: KEYS[index % KEYS.length] });
+        index += 1;
+        iterations += 1;
+        await Promise.resolve();
+        if (warnings.length > 0) {
+          break;
+        }
+      }
+
+      // The demo player is still the one on screen: the throw was caught
+      // before it could replace it, and reported through the usual `warn`
+      // path rather than left unhandled.
+      expect(result?.current()).toBe(demo);
+      expect(warnings.some((args) => String(args[0]).includes('remount blew up'))).toBe(true);
+    } finally {
+      console.warn = consoleWarn;
+    }
+  });
+
+  it('never crashes on an unmapped key mid-Match, and the Match still completes and replays', async () => {
+    const { log } = await buildDemoBundle();
+    const harness = createHarness(log);
+    const result = await startup(harness.globals);
+    const demo = result?.mounted;
+
+    harness.arcadeHost.fire('[data-arcade-play]', 'click');
+    let index = 0;
+    let iterations = 0;
+    while (result?.current() === demo && iterations < 5_000) {
+      fireKey(harness.arcadeHost, '[data-arcade-keys]', 'Escape');
+      fireKey(harness.arcadeHost, '[data-arcade-keys]', KEYS[index % KEYS.length]);
+      index += 1;
+      iterations += 1;
+      await Promise.resolve();
+    }
+
+    const mounted = result?.current();
+    expect(mounted).not.toBe(demo);
+    expect(mounted?.film.matchesRecordedHash).toBe(true);
   });
 });

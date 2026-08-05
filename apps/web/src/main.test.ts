@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { createFighterEnvironment } from '../../../packages/env-fighter/src/environment';
-import { decisionPointCount, hashChip, mountPlayer, reasoningView, type CanvasSurface } from './main';
+import {
+  decisionPointCount,
+  exclusionChip,
+  hashChip,
+  mountPlayer,
+  reasoningView,
+  type CanvasSurface,
+} from './main';
 import { buildDemoLog } from './testing/demo-log';
 import { buildReplayFilm } from './replay/film';
 import type { ReasoningLookup } from './replay/sidecar';
@@ -18,6 +25,45 @@ import type { DrawnFighter, FighterArtist } from './render/artist';
  * without a DOM is the decision the page *displays*: a replay that did not
  * verify has to be loud, and that decision is a pure function.
  */
+
+describe('the "not rated" chip labels the actual exclusion reason (P2)', () => {
+  it('labels a BYOK-excluded Match "BYOK · not rated"', () => {
+    const log = {
+      agents: [
+        {
+          id: 'p1',
+          kind: 'deployment',
+          deployment: { provider: 'byok', endpoint: 'https://example.test', model: 'm' },
+        },
+        { id: 'p2', kind: 'bot' },
+      ],
+    } as const;
+
+    expect(exclusionChip(log)).toStrictEqual({ label: 'BYOK · not rated', modifier: 'tb-chip--byok' });
+  });
+
+  it('labels a human-excluded (arcade) Match "Arcade · not rated", not "BYOK"', () => {
+    const log = {
+      agents: [
+        { id: 'p1:human', kind: 'human' },
+        { id: 'p2:bot:random', kind: 'bot' },
+      ],
+    } as const;
+
+    expect(exclusionChip(log)).toStrictEqual({ label: 'Arcade · not rated', modifier: 'tb-chip--byok' });
+  });
+
+  it('returns null for an eligible Match', () => {
+    const log = {
+      agents: [
+        { id: 'p1', kind: 'bot' },
+        { id: 'p2', kind: 'bot' },
+      ],
+    } as const;
+
+    expect(exclusionChip(log)).toBeNull();
+  });
+});
 
 describe('the hash verdict shown on the page (AC5)', () => {
   it('reports a verified replay', async () => {
