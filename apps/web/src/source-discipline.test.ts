@@ -74,9 +74,12 @@ function codeLines(source: string): readonly { readonly line: number; readonly t
     });
 }
 
-function offendingLines(pattern: RegExp): readonly string[] {
+function offendingLines(pattern: RegExp, exempt: readonly string[] = []): readonly string[] {
   const offences: string[] = [];
   for (const { path, source } of shippedFiles()) {
+    if (exempt.includes(path.replace(/\\/g, '/'))) {
+      continue;
+    }
     for (const { line, text } of codeLines(source)) {
       if (pattern.test(text)) {
         offences.push(`${path}:${line}: ${text.trim()}`);
@@ -85,6 +88,20 @@ function offendingLines(pattern: RegExp): readonly string[] {
   }
   return offences;
 }
+
+/**
+ * Story 9.3's one deliberate, documented exception to "no wall-clock
+ * anywhere": `spectate/manifest.ts`'s `readNowMs` is the single permitted
+ * `Date.now()` read in the whole player, isolated behind one exported
+ * function precisely so it stays the *only* one -- every other file,
+ * including `spectate/walk.ts` and `spectate/panel.ts`, is still swept
+ * normally below. AD-17's "a visitor arriving mid-loop sees a Match already
+ * in progress" cannot be done without knowing what time it is once, at
+ * mount; INV-3 is preserved because the read happens exactly once, produces
+ * a frame offset handed to the ordinary frame-counted clock, and never
+ * recurs on any per-frame path.
+ */
+const WALL_CLOCK_EXEMPT = ['spectate/manifest.ts'];
 
 describe('shipped player source discipline', () => {
   it('finds the files it is meant to police', () => {
@@ -124,7 +141,7 @@ describe('shipped player source discipline', () => {
     // Deployment took to think.
     const wallClock =
       /\b(Date\.now|performance\.now|new Date\(|Date\.parse|process\.hrtime|setInterval)\b/;
-    expect(offendingLines(wallClock)).toStrictEqual([]);
+    expect(offendingLines(wallClock, WALL_CLOCK_EXEMPT)).toStrictEqual([]);
   });
 
   it('reads no latency, duration or elapsed field (AC3)', () => {
@@ -140,6 +157,38 @@ describe('shipped player source discipline', () => {
     // is precisely the shape INV-3 forbids: playback would then depend on the
     // viewer's refresh rate and on how long the tab was backgrounded.
     expect(offendingLines(/\b(deltaTime|deltaMs|dt)\b/)).toStrictEqual([]);
+  });
+
+  it('confines the one permitted wall-clock read to a single line in a single file (Story 9.3)', () => {
+    // The exemption above is deliberately narrow: it drops `manifest.ts` from
+    // the sweep entirely rather than merely permitting one pattern, so this
+    // case re-checks the file directly and pins the read to exactly one call,
+    // inside `readNowMs`, so the exemption cannot quietly grow.
+    const manifest = shippedFiles().find((file) => file.path.replace(/\\/g, '/') === 'spectate/manifest.ts');
+    expect(manifest).toBeDefined();
+    const dateNowCalls = codeLines(manifest?.source ?? '').filter(({ text }) => /Date\.now\(\)/.test(text));
+    expect(dateNowCalls).toHaveLength(1);
+    // A regex rather than a literal `toContain` so a cosmetic reformat
+    // (different whitespace, an extra pair of parens) doesn't fail this test
+    // for reasons unrelated to the invariant it protects: that the call sits
+    // alone on a `return` line, not buried inside other logic.
+    expect(dateNowCalls[0].text.trim()).toMatch(/^return\s+Date\.now\(\)\s*;?$/);
+
+    // And every other file under `spectate/` -- in particular `walk.ts`,
+    // whose per-frame path is the one INV-3 exists to protect -- is still
+    // covered by the ordinary sweep.
+    const wallClock =
+      /\b(Date\.now|performance\.now|new Date\(|Date\.parse|process\.hrtime|setInterval)\b/;
+    const otherSpectateFiles = shippedFiles().filter(
+      (file) =>
+        file.path.replace(/\\/g, '/').startsWith('spectate/') &&
+        file.path.replace(/\\/g, '/') !== 'spectate/manifest.ts',
+    );
+    for (const { source } of otherSpectateFiles) {
+      for (const { text } of codeLines(source)) {
+        expect(wallClock.test(text)).toBe(false);
+      }
+    }
   });
 
   it('declares no module-level mutable binding, which is where cross-frame state hides', () => {

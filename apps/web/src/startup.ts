@@ -7,6 +7,7 @@ import { validateReasoningSidecar } from './replay/sidecar';
 import { createSpriteArtist, type FighterArtist } from './render/artist';
 import { createBackdrop, validateBackdropLayout, type Backdrop } from './render/backdrop';
 import { createSpriteSheet, validateSpriteSheetLayout } from './render/sprite-sheet';
+import { mountSpectatePanel, type SpectateHost, type SpectatePanel } from './spectate/panel';
 
 /**
  * Story 4.2: the bootstrap, and the order it does things in.
@@ -107,6 +108,11 @@ export interface StartupResult {
    * (Story 9.2). Exposed for the same reason `byok` is.
    */
   readonly arcade: ArcadePanel | null;
+  /**
+   * The Spectate panel, or `null` when the page has no `#spectate` host
+   * (Story 9.3). Exposed for the same reason `byok` and `arcade` are.
+   */
+  readonly spectate: SpectatePanel | null;
   /** The player currently on screen. Changes when a BYOK Match replaces the demo. */
   readonly current: () => MountedApp;
   /**
@@ -348,6 +354,48 @@ function mountArcade(
 }
 
 /**
+ * Mounts the Spectate panel, or returns `null` when this page has no host
+ * for it. Mirrors `mountByok`/`mountArcade`'s warn-not-throw shape: the
+ * ambient stream is an offer, not the page's central claim, so a browser
+ * that could not start it must still show the demo replay.
+ *
+ * Unlike BYOK and Arcade, this panel never calls back into `mount`: it owns
+ * its own film/clock sequence entirely (`spectate/walk.ts`) rather than
+ * replacing the `#app` player.
+ */
+function mountSpectate(globals: BrowserGlobals): SpectatePanel | null {
+  const host = globals.document?.querySelector('#spectate');
+  const view = globals.window;
+  if (host == null || view == null || globals.fetch == null) {
+    return null;
+  }
+  try {
+    return mountSpectatePanel(host as unknown as SpectateHost, {
+      view,
+      // Not `globals.fetch` handed through directly: a real browser's
+      // `fetch` is a WebIDL operation branded to `Window`, and extracting it
+      // as a bare reference detaches that binding. `startup.ts`'s own
+      // `fetchJson` never hits this because it always calls
+      // `globals.fetch?.(url)` -- a member-access call, which keeps `this`
+      // bound to `globals`. `spectate/panel.ts` and `spectate/walk.ts`,
+      // downstream, call their injected `fetch` as `deps.fetch(url)` --
+      // also a member-access call, but bound to *their own* `deps` object
+      // instead, which is exactly the mismatched receiver that throws
+      // "Illegal invocation". Wrapping it in an arrow function here, whose
+      // own body performs the correctly-bound call, is what keeps the
+      // binding correct no matter how many object-shaped layers later call
+      // through it. Found via the Story 9.3 live browser check: every
+      // manifest-entry fetch failed with this error while the manifest
+      // fetch itself (invoked one call-shape earlier) happened to survive.
+      fetch: (url: string) => globals.fetch!(url),
+    });
+  } catch (error) {
+    warn('Spectate panel unavailable', error);
+    return null;
+  }
+}
+
+/**
  * The house-style failure card. A player that fails silently looks identical to
  * one still loading.
  *
@@ -469,6 +517,7 @@ export async function startup(globals: BrowserGlobals): Promise<StartupResult | 
       dressed: Promise.all(upgrades).then(() => undefined),
       byok: mountByok(globals, mount),
       arcade: mountArcade(globals, mount),
+      spectate: mountSpectate(globals),
       current: (): MountedApp => player.mounted,
       showLog: mount,
     };

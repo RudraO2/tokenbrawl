@@ -90,6 +90,45 @@ origin, or over-runs its own image.
 frames generously and never agree on how much; get it wrong and the fighter
 floats above the floor or sinks through it.
 
+## Command Logs
+
+| Asset | Source | Licence | Checked |
+|---|---|---|---|
+| Spectate manifest Command Logs (`apps/web/public/replays/spectate-01.command-log.json` … `spectate-06.command-log.json`) | Generated in this repo (Story 9.3), local CLI | **Authored in this repo — no third-party rights** | 2026-08-05 |
+| Spectate manifest (`apps/web/public/replays/manifest.json`) | Generated in this repo (Story 9.3), local CLI | **Authored in this repo — no third-party rights** | 2026-08-05 |
+
+Six deterministic Baseline-Bot-vs-Baseline-Bot Matches, generated locally with
+no provider key and no network by `apps/web/scripts/build-spectate-
+manifest.mts` — the same `runMatch`/`buildCommandLog` composition
+`packages/cli/src/run.ts` uses for a tournament, run here as a one-off script
+rather than through a config file (AD-17: the default stream is a manifest
+walk over already-committed logs, never a computation triggered by a
+visitor). Regenerate with:
+
+```
+node --experimental-strip-types --no-warnings \
+     --import ./packages/cli/bin/register.mjs apps/web/scripts/build-spectate-manifest.mts
+```
+
+Every pairing crosses each of the three graded Baseline Bots (`aggressive`,
+`spacing`, `random`) against a different one, over six distinct seeds, so the
+loop reads as six different fights rather than one Match repeating:
+
+| Entry | Seed | Pairing |
+|---|---|---|
+| `spectate-01` | 9301 | aggressive vs spacing |
+| `spectate-02` | 9302 | spacing vs aggressive |
+| `spectate-03` | 9303 | random vs aggressive |
+| `spectate-04` | 9304 | aggressive vs random |
+| `spectate-05` | 9305 | spacing vs random |
+| `spectate-06` | 9306 | random vs spacing |
+
+`manifest.json` carries a fixed `loopStartEpochMs` anchor (a constant, not a
+timestamp taken at generation time) and each entry's `frameCount`, which
+together let `apps/web/src/spectate/manifest.ts`'s `offsetForNow` compute
+where a visitor arriving right now would join the loop, without ever
+recomputing a Command Log on demand.
+
 ## Typefaces
 
 Both faces are self-hosted as `woff2` under `apps/web/public/fonts/`. No CDN:

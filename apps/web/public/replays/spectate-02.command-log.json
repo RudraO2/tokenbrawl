@@ -1,0 +1,419 @@
+{
+  "schemaVersion": "1.0.0",
+  "matchId": "1adadcf49765595f1265cfb5b0280a4464721457f5183de2e647d237d465669f",
+  "environment": {
+    "id": "fighter-1v1",
+    "version": "1.0.0"
+  },
+  "seed": 9302,
+  "configHash": "24f5f97e1c88a3f3a9b66405c569c076ba30994ac93dbc69429c3b8780bdc0f7",
+  "agents": [
+    {
+      "id": "bot:spacing:1",
+      "kind": "bot"
+    },
+    {
+      "id": "bot:aggressive:2",
+      "kind": "bot"
+    }
+  ],
+  "decisions": [
+    {
+      "tick": 0,
+      "agentIndex": 0,
+      "action": "advance",
+      "reasoning": null,
+      "rawResponse": "spacing:advance",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 0,
+      "agentIndex": 1,
+      "action": "advance",
+      "reasoning": null,
+      "rawResponse": "aggressive:advance",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 30,
+      "agentIndex": 0,
+      "action": "advance",
+      "reasoning": null,
+      "rawResponse": "spacing:advance",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 30,
+      "agentIndex": 1,
+      "action": "advance",
+      "reasoning": null,
+      "rawResponse": "aggressive:advance",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 60,
+      "agentIndex": 0,
+      "action": "block",
+      "reasoning": null,
+      "rawResponse": "spacing:block",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 60,
+      "agentIndex": 1,
+      "action": "attack",
+      "reasoning": null,
+      "rawResponse": "aggressive:attack",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 90,
+      "agentIndex": 0,
+      "action": "attack",
+      "reasoning": null,
+      "rawResponse": "spacing:attack",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 150,
+      "agentIndex": 0,
+      "action": "block",
+      "reasoning": null,
+      "rawResponse": "spacing:block",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 150,
+      "agentIndex": 1,
+      "action": "attack",
+      "reasoning": null,
+      "rawResponse": "aggressive:attack",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 180,
+      "agentIndex": 0,
+      "action": "attack",
+      "reasoning": null,
+      "rawResponse": "spacing:attack",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 240,
+      "agentIndex": 0,
+      "action": "block",
+      "reasoning": null,
+      "rawResponse": "spacing:block",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 240,
+      "agentIndex": 1,
+      "action": "attack",
+      "reasoning": null,
+      "rawResponse": "aggressive:attack",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 270,
+      "agentIndex": 0,
+      "action": "attack",
+      "reasoning": null,
+      "rawResponse": "spacing:attack",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 330,
+      "agentIndex": 0,
+      "action": "block",
+      "reasoning": null,
+      "rawResponse": "spacing:block",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 330,
+      "agentIndex": 1,
+      "action": "attack",
+      "reasoning": null,
+      "rawResponse": "aggressive:attack",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 360,
+      "agentIndex": 0,
+      "action": "attack",
+      "reasoning": null,
+      "rawResponse": "spacing:attack",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 420,
+      "agentIndex": 0,
+      "action": "block",
+      "reasoning": null,
+      "rawResponse": "spacing:block",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 420,
+      "agentIndex": 1,
+      "action": "attack",
+      "reasoning": null,
+      "rawResponse": "aggressive:attack",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 450,
+      "agentIndex": 0,
+      "action": "attack",
+      "reasoning": null,
+      "rawResponse": "spacing:attack",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 510,
+      "agentIndex": 0,
+      "action": "block",
+      "reasoning": null,
+      "rawResponse": "spacing:block",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 510,
+      "agentIndex": 1,
+      "action": "attack",
+      "reasoning": null,
+      "rawResponse": "aggressive:attack",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 540,
+      "agentIndex": 0,
+      "action": "attack",
+      "reasoning": null,
+      "rawResponse": "spacing:attack",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 600,
+      "agentIndex": 0,
+      "action": "block",
+      "reasoning": null,
+      "rawResponse": "spacing:block",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 600,
+      "agentIndex": 1,
+      "action": "attack",
+      "reasoning": null,
+      "rawResponse": "aggressive:attack",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 630,
+      "agentIndex": 0,
+      "action": "attack",
+      "reasoning": null,
+      "rawResponse": "spacing:attack",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 690,
+      "agentIndex": 0,
+      "action": "block",
+      "reasoning": null,
+      "rawResponse": "spacing:block",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 690,
+      "agentIndex": 1,
+      "action": "attack",
+      "reasoning": null,
+      "rawResponse": "aggressive:attack",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 720,
+      "agentIndex": 0,
+      "action": "attack",
+      "reasoning": null,
+      "rawResponse": "spacing:attack",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 780,
+      "agentIndex": 0,
+      "action": "block",
+      "reasoning": null,
+      "rawResponse": "spacing:block",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 780,
+      "agentIndex": 1,
+      "action": "attack",
+      "reasoning": null,
+      "rawResponse": "aggressive:attack",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 810,
+      "agentIndex": 0,
+      "action": "attack",
+      "reasoning": null,
+      "rawResponse": "spacing:attack",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 870,
+      "agentIndex": 0,
+      "action": "block",
+      "reasoning": null,
+      "rawResponse": "spacing:block",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 870,
+      "agentIndex": 1,
+      "action": "attack",
+      "reasoning": null,
+      "rawResponse": "aggressive:attack",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 900,
+      "agentIndex": 0,
+      "action": "attack",
+      "reasoning": null,
+      "rawResponse": "spacing:attack",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 960,
+      "agentIndex": 0,
+      "action": "block",
+      "reasoning": null,
+      "rawResponse": "spacing:block",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 960,
+      "agentIndex": 1,
+      "action": "attack",
+      "reasoning": null,
+      "rawResponse": "aggressive:attack",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 990,
+      "agentIndex": 0,
+      "action": "attack",
+      "reasoning": null,
+      "rawResponse": "spacing:attack",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 1050,
+      "agentIndex": 0,
+      "action": "block",
+      "reasoning": null,
+      "rawResponse": "spacing:block",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 1050,
+      "agentIndex": 1,
+      "action": "attack",
+      "reasoning": null,
+      "rawResponse": "aggressive:attack",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 1080,
+      "agentIndex": 0,
+      "action": "attack",
+      "reasoning": null,
+      "rawResponse": "spacing:attack",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 1140,
+      "agentIndex": 0,
+      "action": "block",
+      "reasoning": null,
+      "rawResponse": "spacing:block",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 1140,
+      "agentIndex": 1,
+      "action": "attack",
+      "reasoning": null,
+      "rawResponse": "aggressive:attack",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 1170,
+      "agentIndex": 0,
+      "action": "attack",
+      "reasoning": null,
+      "rawResponse": "spacing:attack",
+      "provider": "bot",
+      "endpoint": "bot"
+    }
+  ],
+  "result": {
+    "outcome": "p1",
+    "endTick": 1200,
+    "endReason": "timeout",
+    "healthRemaining": [
+      100,
+      3
+    ]
+  },
+  "finalStateHash": "6ee41330371c26d6289609a1a84d8c0e5df7bbe56413b32dbb717fa01e439e0b"
+}

@@ -1,0 +1,43 @@
+{
+  "schemaVersion": "1.0.0",
+  "loopStartEpochMs": 1754000000000,
+  "totalLoopDurationMs": 47600,
+  "entries": [
+    {
+      "id": "spectate-01",
+      "commandLogUrl": "/replays/spectate-01.command-log.json",
+      "schemaVersion": "1.0.0",
+      "frameCount": 480
+    },
+    {
+      "id": "spectate-02",
+      "commandLogUrl": "/replays/spectate-02.command-log.json",
+      "schemaVersion": "1.0.0",
+      "frameCount": 480
+    },
+    {
+      "id": "spectate-03",
+      "commandLogUrl": "/replays/spectate-03.command-log.json",
+      "schemaVersion": "1.0.0",
+      "frameCount": 456
+    },
+    {
+      "id": "spectate-04",
+      "commandLogUrl": "/replays/spectate-04.command-log.json",
+      "schemaVersion": "1.0.0",
+      "frameCount": 480
+    },
+    {
+      "id": "spectate-05",
+      "commandLogUrl": "/replays/spectate-05.command-log.json",
+      "schemaVersion": "1.0.0",
+      "frameCount": 480
+    },
+    {
+      "id": "spectate-06",
+      "commandLogUrl": "/replays/spectate-06.command-log.json",
+      "schemaVersion": "1.0.0",
+      "frameCount": 480
+    }
+  ]
+}

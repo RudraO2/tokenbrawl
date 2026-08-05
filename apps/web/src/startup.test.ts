@@ -158,6 +158,8 @@ interface Harness {
   readonly byokHost: FakeRoot;
   /** The `#arcade` host (Story 9.2), separate from `#app` for the same reason `#byok` is. */
   readonly arcadeHost: FakeRoot;
+  /** The `#spectate` host (Story 9.3), separate from `#app` for the same reason `#byok`/`#arcade` are. */
+  readonly spectateHost: FakeRoot;
   readonly painted: () => readonly string[];
   readonly frames: () => number;
   readonly runFrames: (count: number) => void;
@@ -174,11 +176,14 @@ function createHarness(
     readonly noByokHost?: boolean;
     /** A page with no arcade panel at all -- which must still play the replay. */
     readonly noArcadeHost?: boolean;
+    /** A page with no spectate panel at all -- which must still play the replay. */
+    readonly noSpectateHost?: boolean;
   } = {},
 ): Harness {
   const root = createRoot();
   const byokHost = createRoot();
   const arcadeHost = createRoot();
+  const spectateHost = createRoot();
   const queue: (() => void)[] = [];
   const requested: string[] = [];
 
@@ -213,6 +218,9 @@ function createHarness(
         if (selector === '#arcade') {
           return options.noArcadeHost === true ? null : arcadeHost;
         }
+        if (selector === '#spectate') {
+          return options.noSpectateHost === true ? null : spectateHost;
+        }
         return root;
       },
     },
@@ -239,6 +247,7 @@ function createHarness(
     root,
     byokHost,
     arcadeHost,
+    spectateHost,
     painted: () => root.painted(),
     frames: () => queue.length,
     runFrames: (count: number): void => {
@@ -1374,5 +1383,115 @@ describe('the arcade panel and the player it replaces (Story 9.2)', () => {
     const mounted = result?.current();
     expect(mounted).not.toBe(demo);
     expect(mounted?.film.matchesRecordedHash).toBe(true);
+  });
+});
+
+/**
+ * Story 9.3's wiring, mirroring the arcade/BYOK coverage above: its own host,
+ * mounted alongside (not replacing) the demo player, and graceful absence
+ * when the page has no `#spectate` host at all.
+ *
+ * The default harness answers `/replays/manifest.json` with `pending()`
+ * (the same "held open forever" default every decoration gets), which is
+ * enough to prove the panel mounts and never blocks the demo replay -- the
+ * manifest-driven loop itself is covered end to end by `spectate/panel.test.ts`
+ * and `spectate/walk.test.ts` with no need to re-derive it here.
+ */
+describe('the Spectate panel, mounted alongside the demo player (Story 9.3)', () => {
+  it('mounts the panel into its own host, outside the player shell', async () => {
+    const { log } = await buildDemoBundle();
+    const harness = createHarness(log);
+
+    const result = await startup(harness.globals);
+
+    expect(result?.spectate).not.toBeNull();
+    expect(harness.spectateHost.innerHTML).toContain('Spectate');
+    // Neither the player's shell nor the other panels are touched by it.
+    expect(harness.root.innerHTML).not.toContain('tb-spectate-canvas');
+    expect(harness.root.innerHTML).toContain('tb-canvas');
+    expect(harness.byokHost.innerHTML).not.toContain('tb-spectate-canvas');
+    expect(harness.arcadeHost.innerHTML).not.toContain('tb-spectate-canvas');
+  });
+
+  it('leaves the player alone when the page has no spectate host at all', async () => {
+    const { log } = await buildDemoBundle();
+    const harness = createHarness(log, { noSpectateHost: true });
+
+    const result = await startup(harness.globals);
+
+    expect(result?.spectate).toBeNull();
+    expect(result?.mounted.clock.isRunning()).toBe(true);
+  });
+
+  it('never blocks the demo replay while its own manifest fetch is still in flight', async () => {
+    // The manifest fetch never resolves in this harness by default -- the same
+    // "still in flight" state every other decoration is tested against in the
+    // ordering suite above. The demo player must still be running regardless.
+    const { log } = await buildDemoBundle();
+    const harness = createHarness(log);
+
+    const result = await startup(harness.globals);
+    harness.runFrames(5);
+
+    expect(result?.mounted.clock.isRunning()).toBe(true);
+    expect(result?.mounted.clock.frameIndex()).toBe(4);
+  });
+
+  it('does not crash startup when the spectate panel itself throws on mount', async () => {
+    const { log } = await buildDemoBundle();
+    const harness = createHarness(log);
+    // A spectate host whose querySelector always fails the panel's own
+    // internal element lookups, forcing `mountSpectatePanel` to throw.
+    const brokenSpectateHost = {
+      innerHTML: '',
+      querySelector: () => null,
+    };
+    const globals = {
+      ...harness.globals,
+      document: {
+        querySelector: (selector: string) => {
+          if (selector === '#spectate') {
+            return brokenSpectateHost as unknown as ReturnType<
+              NonNullable<typeof harness.globals.document>['querySelector']
+            >;
+          }
+          return harness.globals.document?.querySelector(selector) ?? null;
+        },
+      },
+    };
+
+    const result = await startup(globals);
+
+    expect(result?.spectate).toBeNull();
+    expect(result?.mounted.clock.isRunning()).toBe(true);
+  });
+
+  it('calls a receiver-branded fetch (like a real Window.fetch) without an Illegal-invocation error', async () => {
+    // Regression test for the bug the manual browser check surfaced: a real
+    // `Window.fetch` is a WebIDL operation branded to `Window` and throws
+    // "Illegal invocation" if extracted and called with a different (or no)
+    // receiver -- something no plain-function test double reproduces. This
+    // fetch stub mimics that by asserting `this` at call time, the same way
+    // a real browser's would, so a regression that reintroduces the bug (by
+    // handing `globals.fetch` through as a bare reference instead of an
+    // arrow function that closes over `globals`) fails this test.
+    const { log } = await buildDemoBundle();
+    const harness = createHarness(log);
+    const brandedWindow = {
+      fetch(this: unknown, _url: string) {
+        if (this !== brandedWindow) {
+          throw new TypeError('Illegal invocation');
+        }
+        return Promise.resolve({ ok: true, status: 200, json: async () => ({ entries: [] }) });
+      },
+    };
+    // The bare method reference, exactly as `window.fetch` would arrive if
+    // extracted -- `mountSpectate`'s own fetch dep must still call it in a
+    // way that supplies the correct receiver.
+    const globals = { ...harness.globals, fetch: brandedWindow.fetch };
+
+    const result = await startup(globals);
+
+    expect(result?.spectate).not.toBeNull();
   });
 });

@@ -1,0 +1,437 @@
+{
+  "schemaVersion": "1.0.0",
+  "matchId": "6f000ca0053da65103b559fcc94a9f8e763ae4989e9604dc9cd5f1e89a2b9285",
+  "environment": {
+    "id": "fighter-1v1",
+    "version": "1.0.0"
+  },
+  "seed": 9303,
+  "configHash": "24f5f97e1c88a3f3a9b66405c569c076ba30994ac93dbc69429c3b8780bdc0f7",
+  "agents": [
+    {
+      "id": "bot:random:1",
+      "kind": "bot"
+    },
+    {
+      "id": "bot:aggressive:2",
+      "kind": "bot"
+    }
+  ],
+  "decisions": [
+    {
+      "tick": 0,
+      "agentIndex": 0,
+      "action": "advance",
+      "reasoning": null,
+      "rawResponse": "random:advance",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 0,
+      "agentIndex": 1,
+      "action": "advance",
+      "reasoning": null,
+      "rawResponse": "aggressive:advance",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 30,
+      "agentIndex": 0,
+      "action": "attack",
+      "reasoning": null,
+      "rawResponse": "random:attack",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 30,
+      "agentIndex": 1,
+      "action": "advance",
+      "reasoning": null,
+      "rawResponse": "aggressive:advance",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 60,
+      "agentIndex": 1,
+      "action": "advance",
+      "reasoning": null,
+      "rawResponse": "aggressive:advance",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 90,
+      "agentIndex": 0,
+      "action": "block",
+      "reasoning": null,
+      "rawResponse": "random:block",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 90,
+      "agentIndex": 1,
+      "action": "attack",
+      "reasoning": null,
+      "rawResponse": "aggressive:attack",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 120,
+      "agentIndex": 0,
+      "action": "retreat",
+      "reasoning": null,
+      "rawResponse": "random:retreat",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 150,
+      "agentIndex": 0,
+      "action": "attack",
+      "reasoning": null,
+      "rawResponse": "random:attack",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 150,
+      "agentIndex": 1,
+      "action": "advance",
+      "reasoning": null,
+      "rawResponse": "aggressive:advance",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 180,
+      "agentIndex": 1,
+      "action": "attack",
+      "reasoning": null,
+      "rawResponse": "aggressive:attack",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 240,
+      "agentIndex": 0,
+      "action": "attack",
+      "reasoning": null,
+      "rawResponse": "random:attack",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 240,
+      "agentIndex": 1,
+      "action": "attack",
+      "reasoning": null,
+      "rawResponse": "aggressive:attack",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 300,
+      "agentIndex": 0,
+      "action": "attack",
+      "reasoning": null,
+      "rawResponse": "random:attack",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 300,
+      "agentIndex": 1,
+      "action": "attack",
+      "reasoning": null,
+      "rawResponse": "aggressive:attack",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 360,
+      "agentIndex": 0,
+      "action": "advance",
+      "reasoning": null,
+      "rawResponse": "random:advance",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 360,
+      "agentIndex": 1,
+      "action": "attack",
+      "reasoning": null,
+      "rawResponse": "aggressive:attack",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 420,
+      "agentIndex": 0,
+      "action": "advance",
+      "reasoning": null,
+      "rawResponse": "random:advance",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 420,
+      "agentIndex": 1,
+      "action": "attack",
+      "reasoning": null,
+      "rawResponse": "aggressive:attack",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 480,
+      "agentIndex": 0,
+      "action": "retreat",
+      "reasoning": null,
+      "rawResponse": "random:retreat",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 480,
+      "agentIndex": 1,
+      "action": "attack",
+      "reasoning": null,
+      "rawResponse": "aggressive:attack",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 540,
+      "agentIndex": 0,
+      "action": "special",
+      "reasoning": null,
+      "rawResponse": "random:special",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 540,
+      "agentIndex": 1,
+      "action": "advance",
+      "reasoning": null,
+      "rawResponse": "aggressive:advance",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 600,
+      "agentIndex": 0,
+      "action": "retreat",
+      "reasoning": null,
+      "rawResponse": "random:retreat",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 600,
+      "agentIndex": 1,
+      "action": "attack",
+      "reasoning": null,
+      "rawResponse": "aggressive:attack",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 660,
+      "agentIndex": 0,
+      "action": "attack",
+      "reasoning": null,
+      "rawResponse": "random:attack",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 660,
+      "agentIndex": 1,
+      "action": "advance",
+      "reasoning": null,
+      "rawResponse": "aggressive:advance",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 690,
+      "agentIndex": 1,
+      "action": "attack",
+      "reasoning": null,
+      "rawResponse": "aggressive:attack",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 750,
+      "agentIndex": 0,
+      "action": "advance",
+      "reasoning": null,
+      "rawResponse": "random:advance",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 750,
+      "agentIndex": 1,
+      "action": "attack",
+      "reasoning": null,
+      "rawResponse": "aggressive:attack",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 810,
+      "agentIndex": 0,
+      "action": "retreat",
+      "reasoning": null,
+      "rawResponse": "random:retreat",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 810,
+      "agentIndex": 1,
+      "action": "attack",
+      "reasoning": null,
+      "rawResponse": "aggressive:attack",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 870,
+      "agentIndex": 0,
+      "action": "advance",
+      "reasoning": null,
+      "rawResponse": "random:advance",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 870,
+      "agentIndex": 1,
+      "action": "advance",
+      "reasoning": null,
+      "rawResponse": "aggressive:advance",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 900,
+      "agentIndex": 0,
+      "action": "special",
+      "reasoning": null,
+      "rawResponse": "random:special",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 900,
+      "agentIndex": 1,
+      "action": "attack",
+      "reasoning": null,
+      "rawResponse": "aggressive:attack",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 960,
+      "agentIndex": 0,
+      "action": "block",
+      "reasoning": null,
+      "rawResponse": "random:block",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 960,
+      "agentIndex": 1,
+      "action": "attack",
+      "reasoning": null,
+      "rawResponse": "aggressive:attack",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 990,
+      "agentIndex": 0,
+      "action": "retreat",
+      "reasoning": null,
+      "rawResponse": "random:retreat",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 1020,
+      "agentIndex": 0,
+      "action": "advance",
+      "reasoning": null,
+      "rawResponse": "random:advance",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 1020,
+      "agentIndex": 1,
+      "action": "advance",
+      "reasoning": null,
+      "rawResponse": "aggressive:advance",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 1050,
+      "agentIndex": 0,
+      "action": "advance",
+      "reasoning": null,
+      "rawResponse": "random:advance",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 1050,
+      "agentIndex": 1,
+      "action": "attack",
+      "reasoning": null,
+      "rawResponse": "aggressive:attack",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 1110,
+      "agentIndex": 0,
+      "action": "attack",
+      "reasoning": null,
+      "rawResponse": "random:attack",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 1110,
+      "agentIndex": 1,
+      "action": "attack",
+      "reasoning": null,
+      "rawResponse": "aggressive:attack",
+      "provider": "bot",
+      "endpoint": "bot"
+    }
+  ],
+  "result": {
+    "outcome": "p2",
+    "endTick": 1140,
+    "endReason": "ko",
+    "healthRemaining": [
+      0,
+      62
+    ]
+  },
+  "finalStateHash": "88b129fa2dd93625533366ecdcc43236de0060a1a549b75c83cd49c39eb9784f"
+}

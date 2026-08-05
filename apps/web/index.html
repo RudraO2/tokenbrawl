@@ -66,6 +66,12 @@
       itself the moment it succeeded.
     -->
     <section class="tb-arcade" id="arcade"></section>
+    <!--
+      Story 9.3's Spectate panel, outside #app for the same reason #byok and
+      #arcade are: it owns its own film/clock sequence (walking the manifest)
+      rather than joining the single-log player #app hosts.
+    -->
+    <section class="tb-spectate" id="spectate"></section>
     <script type="module" src="/src/boot.ts"></script>
   </body>
 </html>
