@@ -360,4 +360,31 @@ describe('the manifest walk (Story 9.3)', () => {
     expect(walk.currentClock()).toBeNull();
     expect(() => driver.pump(5)).not.toThrow();
   });
+
+  it('resumeLoop() after stop() actually resumes playback, not a silent no-op', async () => {
+    const ids = ['a', 'b', 'c'];
+    const manifest = manifestOf(ids);
+    const driver = createDriver();
+
+    const walk = createSpectateWalk({
+      manifest,
+      fetchJson: fetchFor(ids),
+      env,
+      requestFrame: driver.requestFrame,
+      cancelFrame: driver.cancelFrame,
+    });
+
+    await walk.startLoop({ entryIndex: 0, frameOffset: 0 });
+    walk.stop();
+    expect(walk.currentClock()).toBeNull();
+
+    await walk.resumeLoop();
+    // resumeLoop -> playLoopFrom is fire-and-forget internally (mirrors the
+    // loop-advance path), so give its async `mount` a tick to settle.
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(walk.currentEntryId()).toBe('a');
+    expect(walk.currentClock()).not.toBeNull();
+  });
 });

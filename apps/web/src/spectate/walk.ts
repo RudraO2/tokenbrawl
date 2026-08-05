@@ -296,6 +296,7 @@ export function createSpectateWalk(deps: SpectateWalkDeps): SpectateWalkHandle {
 
   async function resumeLoop(): Promise<void> {
     state.mode = 'loop';
+    state.stopped = false;
     playLoopFrom(state.resumeIndex);
   }
 

@@ -177,7 +177,11 @@ export function mountSpectatePanel(host: SpectateHost, deps: SpectatePanelDeps):
    * manifest resolving and `state.walk` being assigned.
    */
   function play(entryId: string): void {
-    state.walk?.playSpecific(entryId).catch((error: unknown) => {
+    if (state.walk === null) {
+      console.warn(`Spectate: could not play "${entryId}" -- the stream has not finished loading yet.`);
+      return;
+    }
+    state.walk.playSpecific(entryId).catch((error: unknown) => {
       console.warn(`Spectate: could not play "${entryId}". ${error instanceof Error ? error.message : String(error)}`);
     });
   }
@@ -247,6 +251,13 @@ export function mountSpectatePanel(host: SpectateHost, deps: SpectatePanelDeps):
 
       const offset = offsetForNow(manifest, nowFn());
       await walk.startLoop(offset);
+      if (walk.currentEntryId() === null) {
+        // Every manifest entry failed to load or hash-verify -- `walk.ts`
+        // already warned per-entry; the status text must not be left stuck
+        // on "Loading…" forever (the fail-soft path still needs a visible
+        // terminal state for a human watching the page, not just the log).
+        say('Spectate stream unavailable: every manifest entry failed to load.');
+      }
     } catch (error) {
       say(
         `Spectate stream unavailable: ${error instanceof Error ? error.message : String(error)}`,

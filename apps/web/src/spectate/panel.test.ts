@@ -318,6 +318,22 @@ describe('the Spectate panel (Story 9.3)', () => {
     expect(host.node('[data-spectate-status]').innerHTML).toContain('unavailable');
   });
 
+  it('shows a fail-soft status when every manifest entry fails to load, rather than staying stuck on "Loading…"', async () => {
+    const host = createHost();
+    const driver = createDriver();
+    const deps: SpectatePanelDeps = {
+      ...baseDeps(driver),
+      fetch: async () => ({ ok: false, status: 404, json: async () => ({}) }),
+    };
+
+    mountSpectatePanel(host, deps);
+    await flush();
+
+    const status = host.node('[data-spectate-status]').innerHTML;
+    expect(status).not.toContain('Loading');
+    expect(status).toContain('unavailable');
+  });
+
   it('throws a clear error when the host is missing required elements, rather than mounting half a panel', () => {
     const brokenHost: SpectateHost = {
       innerHTML: '',
