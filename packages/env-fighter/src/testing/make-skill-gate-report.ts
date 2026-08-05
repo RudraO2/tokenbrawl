@@ -21,6 +21,13 @@ import { LADDER_BOOTSTRAP_RESAMPLES, LADDER_BOOTSTRAP_SEED } from './skill-ladde
 export const SKILL_GATE_REPORT_PATH = 'docs/reports/skill-separation-gate.json';
 export const SKILL_GATE_REPORT_MARKDOWN_PATH = 'docs/reports/skill-separation-gate.md';
 
+/**
+ * Story 8.5's report. AD-13: it sits alongside the v1 report above, computed
+ * from the identical ladder run, and never replaces it.
+ */
+export const SKILL_GATE_V2_REPORT_PATH = 'docs/reports/skill-separation-gate-v2.json';
+export const SKILL_GATE_V2_REPORT_MARKDOWN_PATH = 'docs/reports/skill-separation-gate-v2.md';
+
 export interface ReportPairing {
   readonly stronger: string;
   readonly weaker: string;
@@ -68,7 +75,11 @@ export interface SkillGateReport {
   readonly failures: readonly string[];
 }
 
-export function buildSkillGateReport(run: LadderRun, verdict: SkillGateVerdict): SkillGateReport {
+export function buildSkillGateReport(
+  run: LadderRun,
+  verdict: SkillGateVerdict,
+  storyId: string = '2-4-skill-separation-gate',
+): SkillGateReport {
   const koByPairing = new Map<string, number>();
   const matchIds = new Set<string>();
   let totalMatches = 0;
@@ -88,7 +99,7 @@ export function buildSkillGateReport(run: LadderRun, verdict: SkillGateVerdict):
   const firstInterval = verdict.pairings[0]?.interval;
 
   return {
-    story: '2-4-skill-separation-gate',
+    story: storyId,
     passed: verdict.passed,
     environment: run.environment,
     configHash: run.configHash,

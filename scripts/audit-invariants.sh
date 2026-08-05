@@ -286,6 +286,36 @@ else
   fi
 fi
 
+# --- Story 8.5: the v2 re-gate report, alongside the v1 report -------------
+#
+# AD-13: the v2 report sits alongside the v1 report above, computed from the
+# same pinned thresholds, and never replaces it. Both must exist and both
+# must record a passing gate, or the "re-gate" claim is unverifiable.
+echo
+echo "Story 8.5  v2 skill-separation report is committed and passing"
+if [ ! -f "$ladder" ]; then
+  skip "no skill-separation ladder yet"
+else
+  v2_broken=""
+  for f in docs/reports/skill-separation-gate-v2.json docs/reports/skill-separation-gate-v2.md; do
+    [ -f "$f" ] || v2_broken="$v2_broken missing-report:$f"
+  done
+  if [ -f docs/reports/skill-separation-gate-v2.json ] \
+     && ! grep -q '"passed": true' docs/reports/skill-separation-gate-v2.json; then
+    v2_broken="$v2_broken committed-v2-report-records-a-failing-gate"
+  fi
+  # The v1 report this story must never overwrite (AD-13).
+  for f in docs/reports/skill-separation-gate.json docs/reports/skill-separation-gate.md; do
+    [ -f "$f" ] || v2_broken="$v2_broken missing-v1-report:$f"
+  done
+
+  if [ -n "$v2_broken" ]; then
+    fail "v2 re-gate report weakened:$v2_broken"
+  else
+    pass "v2 report committed alongside the v1 report, with a passing gate"
+  fi
+fi
+
 # --- INV-3: rendering decoupled from decision-making ------------------------
 echo
 echo "INV-3  rendering is decoupled from decision-making"

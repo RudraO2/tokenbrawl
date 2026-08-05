@@ -7,6 +7,8 @@ import { WIN_BASIS_POINTS } from '../../core/src/statistics';
 import {
   SKILL_GATE_REPORT_MARKDOWN_PATH,
   SKILL_GATE_REPORT_PATH,
+  SKILL_GATE_V2_REPORT_MARKDOWN_PATH,
+  SKILL_GATE_V2_REPORT_PATH,
   buildSkillGateReport,
   renderSkillGateMarkdown,
   type SkillGateReport,
@@ -53,6 +55,18 @@ const verdict: SkillGateVerdict = evaluateSkillGate({
   seed: LADDER_BOOTSTRAP_SEED,
 });
 const report: SkillGateReport = buildSkillGateReport(run, verdict);
+
+/**
+ * Story 8.5's report -- the identical ladder run and verdict as above, the
+ * same thresholds (never revised after seeing results), just labelled and
+ * committed as its own artefact per AD-13 so the v1 report above is never
+ * overwritten again the way 8.2-8.4 silently overwrote it in place.
+ */
+const reportV2: SkillGateReport = buildSkillGateReport(
+  run,
+  verdict,
+  '8-5-v2-skill-separation-re-gate',
+);
 
 function pairingFor(stronger: string, weaker: string) {
   const found = verdict.pairings.find(
@@ -188,5 +202,27 @@ describe('skill separation gate (FR-3, the gate on E3/E4/E5/E7)', () => {
     expect(committed.passed).toBe(true);
     expect(committed.bootstrap.seed).toBe(LADDER_BOOTSTRAP_SEED);
     expect(committed.bootstrap.confidenceBasisPoints).toBe(9500);
+  });
+
+  it('matches the committed Story 8.5 v2 report, alongside the v1 report, not overwriting it (AD-13)', () => {
+    const jsonPath = join(REPO_ROOT, SKILL_GATE_V2_REPORT_PATH);
+    const markdownPath = join(REPO_ROOT, SKILL_GATE_V2_REPORT_MARKDOWN_PATH);
+    const json = `${JSON.stringify(reportV2, null, 2)}\n`;
+    const markdown = `${renderSkillGateMarkdown(reportV2)}\n`;
+
+    if (WRITE_REPORT) {
+      writeFileSync(jsonPath, json, 'utf8');
+      writeFileSync(markdownPath, markdown, 'utf8');
+    }
+
+    expect(readFileSync(jsonPath, 'utf8')).toBe(json);
+    expect(readFileSync(markdownPath, 'utf8')).toBe(markdown);
+
+    const committed = JSON.parse(readFileSync(jsonPath, 'utf8')) as SkillGateReport;
+    expect(committed.story).toBe('8-5-v2-skill-separation-re-gate');
+    expect(committed.configHash).toBe(run.configHash);
+    expect(committed.totalMatches).toBe(LADDER_SEED_COUNT * 2 * run.pairings.length);
+    expect(committed.distinctMatchIds).toBe(committed.totalMatches);
+    expect(committed.passed).toBe(true);
   });
 });
