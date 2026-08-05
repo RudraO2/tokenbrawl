@@ -3,6 +3,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { createFighterEnvironment } from './environment';
+import type { Zone } from './frames';
 import type { FighterState } from './state';
 import type { LoggedActionV2 } from '@tokenbrawl/contracts';
 
@@ -81,11 +82,43 @@ const SCRIPT: readonly (readonly [LoggedActionV2 | null, LoggedActionV2 | null])
   ['attack', 'advance'],
 ];
 
+/**
+ * Story 8.3: the Zone paired with `SCRIPT`, one entry per Decision Point.
+ * Only meaningful for a Decision Point where the matching `SCRIPT` entry is
+ * `attack`, `special`, or `block` -- `null` everywhere else, and deliberately
+ * varied between matched and mismatched Zones on the `attack`/`block` pairs
+ * (index 3 matches, index 13's `block`/`special` pairing has no attacker to
+ * match against at all) so a Zone-mismatch that changes the resulting damage,
+ * and therefore the Final-State Hash, is actually exercised across processes.
+ */
+const ZONES: readonly (readonly [Zone | null, Zone | null])[] = [
+  [null, null],
+  [null, null],
+  [null, null],
+  ['high', 'high'],
+  [null, null],
+  ['low', 'high'],
+  [null, null],
+  [null, null],
+  [null, null],
+  [null, null],
+  ['high', 'low'],
+  ['low', null],
+  [null, null],
+  [null, 'low'],
+  [null, null],
+  [null, null],
+];
+
 function encodeScript(script: typeof SCRIPT): string {
   return script.map(([first, second]) => `${first ?? '-'}:${second ?? '-'}`).join(',');
 }
 
-function hashInChildProcess(seed: number, script: typeof SCRIPT): string {
+function encodeZones(zones: typeof ZONES): string {
+  return zones.map(([first, second]) => `${first ?? '-'}:${second ?? '-'}`).join(',');
+}
+
+function hashInChildProcess(seed: number, script: typeof SCRIPT, zones: typeof ZONES = ZONES): string {
   const child = spawnSync(
     process.execPath,
     [
@@ -96,6 +129,7 @@ function hashInChildProcess(seed: number, script: typeof SCRIPT): string {
       CHILD_SCRIPT,
       String(seed),
       encodeScript(script),
+      encodeZones(zones),
     ],
     { encoding: 'utf8' },
   );
@@ -108,11 +142,11 @@ function hashInChildProcess(seed: number, script: typeof SCRIPT): string {
   return child.stdout.trim();
 }
 
-function hashInProcess(seed: number, script: typeof SCRIPT): string {
+function hashInProcess(seed: number, script: typeof SCRIPT, zones: typeof ZONES = ZONES): string {
   const env = createFighterEnvironment();
   let state: FighterState = env.reset(seed);
-  for (const actions of script) {
-    state = env.step(state, actions);
+  for (let index = 0; index < script.length; index += 1) {
+    state = env.step(state, script[index], zones[index]);
   }
   return env.hash(state);
 }
@@ -146,5 +180,27 @@ describe('cross-process determinism (INV-2)', () => {
 
   it('reports a child failure instead of silently passing', () => {
     expect(() => hashInChildProcess(Number.NaN, SCRIPT)).toThrow(/hash-child exited/);
+  });
+});
+
+describe('Zone-varied determinism (Story 8.3, INV-2)', () => {
+  it('a Zone-varied script replays to the same Final-State Hash in-process, twice', () => {
+    expect(hashInProcess(SEED, SCRIPT, ZONES)).toBe(hashInProcess(SEED, SCRIPT, ZONES));
+  });
+
+  it('a Zone-varied script replays to the same Final-State Hash in-process and cross-process', () => {
+    expect(hashInChildProcess(SEED, SCRIPT, ZONES)).toBe(hashInProcess(SEED, SCRIPT, ZONES));
+  });
+
+  it('still separates a matched-Zone script from an otherwise-identical mismatched one', () => {
+    // Index 3 is `['attack', 'block']` with `['high', 'high']` in `ZONES` --
+    // flipping the defender's Zone to `'low'` turns a prevented hit into a
+    // full one, which must move the Final-State Hash.
+    const mismatched = ZONES.map((pair, index) =>
+      index === 3 ? (['high', 'low'] as const) : pair,
+    );
+    expect(hashInChildProcess(SEED, SCRIPT, ZONES)).not.toBe(
+      hashInChildProcess(SEED, SCRIPT, mismatched),
+    );
   });
 });

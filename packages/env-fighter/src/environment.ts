@@ -16,6 +16,7 @@ import {
   PHASE_IDLE,
   PHASE_RECOVERY,
   PHASE_STARTUP,
+  ZONE_NONE,
   damageForCode,
   jumpFallStepPerTick,
   jumpRiseStepPerTick,
@@ -23,12 +24,40 @@ import {
   phaseOf,
   rangeForCode,
   windowTotalTicks,
+  zoneCodeFor,
+  type Zone,
 } from './frames';
 import { mixSeed, nextRngState } from './prng';
 import { sha256Hex } from './sha256';
 import type { FighterState } from './state';
 
 const AGENT_INDICES: readonly (0 | 1)[] = [0, 1];
+
+/**
+ * `EnvironmentAdapter<FighterState>` with `step()`'s Story 8.3 companion
+ * `zones` parameter made visible to this package's own callers.
+ *
+ * `docs/contracts/index.ts`'s `EnvironmentAdapter.step()` signature is frozen
+ * at exactly `(state, actions)` -- that is the interface every Environment
+ * Adapter, and every caller that only knows about adapters in general (the
+ * Harness, `match-runner.ts`), is entitled to rely on, and this story does
+ * not touch it. But a caller that holds a value typed as the *narrower*
+ * `EnvironmentAdapter<FighterState>` cannot pass a third argument at all --
+ * TypeScript checks a call against the declared arity, not against whatever
+ * the underlying object happens to accept at runtime -- so this package's own
+ * tests (and any future in-package caller that needs to supply a Zone) need
+ * a type that says the third argument exists. An extra *optional* parameter
+ * on an overriding method is a valid subtype of the base method, so this
+ * interface is still assignable anywhere an `EnvironmentAdapter<FighterState>`
+ * is expected -- nothing outside this package needs to know it exists.
+ */
+export interface FighterEnvironmentAdapter extends EnvironmentAdapter<FighterState> {
+  step(
+    state: FighterState,
+    actions: readonly [LoggedActionV2 | null, LoggedActionV2 | null],
+    zones?: readonly [Zone | null, Zone | null],
+  ): FighterState;
+}
 
 /** Bit offsets the two sides draw their damage jitter from -- disjoint, so a
  * threading bug that corrupts one side's outcome cannot hide behind the
@@ -72,7 +101,7 @@ function legaliseAction(
 
 export function createFighterEnvironment(
   overrides: Partial<FighterConfig> = {},
-): EnvironmentAdapter<FighterState> {
+): FighterEnvironmentAdapter {
   const config: FighterConfig = { ...DEFAULT_FIGHTER_CONFIG, ...overrides };
   assertIntegerConfig(config);
 
@@ -94,6 +123,7 @@ export function createFighterEnvironment(
         windowHitLanded: [0, 0],
         verticalPosition: [0, 0],
         airState: [PHASE_IDLE, PHASE_IDLE],
+        committedZone: [ZONE_NONE, ZONE_NONE],
       };
     },
 
@@ -160,6 +190,17 @@ export function createFighterEnvironment(
     step(
       state: FighterState,
       actions: readonly [LoggedActionV2 | null, LoggedActionV2 | null],
+      // Story 8.3: the Zone `attack`/`special`/`block` carries this Decision
+      // Point, alongside `actions` rather than folded into it. `LoggedActionV2`
+      // stays the plain Action string `EnvironmentAdapter.step()`'s frozen
+      // signature already commits to (`docs/contracts/index.ts`) -- adding a
+      // required parameter here would be an *additional* one, which every
+      // existing two-argument call site (a caller going through the adapter
+      // interface, which declares only `(state, actions)`) still satisfies,
+      // since it is optional and a missing entry reads as "no Zone" exactly
+      // like an omitted `zones` argument entirely. Ignored for any index whose
+      // submitted Action is not `attack`, `special`, or `block`.
+      zones?: readonly [Zone | null, Zone | null],
     ): FighterState {
       // Already terminal on entry: the whole Decision Point is frozen. Nothing
       // is committed, no Tick is simulated, and no PRNG draw is consumed --
@@ -196,9 +237,18 @@ export function createFighterEnvironment(
         state.verticalPosition[1],
       ];
       const airState: [number, number] = [state.airState[0], state.airState[1]];
+      const committedZone: [number, number] = [state.committedZone[0], state.committedZone[1]];
       const moveIntent: [number, number] = [MOVE_NONE, MOVE_NONE];
       /** `block` is a stance held for this Decision Point's ticks only -- it never survives into the next. */
       const blocking: [boolean, boolean] = [false, false];
+      /**
+       * The Zone a `block` stance holds, for this Decision Point's ticks only
+       * -- exactly as ephemeral as `blocking` itself, and for the same reason:
+       * `block` never opens a Commitment Window, so it never needs to survive
+       * past this `step()` call the way `committedZone` (for `attack`/
+       * `special`) does.
+       */
+      const blockZone: [number, number] = [ZONE_NONE, ZONE_NONE];
 
       // --- Commit pass: what each Agent chose at this boundary ---------------
       for (const agentIndex of AGENT_INDICES) {
@@ -218,12 +268,14 @@ export function createFighterEnvironment(
           moveIntent[agentIndex] = MOVE_RETREAT;
         } else if (action === 'block') {
           blocking[agentIndex] = true;
+          blockZone[agentIndex] = zoneCodeFor(zones?.[agentIndex]);
         } else if (action === 'attack' || action === 'special') {
           const code = action === 'attack' ? COMMITTED_ATTACK : COMMITTED_SPECIAL;
           const window = action === 'attack' ? config.attackWindow : config.specialWindow;
           committed[agentIndex] = code;
           remaining[agentIndex] = windowTotalTicks(window);
           hitLanded[agentIndex] = 0;
+          committedZone[agentIndex] = zoneCodeFor(zones?.[agentIndex]);
           if (action === 'special') {
             // Spent at commit, not on connection: a whiffed `special` costs its
             // meter, which is what makes throwing one a real decision.
@@ -330,7 +382,15 @@ export function createFighterEnvironment(
           }
 
           const opponentIndex = opponentOf(agentIndex);
-          const reduction = blocking[opponentIndex] ? config.blockDamageReduction : 0;
+          // Story 8.3: a `block` only prevents damage when its Zone matches
+          // the incoming strike's -- wrong-Zone or no block at all reduce to
+          // the same full-damage outcome (AC3). `ZONE_NONE === ZONE_NONE`
+          // (neither side named a Zone) still matches, which is what keeps a
+          // Zone-naive `block` behaving exactly as it did before this story.
+          const reduction =
+            blocking[opponentIndex] && blockZone[opponentIndex] === committedZone[agentIndex]
+              ? config.blockDamageReduction
+              : 0;
           damageTaken[opponentIndex] += Math.max(
             0,
             damageForCode(config, code) + jitter[agentIndex] - reduction,
@@ -403,6 +463,7 @@ export function createFighterEnvironment(
             const wasJump = committed[agentIndex] === COMMITTED_JUMP;
             committed[agentIndex] = COMMITTED_NONE;
             hitLanded[agentIndex] = 0;
+            committedZone[agentIndex] = ZONE_NONE;
             if (wasJump) {
               // Land exactly on the floor: a rise/fall Tick count that does not
               // divide `jumpHeight` evenly would otherwise leave a 1-or-2-unit
@@ -425,6 +486,7 @@ export function createFighterEnvironment(
         windowHitLanded: [hitLanded[0], hitLanded[1]],
         verticalPosition: [verticalPosition[0], verticalPosition[1]],
         airState: [airState[0], airState[1]],
+        committedZone: [committedZone[0], committedZone[1]],
       };
     },
 

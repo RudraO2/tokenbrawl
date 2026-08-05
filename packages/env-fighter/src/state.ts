@@ -53,4 +53,20 @@ export interface FighterState {
    * can consume it without threading `committedAction` through as well.
    */
   readonly airState: readonly [number, number];
+  /**
+   * Story 8.3: the Zone (`ZONE_NONE` / `ZONE_HIGH` / `ZONE_LOW` in
+   * `frames.ts`) a fighter's *current* `committedAction` targets, when that
+   * Action is `attack` or `special`. Stored per Agent, alongside
+   * `committedAction`, for the same reason `committedAction` itself is
+   * stored rather than recomputed: the active-phase Tick that judges a hit
+   * can fall in a later `step()` call than the one that committed it, so the
+   * Zone has to survive between calls. An integer code, never the
+   * `'high' | 'low'` string the Command Log carries (INV-2, AD-13) -- that
+   * split is the concrete point of this story.
+   *
+   * Meaningless (and unread) whenever `committedAction` is not `attack` or
+   * `special`; cleared to `ZONE_NONE` alongside `committedAction` when a
+   * window closes, so a stale value can never leak into the next commitment.
+   */
+  readonly committedZone: readonly [number, number];
 }

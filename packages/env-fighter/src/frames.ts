@@ -30,6 +30,46 @@ export const COMMITTED_SPECIAL = 2;
 export const COMMITTED_JUMP = 3;
 export type CommittedActionCode = 0 | 1 | 2 | 3;
 
+/**
+ * Zone codes (Story 8.3). `attack`/`special` target one of two Zones, and
+ * `block` must match it to prevent damage. Integer codes rather than the
+ * `'high' | 'low'` string the Command Log schema uses (`DecisionEntryV2.zone`,
+ * Story 8.1) because `FighterState` is integers only (INV-2, AD-5) -- AD-13's
+ * schema-vs-state representation split, made concrete.
+ *
+ * `ZONE_NONE` is not a third Zone an Agent can choose: it is what an
+ * uncommitted fighter, or a fighter whose committed Action carries no Zone
+ * (the Fallback Action, or any non-attack/special/block Action), reads as. A
+ * `block` submitted with no Zone therefore never matches a real attacker
+ * Zone -- unless the attacker also carries no Zone, in which case both sides
+ * read `ZONE_NONE` and the match is exact, which is what keeps a Zone-naive
+ * caller's `block` behaving exactly as before this story.
+ */
+export const ZONE_NONE = 0;
+export const ZONE_HIGH = 1;
+export const ZONE_LOW = 2;
+export type ZoneCode = 0 | 1 | 2;
+
+/** The string form used on the wire (Command Log v2, `DecisionEntryV2.zone`). */
+export type Zone = 'high' | 'low';
+
+/**
+ * `null`/`undefined` -- no Zone submitted -- maps to `ZONE_NONE`, never to
+ * either real Zone. Never called with the Fallback Action: `stand` carries no
+ * Zone by construction (this story's Fallback-Action AC), so callers must not
+ * route a Parse Failure's substituted Action through this function with a
+ * caller-supplied Zone.
+ */
+export function zoneCodeFor(zone: Zone | null | undefined): ZoneCode {
+  if (zone === 'high') {
+    return ZONE_HIGH;
+  }
+  if (zone === 'low') {
+    return ZONE_LOW;
+  }
+  return ZONE_NONE;
+}
+
 /** Not inside a window at all -- distinct from being inside one and between phases. */
 export const PHASE_IDLE = 0;
 /** For `jump`, this is the rise phase. */

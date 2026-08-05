@@ -9,6 +9,9 @@ import {
   PHASE_IDLE,
   PHASE_RECOVERY,
   PHASE_STARTUP,
+  ZONE_HIGH,
+  ZONE_LOW,
+  ZONE_NONE,
   jumpFallStepPerTick,
   phaseOf,
   windowTotalTicks,
@@ -42,6 +45,7 @@ function stateOf(overrides: Partial<FighterState> = {}): FighterState {
     windowHitLanded: [0, 0],
     verticalPosition: [0, 0],
     airState: [PHASE_IDLE, PHASE_IDLE],
+    committedZone: [ZONE_NONE, ZONE_NONE],
     ...overrides,
   };
 }
@@ -278,6 +282,7 @@ describe('hash (the Final-State Hash)', () => {
   it('is insensitive to key declaration order', () => {
     const forwards = stateOf();
     const backwards: FighterState = {
+      committedZone: forwards.committedZone,
       airState: forwards.airState,
       verticalPosition: forwards.verticalPosition,
       windowHitLanded: forwards.windowHitLanded,
@@ -316,6 +321,8 @@ describe('hash (the Final-State Hash)', () => {
       { ...base, verticalPosition: [base.verticalPosition[0], base.verticalPosition[1] + 1] },
       { ...base, airState: [PHASE_STARTUP, base.airState[1]] },
       { ...base, airState: [base.airState[0], PHASE_STARTUP] },
+      { ...base, committedZone: [ZONE_HIGH, base.committedZone[1]] },
+      { ...base, committedZone: [base.committedZone[0], ZONE_HIGH] },
     ];
     expect(mutations).toHaveLength(Object.keys(base).length * 2 - 2);
     for (const mutated of mutations) {
@@ -419,6 +426,102 @@ describe('attacks, blocking and simultaneity', () => {
     const after = env.step(stateOf({ health: [1, 1] }), ['attack', 'attack']);
     expect(after.health).toStrictEqual([0, 0]);
   });
+
+});
+
+/** Story 8.3: Zone-matched `block` -- prevents damage only when its Zone matches the incoming strike's. */
+describe('Zoned strikes and matched block (Story 8.3)', () => {
+  const env = createFighterEnvironment(CLOSE_QUARTERS);
+
+  it('a block on the same Zone as the strike prevents damage, exactly like the Zone-naive case', () => {
+    const start = env.reset(SEED);
+    const unblocked = env.step(start, ['attack', 'stand'], ['high', null]);
+    const blocked = env.step(start, ['attack', 'block'], ['high', 'high']);
+    const unblockedDamage = DEFAULT_FIGHTER_CONFIG.initialHealth - unblocked.health[1];
+
+    expect(DEFAULT_FIGHTER_CONFIG.initialHealth - blocked.health[1]).toBe(
+      Math.max(0, unblockedDamage - DEFAULT_FIGHTER_CONFIG.blockDamageReduction),
+    );
+  });
+
+  it('a block on the wrong Zone takes full damage -- identical to submitting no block at all', () => {
+    const start = env.reset(SEED);
+    const noBlock = env.step(start, ['attack', 'stand'], ['high', null]);
+    const wrongZone = env.step(start, ['attack', 'block'], ['high', 'low']);
+
+    expect(wrongZone.health).toStrictEqual(noBlock.health);
+  });
+
+  it('a block with no Zone against a strike with a real Zone takes full damage', () => {
+    const start = env.reset(SEED);
+    const noBlock = env.step(start, ['attack', 'stand'], ['low', null]);
+    const unzonedBlock = env.step(start, ['attack', 'block'], ['low', null]);
+
+    // `blockZone` reads `ZONE_NONE` here (no Zone was submitted for the
+    // `block`), which never matches a real attacker Zone (`ZONE_LOW`) --
+    // only another `ZONE_NONE`, per `zoneCodeFor`'s contract.
+    expect(unzonedBlock.health).toStrictEqual(noBlock.health);
+  });
+
+  it('special also only prevents damage on a matching-Zone block', () => {
+    const meterState = stateOf({ meter: [DEFAULT_FIGHTER_CONFIG.specialMeterCost, 0] });
+    const noBlock = env.step(meterState, ['special', 'stand'], ['low', null]);
+    const matched = env.step(meterState, ['special', 'block'], ['low', 'low']);
+    const mismatched = env.step(meterState, ['special', 'block'], ['low', 'high']);
+
+    expect(DEFAULT_FIGHTER_CONFIG.initialHealth - matched.health[1]).toBeLessThan(
+      DEFAULT_FIGHTER_CONFIG.initialHealth - noBlock.health[1],
+    );
+    expect(mismatched.health).toStrictEqual(noBlock.health);
+  });
+
+  it('the Fallback Action (stand, on Parse Failure) never carries a Zone', () => {
+    // A `special` an Agent cannot afford is legalised into `stand` -- the same
+    // substitution a Parse Failure gets. Even when a caller (incorrectly)
+    // supplies a Zone alongside the illegal `special`, the substituted `stand`
+    // must not pick it up: `committedAction` stays `COMMITTED_NONE` and no
+    // Zone is ever stored, so a lucky Zone guess cannot reward what is really
+    // a rejected submission (FR-9's guarantee, AC4).
+    const broke = stateOf({ meter: [0, 0] });
+    const rejected = env.step(broke, ['special', 'stand'], ['high', null]);
+
+    expect(rejected.committedAction[0]).toBe(COMMITTED_NONE);
+    expect(rejected.committedZone[0]).toBe(ZONE_NONE);
+  });
+
+  it('a genuine stand (not a rejected special) also never carries a Zone', () => {
+    const start = env.reset(SEED);
+    const after = env.step(start, ['stand', 'stand'], ['high', 'low']);
+
+    expect(after.committedZone).toStrictEqual([ZONE_NONE, ZONE_NONE]);
+  });
+
+  it('advance, retreat, and jump never store a Zone even when one is supplied', () => {
+    const start = env.reset(SEED);
+
+    const advanced = env.step(start, ['advance', 'retreat'], ['high', 'low']);
+    expect(advanced.committedZone).toStrictEqual([ZONE_NONE, ZONE_NONE]);
+
+    const jumped = env.step(start, ['jump', 'stand'], ['low', null]);
+    expect(jumped.committedZone).toStrictEqual([ZONE_NONE, ZONE_NONE]);
+  });
+
+  it("legalActionsFor still withholds 'special' below its Super Meter cost regardless of Zone", () => {
+    // Zone is an orthogonal axis to Super Meter gating -- AC5: nothing about
+    // supplying a Zone can make an unaffordable `special` legal.
+    const broke = stateOf({ meter: [DEFAULT_FIGHTER_CONFIG.specialMeterCost - 1, 0] });
+    const legal = env.observe(broke, 0).legalActions;
+
+    expect(legal).not.toContain('special');
+
+    const after = env.step(broke, ['special', 'stand'], ['high', null]);
+    expect(after.committedAction[0]).toBe(COMMITTED_NONE);
+    expect(after.committedZone[0]).toBe(ZONE_NONE);
+  });
+});
+
+describe('attacks, blocking and simultaneity -- continued', () => {
+  const env = createFighterEnvironment(CLOSE_QUARTERS);
 
   it('resolves both Actions from the same pre-step snapshot (AC: simultaneity)', () => {
     // Each side's health loss must depend only on what the *other* side did.

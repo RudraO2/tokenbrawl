@@ -8,6 +8,7 @@ import {
   PHASE_IDLE,
   PHASE_RECOVERY,
   PHASE_STARTUP,
+  ZONE_NONE,
 } from '../../../../packages/env-fighter/src/frames';
 import type { FighterState } from '../../../../packages/env-fighter/src/state';
 import type { RenderFrame } from '../replay/film';
@@ -76,6 +77,9 @@ function stateWith(overrides: Partial<FighterState> = {}): FighterState {
     commitmentRemaining: [0, 0],
     committedAction: [COMMITTED_NONE, COMMITTED_NONE],
     windowHitLanded: [0, 0],
+    verticalPosition: [0, 0],
+    airState: [PHASE_IDLE, PHASE_IDLE],
+    committedZone: [ZONE_NONE, ZONE_NONE],
     ...overrides,
   };
 }
