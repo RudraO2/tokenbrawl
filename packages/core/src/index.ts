@@ -176,3 +176,18 @@ export {
   meanBasisPoints,
 } from './statistics';
 export type { BootstrapInterval, BootstrapParams } from './statistics';
+
+// ---------------------------------------------------------------------------
+// Story 8.1: Command Log schema v2 -- a strict superset of v1 adding vertical
+// position, Zone, Juggle Count, a 'jump' Action, and a 'human' Agent kind.
+// v1's validator and exports are untouched; this is the v2-only reader.
+// ---------------------------------------------------------------------------
+
+export { validateCommandLogV2 } from './command-log-v2';
+export type {
+  ActionV2,
+  AgentIdentityV2,
+  CommandLogV2,
+  DecisionEntryV2,
+  LoggedActionV2,
+} from '@tokenbrawl/contracts';

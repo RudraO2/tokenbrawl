@@ -1,4 +1,4 @@
-import type { AgentIdentity } from '@tokenbrawl/contracts';
+import type { AgentIdentity, AgentIdentityV2 } from '@tokenbrawl/contracts';
 
 /**
  * Story 4.6: AD-11's "BYOK Matches never enter the leaderboard", as a
@@ -25,8 +25,8 @@ import type { AgentIdentity } from '@tokenbrawl/contracts';
  * identities is all that is being judged.
  */
 
-/** Why a Match is not ratable. One member today; a union so 7.2 can add without changing shape. */
-export type RatingExclusion = 'byok';
+/** Why a Match is not ratable. */
+export type RatingExclusion = 'byok' | 'human';
 
 export interface RatingEligibility {
   readonly eligible: boolean;
@@ -39,9 +39,15 @@ export interface RatingEligibility {
   readonly reason: string | null;
 }
 
-/** The fields this rule reads. A full `CommandLog` satisfies it structurally. */
+/**
+ * The fields this rule reads. A full `CommandLog` or `CommandLogV2` satisfies
+ * it structurally -- `AgentIdentity | AgentIdentityV2` rather than just
+ * `AgentIdentity` so this one predicate keeps working once Story 8.1's
+ * `kind: "human"` agents (v2-only) start arriving, without a second copy of
+ * the rule.
+ */
 export interface RatableLog {
-  readonly agents: readonly AgentIdentity[];
+  readonly agents: readonly (AgentIdentity | AgentIdentityV2)[];
 }
 
 const BYOK_PROVIDER = 'byok';
@@ -49,14 +55,30 @@ const BYOK_PROVIDER = 'byok';
 const BYOK_REASON =
   'Run in a visitor\'s own browser with their own key (provider: "byok"). BYOK Matches are excluded from all rating computation (AD-11).';
 
+const HUMAN_REASON =
+  'One side is a human player (kind: "human"), not a Deployment or Baseline Bot. Human Matches are excluded from all rating computation, the same way BYOK Matches are (AD-11, AD-14).';
+
 /**
  * Whether this Match may contribute to a rating, and why not when it may not.
  *
  * One BYOK Agent is enough to exclude the Match. A Deployment on somebody's
  * personal key fighting a Baseline Bot is exactly as unverifiable as two of
  * them, and "half the Match was auditable" is not a thing a rating can use.
+ *
+ * A human Agent is checked first: Story 8.1 adds `kind: "human"` to the
+ * schema, and a human Match is excluded for its own reason regardless of
+ * whether either side also happens to be BYOK.
  */
 export function ratingEligibility(log: RatableLog): RatingEligibility {
+  const human = log.agents.some((agent) => agent.kind === 'human');
+  if (human) {
+    return Object.freeze({
+      eligible: false,
+      exclusion: 'human' as const,
+      reason: HUMAN_REASON,
+    });
+  }
+
   const byok = log.agents.some((agent) => agent.deployment?.provider === BYOK_PROVIDER);
   return Object.freeze({
     eligible: !byok,

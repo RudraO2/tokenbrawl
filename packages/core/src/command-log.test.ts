@@ -149,6 +149,42 @@ describe('Unknown schemaVersion (I/O matrix)', () => {
 
     expect(() => validateCommandLog(candidate)).toThrow();
   });
+
+  it('Story 8.1: the v1-only reader rejects a v2-shaped Command Log (schemaVersion "2.0.0")', () => {
+    const v2Shaped: unknown = { ...baseCommandLog(), schemaVersion: '2.0.0' };
+
+    expect(() => validateCommandLog(v2Shaped)).toThrow(/2\.0\.0/);
+  });
+});
+
+describe('Story 8.1: v1 hash stability', () => {
+  it('finalStateHash is byte-identical when a v1 fixture is validated twice, unaffected by the v2 schema addition', () => {
+    const log = baseCommandLog({
+      decisions: [
+        {
+          tick: 0,
+          agentIndex: 0,
+          action: 'attack',
+          tokensSpent: 12,
+          reasoningTokens: 4,
+          bankRemaining: 24988,
+          reflexMode: false,
+          parseFailure: false,
+          reasoning: 'thinking',
+          rawResponse: 'attack',
+          provider: 'mock',
+          endpoint: 'mock',
+        },
+      ],
+    });
+
+    const first = validateCommandLog(JSON.parse(JSON.stringify(log)));
+    const second = validateCommandLog(JSON.parse(JSON.stringify(log)));
+
+    expect(first.finalStateHash).toBe(FIXTURE_STATE_HASH);
+    expect(second.finalStateHash).toBe(FIXTURE_STATE_HASH);
+    expect(first.finalStateHash).toBe(second.finalStateHash);
+  });
 });
 
 describe('Config change (I/O matrix)', () => {

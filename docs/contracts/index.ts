@@ -218,3 +218,101 @@ export function assertSchemaVersion(log: { schemaVersion?: unknown }): asserts l
     );
   }
 }
+
+// ---------------------------------------------------------------------------
+// Command Log v2 (Story 8.1). Additive only -- every v1 export above is
+// untouched. v2 is a strict superset: the six v1 Actions plus 'jump', a
+// third agentIdentity.kind ('human'), and three new optional per-decision
+// fields (verticalPosition, zone, juggleCount) for the Epic 8 vertical-axis
+// engine stories. A v2 reader hard-fails on a v1 doc and vice versa
+// (exact-match, mirroring assertSchemaVersion).
+// ---------------------------------------------------------------------------
+
+export const SCHEMA_VERSION_V2 = '2.0.0' as const;
+
+/** The six Actions an Agent may choose in v2: the five v1 Actions plus 'jump'. */
+export type ActionV2 = Action | 'jump';
+
+export const ACTIONS_V2: readonly ActionV2[] = [
+  'advance',
+  'retreat',
+  'attack',
+  'block',
+  'special',
+  'jump',
+];
+
+/** `LoggedAction` for v2: an `ActionV2` an Agent chose, or the 'stand' Fallback Action. */
+export type LoggedActionV2 = ActionV2 | 'stand';
+
+export interface AgentIdentityV2 {
+  readonly id: string;
+  readonly kind: 'deployment' | 'bot' | 'human';
+  readonly deployment?: DeploymentIdentity;
+  /** Anything but `reports-reasoning` forces `reflex`; tracks never merge. */
+  readonly track?: 'main' | 'reflex';
+}
+
+export interface DecisionEntryV2 {
+  readonly tick: number;
+  readonly agentIndex: 0 | 1;
+  readonly action: LoggedActionV2;
+  /**
+   * Absent for a Baseline Bot (it consumes nothing). `null` for a Deployment
+   * whose provider reported no usage — a Metering Probe result, never to be
+   * collapsed to `0`. INV-5 depends on that distinction surviving to disk,
+   * so it is carried here exactly as `Decision.tokensSpent` reports it.
+   */
+  readonly tokensSpent?: number | null;
+  /** `null` means the provider did not report reasoning tokens separately. */
+  readonly reasoningTokens?: number | null;
+  readonly bankRemaining?: number;
+  readonly reflexMode?: boolean;
+  readonly parseFailure?: boolean;
+  readonly reasoning?: string | null;
+  readonly rawResponse?: string | null;
+  readonly provider?: string;
+  readonly endpoint?: string;
+  /** Vertical-axis position at this Decision Point. Epic 8 engine stories. */
+  readonly verticalPosition?: number;
+  /** Which vertical Zone this Decision Point occurred in. Epic 8 engine stories. */
+  readonly zone?: 'high' | 'low';
+  /** Consecutive Juggle hits landed at this Decision Point. Epic 8 engine stories. */
+  readonly juggleCount?: number;
+}
+
+/**
+ * The canonical record of one Match under schema v2. Stores decisions, not
+ * frames: the player reproduces visual state by re-running the deterministic
+ * engine from (seed, config, actions).
+ */
+export interface CommandLogV2 {
+  readonly schemaVersion: typeof SCHEMA_VERSION_V2;
+  readonly matchId: string;
+  readonly environment: { readonly id: string; readonly version: string };
+  readonly seed: number;
+  readonly configHash: string;
+  readonly tokenBankStart?: number;
+  readonly agents: readonly [AgentIdentityV2, AgentIdentityV2];
+  readonly decisions: readonly DecisionEntryV2[];
+  readonly result: TerminalResult;
+  readonly finalStateHash: string;
+  readonly reasoningSidecar?: string | null;
+}
+
+/**
+ * Exact-match version check for v2. A consumer that does not implement this
+ * precise version MUST reject the document — a partial read of an evolved
+ * schema is how a leaderboard quietly becomes wrong. Mirrors
+ * `assertSchemaVersion` exactly; kept as a separate function so a v2 reader
+ * can never accidentally accept a v1 document.
+ */
+export function assertSchemaVersionV2(log: {
+  schemaVersion?: unknown;
+}): asserts log is CommandLogV2 {
+  if (log.schemaVersion !== SCHEMA_VERSION_V2) {
+    throw new Error(
+      `Unsupported Command Log schemaVersion: ${String(log.schemaVersion)} (expected ${SCHEMA_VERSION_V2})`,
+    );
+  }
+}

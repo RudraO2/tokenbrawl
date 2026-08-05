@@ -57,6 +57,13 @@ describe('AD-11: BYOK Matches never enter the leaderboard', () => {
     expect(verdict.reason).toMatch(/excluded/i);
   });
 
+  it('Story 8.1: excludes a Match with one human-kind agent, exclusion "human"', () => {
+    const human = { id: 'human:player-1', kind: 'human' as const };
+    const verdict = ratingEligibility({ agents: [human, deployment('groq')] });
+    expect(verdict.eligible).toBe(false);
+    expect(verdict.exclusion).toBe('human');
+  });
+
   it('reads the provider rather than the agent id, which a visitor could otherwise spoof', () => {
     // An id is a label. `deployment.provider` is the enum the frozen schema
     // validates, and it is the only field this rule may trust.
