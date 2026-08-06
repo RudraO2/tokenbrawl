@@ -8,9 +8,9 @@ only within a table, and only as far as the two Agents met comparable opposition
 opponent count and the full per-opponent breakdown are published with every row.
 
 - Environment: `fighter-1v1` v1.0.0
-- Frame-data config hash: `891e524089af5b88da76fcfb9149be945cb0d33738d2eda472498475180b48a2`
-- Corpus: 1 committed Command Log from `apps/web/public/replays`
-- Matches: 1 total, 0 rated, 1 excluded
+- Frame-data config hash: `24f5f97e1c88a3f3a9b66405c569c076ba30994ac93dbc69429c3b8780bdc0f7`
+- Corpus: 8 committed Command Logs from `apps/web/public/replays`
+- Matches: 8 total, 0 rated, 8 excluded
 - Confidence interval: seeded percentile bootstrap, 2000 resamples, seed 20260802, 0.9500 coverage (AD-5)
 
 ## Main leaderboard
@@ -47,7 +47,15 @@ _No rated entrant, so nothing to report behaviour for._
 | Entrant | Kind | Track | Why |
 | --- | --- | --- | --- |
 | bot:aggressive | bot | main | No rated Match: every Match this Agent played was excluded (BYOK, or a pairing below the coverage floor). |
+| bot:aggressive:1 | bot | main | No rated Match: every Match this Agent played was excluded (BYOK, or a pairing below the coverage floor). |
+| bot:aggressive:2 | bot | main | No rated Match: every Match this Agent played was excluded (BYOK, or a pairing below the coverage floor). |
+| bot:random:1 | bot | main | No rated Match: every Match this Agent played was excluded (BYOK, or a pairing below the coverage floor). |
+| bot:random:2 | bot | main | No rated Match: every Match this Agent played was excluded (BYOK, or a pairing below the coverage floor). |
 | bot:spacing | bot | main | No rated Match: every Match this Agent played was excluded (BYOK, or a pairing below the coverage floor). |
+| bot:spacing:1 | bot | main | No rated Match: every Match this Agent played was excluded (BYOK, or a pairing below the coverage floor). |
+| bot:spacing:2 | bot | main | No rated Match: every Match this Agent played was excluded (BYOK, or a pairing below the coverage floor). |
+| cerebras-zai-glm-4.7 | deployment | reflex | No rated Match: every Match this Agent played was excluded (BYOK, or a pairing below the coverage floor). |
+| groq-llama-3.3-70b | deployment | reflex | No rated Match: every Match this Agent played was excluded (BYOK, or a pairing below the coverage floor). |
 
 ## Pairing coverage
 
@@ -57,6 +65,13 @@ is provisional and contributes to no rating (Story 7-1, AC3).
 | Pairing | Matches | On side 0 | Mirrored seeds | Rated |
 | --- | --- | --- | --- | --- |
 | bot:aggressive vs bot:spacing | 1 | 1 / 0 | 0 | provisional (insufficient-matches, insufficient-mirrored-seeds) |
+| bot:aggressive:1 vs bot:random:2 | 1 | 1 / 0 | 0 | provisional (insufficient-matches, insufficient-mirrored-seeds) |
+| bot:aggressive:1 vs bot:spacing:2 | 1 | 1 / 0 | 0 | provisional (insufficient-matches, insufficient-mirrored-seeds) |
+| bot:aggressive:2 vs bot:random:1 | 1 | 0 / 1 | 0 | provisional (insufficient-matches, insufficient-mirrored-seeds) |
+| bot:aggressive:2 vs bot:spacing:1 | 1 | 0 / 1 | 0 | provisional (insufficient-matches, insufficient-mirrored-seeds) |
+| bot:random:1 vs bot:spacing:2 | 1 | 1 / 0 | 0 | provisional (insufficient-matches, insufficient-mirrored-seeds) |
+| bot:random:2 vs bot:spacing:1 | 1 | 0 / 1 | 0 | provisional (insufficient-matches, insufficient-mirrored-seeds) |
+| cerebras-zai-glm-4.7 vs groq-llama-3.3-70b | 1 | 0 / 1 | 0 | provisional (insufficient-matches, insufficient-mirrored-seeds) |
 
 ## Excluded Matches
 
@@ -65,5 +80,5 @@ to the total above.
 
 | Reason | Matches |
 | --- | --- |
-| insufficient-matches | 1 |
-| insufficient-mirrored-seeds | 1 |
+| insufficient-matches | 8 |
+| insufficient-mirrored-seeds | 8 |

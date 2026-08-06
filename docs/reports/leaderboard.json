@@ -2,23 +2,23 @@
   "story": "7-3-behavioural-metrics",
   "title": "Tokenbrawl leaderboard",
   "generatedBy": "tokenbrawl leaderboard --config configs/tournament.config.json",
-  "corpus": "1 committed Command Log from `apps/web/public/replays`",
+  "corpus": "8 committed Command Logs from `apps/web/public/replays`",
   "environment": {
     "id": "fighter-1v1",
     "version": "1.0.0"
   },
-  "configHash": "891e524089af5b88da76fcfb9149be945cb0d33738d2eda472498475180b48a2",
-  "matches": 1,
+  "configHash": "24f5f97e1c88a3f3a9b66405c569c076ba30994ac93dbc69429c3b8780bdc0f7",
+  "matches": 8,
   "ratedMatches": 0,
-  "excludedMatches": 1,
+  "excludedMatches": 8,
   "exclusionTotals": [
     {
       "exclusion": "insufficient-matches",
-      "matches": 1
+      "matches": 8
     },
     {
       "exclusion": "insufficient-mirrored-seeds",
-      "matches": 1
+      "matches": 8
     }
   ],
   "bootstrap": {
@@ -37,9 +37,57 @@
       "reason": "No rated Match: every Match this Agent played was excluded (BYOK, or a pairing below the coverage floor)."
     },
     {
+      "agent": "bot:aggressive:1",
+      "kind": "bot",
+      "track": "main",
+      "reason": "No rated Match: every Match this Agent played was excluded (BYOK, or a pairing below the coverage floor)."
+    },
+    {
+      "agent": "bot:aggressive:2",
+      "kind": "bot",
+      "track": "main",
+      "reason": "No rated Match: every Match this Agent played was excluded (BYOK, or a pairing below the coverage floor)."
+    },
+    {
+      "agent": "bot:random:1",
+      "kind": "bot",
+      "track": "main",
+      "reason": "No rated Match: every Match this Agent played was excluded (BYOK, or a pairing below the coverage floor)."
+    },
+    {
+      "agent": "bot:random:2",
+      "kind": "bot",
+      "track": "main",
+      "reason": "No rated Match: every Match this Agent played was excluded (BYOK, or a pairing below the coverage floor)."
+    },
+    {
       "agent": "bot:spacing",
       "kind": "bot",
       "track": "main",
+      "reason": "No rated Match: every Match this Agent played was excluded (BYOK, or a pairing below the coverage floor)."
+    },
+    {
+      "agent": "bot:spacing:1",
+      "kind": "bot",
+      "track": "main",
+      "reason": "No rated Match: every Match this Agent played was excluded (BYOK, or a pairing below the coverage floor)."
+    },
+    {
+      "agent": "bot:spacing:2",
+      "kind": "bot",
+      "track": "main",
+      "reason": "No rated Match: every Match this Agent played was excluded (BYOK, or a pairing below the coverage floor)."
+    },
+    {
+      "agent": "cerebras-zai-glm-4.7",
+      "kind": "deployment",
+      "track": "reflex",
+      "reason": "No rated Match: every Match this Agent played was excluded (BYOK, or a pairing below the coverage floor)."
+    },
+    {
+      "agent": "groq-llama-3.3-70b",
+      "kind": "deployment",
+      "track": "reflex",
       "reason": "No rated Match: every Match this Agent played was excluded (BYOK, or a pairing below the coverage floor)."
     }
   ],
@@ -53,6 +101,125 @@
       "matchesBySide": [
         1,
         0
+      ],
+      "mirroredSeeds": 0,
+      "provisional": true,
+      "exclusions": [
+        "insufficient-matches",
+        "insufficient-mirrored-seeds"
+      ]
+    },
+    {
+      "pairing": [
+        "bot:aggressive:1",
+        "bot:random:2"
+      ],
+      "matches": 1,
+      "matchesBySide": [
+        1,
+        0
+      ],
+      "mirroredSeeds": 0,
+      "provisional": true,
+      "exclusions": [
+        "insufficient-matches",
+        "insufficient-mirrored-seeds"
+      ]
+    },
+    {
+      "pairing": [
+        "bot:aggressive:1",
+        "bot:spacing:2"
+      ],
+      "matches": 1,
+      "matchesBySide": [
+        1,
+        0
+      ],
+      "mirroredSeeds": 0,
+      "provisional": true,
+      "exclusions": [
+        "insufficient-matches",
+        "insufficient-mirrored-seeds"
+      ]
+    },
+    {
+      "pairing": [
+        "bot:aggressive:2",
+        "bot:random:1"
+      ],
+      "matches": 1,
+      "matchesBySide": [
+        0,
+        1
+      ],
+      "mirroredSeeds": 0,
+      "provisional": true,
+      "exclusions": [
+        "insufficient-matches",
+        "insufficient-mirrored-seeds"
+      ]
+    },
+    {
+      "pairing": [
+        "bot:aggressive:2",
+        "bot:spacing:1"
+      ],
+      "matches": 1,
+      "matchesBySide": [
+        0,
+        1
+      ],
+      "mirroredSeeds": 0,
+      "provisional": true,
+      "exclusions": [
+        "insufficient-matches",
+        "insufficient-mirrored-seeds"
+      ]
+    },
+    {
+      "pairing": [
+        "bot:random:1",
+        "bot:spacing:2"
+      ],
+      "matches": 1,
+      "matchesBySide": [
+        1,
+        0
+      ],
+      "mirroredSeeds": 0,
+      "provisional": true,
+      "exclusions": [
+        "insufficient-matches",
+        "insufficient-mirrored-seeds"
+      ]
+    },
+    {
+      "pairing": [
+        "bot:random:2",
+        "bot:spacing:1"
+      ],
+      "matches": 1,
+      "matchesBySide": [
+        0,
+        1
+      ],
+      "mirroredSeeds": 0,
+      "provisional": true,
+      "exclusions": [
+        "insufficient-matches",
+        "insufficient-mirrored-seeds"
+      ]
+    },
+    {
+      "pairing": [
+        "cerebras-zai-glm-4.7",
+        "groq-llama-3.3-70b"
+      ],
+      "matches": 1,
+      "matchesBySide": [
+        0,
+        1
       ],
       "mirroredSeeds": 0,
       "provisional": true,
