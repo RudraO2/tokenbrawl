@@ -47,7 +47,8 @@ export interface FighterArtist {
  * subject, so they get the vertical space.
  */
 const BODY_WIDTH = 64;
-const BODY_HEIGHT = 160;
+/** Exported so `identity.ts` can place its emblem above the head without duplicating this constant. */
+export const BODY_HEIGHT = 160;
 /** How far a committed strike reaches out of the body box, drawn as a bar. */
 const STRIKE_LENGTH = 72;
 const STRIKE_HEIGHT = 20;

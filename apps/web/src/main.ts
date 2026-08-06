@@ -17,6 +17,7 @@ import {
 import type { Canvas2D } from './render/canvas2d';
 import { createBlockArtist, type FighterArtist } from './render/artist';
 import type { Backdrop } from './render/backdrop';
+import { createIdentityArtist, deriveVisualIdentity } from './render/identity';
 import { drawFrame } from './render/renderer';
 import './styles/app.css';
 
@@ -201,6 +202,49 @@ export function mountPlayer(
   } = { artists: [], backdrop: undefined, frameIndex: 0 };
   const blockArtist = createBlockArtist();
 
+  /**
+   * Wraps an artist with the Deployment's derived emblem when
+   * `log.agents[agentIndex]` names a Deployment, and passes it through
+   * unchanged for a bot, a human, or a malformed `'deployment'`-kind agent
+   * with no `deployment` field (Story 9.4).
+   *
+   * `log` is `unknown` here -- `buildReplayFilm`, above, is what establishes
+   * the document is a schema version this player understands -- so the
+   * lookup is defensive rather than typed, and anything that does not shape
+   * up as a Deployment identity falls through to the artist exactly as it
+   * arrived, with no throw.
+   */
+  function withIdentity(agentIndex: 0 | 1, artist: FighterArtist): FighterArtist {
+    const agent = (log as { agents?: readonly unknown[] } | null)?.agents?.[agentIndex] as
+      | { kind?: unknown; deployment?: unknown }
+      | undefined;
+    if (agent?.kind !== 'deployment' || !agent.deployment) {
+      return artist;
+    }
+    try {
+      return createIdentityArtist(
+        artist,
+        deriveVisualIdentity(agent.deployment as Parameters<typeof deriveVisualIdentity>[0]),
+      );
+    } catch {
+      // A `'deployment'`-kind agent whose `deployment` field doesn't actually
+      // shape up as a `DeploymentIdentity` (missing/non-string provider,
+      // endpoint or model) -- falls through to the artist exactly as it
+      // arrived, with no throw, rather than drawing a bogus emblem from
+      // `"undefined"` substrings.
+      return artist;
+    }
+  }
+
+  // The fallback the block artist stands in with while a pack has not yet
+  // decoded (or never will, for a Baseline Bot) -- wrapped once per
+  // `agentIndex` up front, since the two fighters can carry different
+  // Deployments and therefore different emblems.
+  const dressedBlockArtists: readonly [FighterArtist, FighterArtist] = [
+    withIdentity(0, blockArtist),
+    withIdentity(1, blockArtist),
+  ];
+
   const paint = (index: number): void => {
     dressing.frameIndex = index;
     const decisionPoint = film.frames[index]?.decisionPoint ?? 0;
@@ -215,11 +259,14 @@ export function mountPlayer(
       // index to index 0, so handing it `[undefined, packTwo]` would dress
       // *both* fighters in pack two -- the one thing the two packs exist to
       // prevent. Each slot is therefore filled explicitly, with the block
-      // artist standing in for whichever pack has not decoded yet.
-      artists:
-        dressing.artists[0] === undefined && dressing.artists[1] === undefined
-          ? undefined
-          : [dressing.artists[0] ?? blockArtist, dressing.artists[1] ?? blockArtist],
+      // artist standing in for whichever pack has not decoded yet -- and
+      // always the identity-wrapped one (Story 9.4), so a Deployment's emblem
+      // is on screen from frame zero rather than only once a sprite pack
+      // decodes.
+      artists: [
+        dressing.artists[0] ?? dressedBlockArtists[0],
+        dressing.artists[1] ?? dressedBlockArtists[1],
+      ],
       backdrop: dressing.backdrop,
     });
     onPaint?.(index);
@@ -248,7 +295,7 @@ export function mountPlayer(
     film,
     clock,
     setArtist: (agentIndex: 0 | 1, artist: FighterArtist): void => {
-      dressing.artists[agentIndex] = artist;
+      dressing.artists[agentIndex] = withIdentity(agentIndex, artist);
       repaint();
     },
     setBackdrop: (backdrop: Backdrop): void => {
