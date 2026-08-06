@@ -18,7 +18,8 @@ import type { Canvas2D } from './render/canvas2d';
 import { createBlockArtist, type FighterArtist } from './render/artist';
 import type { Backdrop } from './render/backdrop';
 import { createIdentityArtist, deriveVisualIdentity } from './render/identity';
-import { drawFrame } from './render/renderer';
+import { DEFAULT_JUICE_TUNING, arenaFor, buildJuiceTrack } from './render/juice';
+import { drawJuicedFrame } from './render/juice-draw';
 import './styles/app.css';
 
 /**
@@ -136,6 +137,19 @@ export interface MountedPlayer {
   readonly repaint: () => void;
   /** The Decision Point currently on screen. `0` before the first frame is drawn. */
   readonly decisionPoint: () => number;
+  /**
+   * Clock frames in this playback (Story 9.5).
+   *
+   * **Not** `film.frames.length`. Hitstop re-presents a film frame for several
+   * clock frames, so the clock's range is the film's length plus every hold.
+   * Everything that used to reason about the film's length -- the scrub's
+   * `max`, "have we reached the end" -- must reason about this instead, or the
+   * transport will stop short of the fight's last frames by exactly the amount
+   * of juice the Match contained.
+   */
+  readonly frameCount: number;
+  /** The film frame a clock frame presents. Clamped at both ends. */
+  readonly filmIndexAt: (clockIndex: number) => number;
 }
 
 export interface MountedApp extends MountedPlayer {
@@ -245,10 +259,40 @@ export function mountPlayer(
     withIdentity(1, blockArtist),
   ];
 
+  /**
+   * Story 9.5. The precomputed juice for this film: hitstop holds, shake
+   * offsets, sparks and floating numbers, one entry per *clock* frame.
+   *
+   * Built once, here, from the film alone. Because it is a table rather than a
+   * stepped effect list, seeking to frame 200 and playing to frame 200 produce
+   * the same juice -- which is the property Story 4.5's scrub needs and the
+   * one a mutable effect list cannot offer.
+   *
+   * The arena is derived from the *same* `FighterConfig` the paint path below
+   * hands to `drawJuicedFrame`, rather than left to the module's default: a
+   * Match run under a retuned `arenaMin`/`arenaMax` would otherwise place
+   * every spark and every floating number at the wrong x while the fighters
+   * themselves drew correctly.
+   *
+   * `prefersReducedMotion` is threaded in for the same reason the clock reads
+   * it: declining to autoplay is only half the promise, and a visitor who
+   * scrubs would otherwise get the full damage-scaled camera shake.
+   */
+  const track = buildJuiceTrack(
+    film.frames,
+    DEFAULT_JUICE_TUNING,
+    arenaFor(DEFAULT_FIGHTER_CONFIG),
+    prefersReducedMotion(view),
+  );
+
   const paint = (index: number): void => {
     dressing.frameIndex = index;
-    const decisionPoint = film.frames[index]?.decisionPoint ?? 0;
-    drawFrame(ctx, film.frames[index], {
+    // Clock index in, film index out. With hitstop the two diverge, and this
+    // is the single place the mapping happens -- every other consumer asks
+    // `filmIndexAt` rather than assuming the two are the same number.
+    const filmIndex = track.filmIndexAt(index);
+    const decisionPoint = film.frames[filmIndex]?.decisionPoint ?? 0;
+    drawJuicedFrame(ctx, film.frames[filmIndex], track.at(index), {
       config: DEFAULT_FIGHTER_CONFIG,
       viewport,
       // Story 4.4. Read per frame rather than cached per Decision Point: the
@@ -273,7 +317,7 @@ export function mountPlayer(
   };
 
   const clock = createPlaybackClock({
-    frameCount: film.frames.length,
+    frameCount: track.frameCount,
     requestFrame: (callback) => view.requestAnimationFrame(() => callback()),
     cancelFrame: (handle) => view.cancelAnimationFrame(handle),
     reducedMotion: prefersReducedMotion(view),
@@ -281,8 +325,8 @@ export function mountPlayer(
   });
 
   const repaint = (): void => {
-    if (film.frames.length > 0) {
-      paint(Math.min(Math.max(dressing.frameIndex, 0), film.frames.length - 1));
+    if (track.frameCount > 0) {
+      paint(Math.min(Math.max(dressing.frameIndex, 0), track.frameCount - 1));
     }
   };
 
@@ -303,7 +347,10 @@ export function mountPlayer(
       repaint();
     },
     repaint,
-    decisionPoint: (): number => film.frames[dressing.frameIndex]?.decisionPoint ?? 0,
+    decisionPoint: (): number =>
+      film.frames[track.filmIndexAt(dressing.frameIndex)]?.decisionPoint ?? 0,
+    frameCount: track.frameCount,
+    filmIndexAt: track.filmIndexAt,
   });
 }
 
@@ -670,7 +717,15 @@ export function renderApp(root: MountPoint, log: CommandLog, view: HostView): Mo
   function syncTimeline(frameIndex: number): void {
     timelineNode.value = String(frameIndex);
     timelineReadoutNode.innerHTML = escapeHtml(
-      timelineLabel(frameIndex, mounted.film, DEFAULT_FIGHTER_CONFIG.ticksPerDecision),
+      // The handle's position is a *clock* index (Story 9.5) and the readout
+      // describes a *film* frame, so the two are bridged explicitly. During a
+      // hitstop hold the readout simply stops moving, which is the honest
+      // description of what the stage is doing.
+      timelineLabel(
+        mounted.filmIndexAt(frameIndex),
+        mounted.film,
+        DEFAULT_FIGHTER_CONFIG.ticksPerDecision,
+      ),
     );
   }
 
@@ -806,7 +861,7 @@ export function renderApp(root: MountPoint, log: CommandLog, view: HostView): Mo
   // `max` is set here rather than in the template because the frame count is
   // only known once the film exists, and the film only exists after the log has
   // been validated (AD-3).
-  timelineNode.setAttribute?.('max', String(Math.max(0, mounted.film.frames.length - 1)));
+  timelineNode.setAttribute?.('max', String(Math.max(0, mounted.frameCount - 1)));
   renderPanel();
   syncTimeline(0);
 
@@ -833,7 +888,7 @@ export function renderApp(root: MountPoint, log: CommandLog, view: HostView): Mo
   toggle.addEventListener('click', () => {
     if (mounted.clock.isRunning()) {
       mounted.clock.stop();
-    } else if (mounted.clock.frameIndex() >= mounted.film.frames.length - 1) {
+    } else if (mounted.clock.frameIndex() >= mounted.frameCount - 1) {
       // At the end there is nothing to resume into, and a Play button that did
       // nothing would read as broken.
       mounted.clock.start();

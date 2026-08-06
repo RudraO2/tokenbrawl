@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -22,7 +22,57 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
  */
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
-const SCRIPT = join(REPO_ROOT, 'scripts', 'assert-no-secret-leak.sh');
+const SCRIPT_PATH = join(REPO_ROOT, 'scripts', 'assert-no-secret-leak.sh');
+// Only Windows needs the separator rewrite: on POSIX a backslash is a legal
+// path character, and rewriting one there would corrupt a valid path.
+const SCRIPT = process.platform === 'win32' ? SCRIPT_PATH.replace(/\\/g, '/') : SCRIPT_PATH;
+
+/**
+ * On Windows, a bare `bash` on PATH is the System32 WSL launcher, which fails
+ * with `execvpe(/bin/bash)` on a machine with no distribution installed. CI
+ * runs this file on Ubuntu, where `bash` is the real shell; a Windows
+ * developer needs the Git-for-Windows one resolved explicitly, or the gate
+ * reports itself broken when only the launcher is.
+ *
+ * Resolution is by capability, not by file name: a path that exists but does
+ * not run is the same "looked for nothing" failure this file exists to make
+ * impossible, so each candidate is proven with `bash -c 'exit 0'`.
+ */
+function resolveBash(): string {
+  if (process.platform !== 'win32') return 'bash';
+
+  // Roots come from the environment and from wherever `git` itself resolved
+  // to (which covers scoop/winget/portable installs). An absolute path
+  // spelled out here would be a machine-specific literal, which
+  // `extraction-exclusion.test.ts` rightly forbids in tracked source.
+  const gitExe = spawnSync('where', ['git.exe'], { encoding: 'utf8' }).stdout?.split(/\r?\n/)[0]?.trim();
+  const roots = [
+    process.env['ProgramW6432'],
+    process.env['ProgramFiles'],
+    process.env['ProgramFiles(x86)'],
+    process.env['LOCALAPPDATA'] ? join(process.env['LOCALAPPDATA'], 'Programs') : undefined,
+  ];
+  const candidates = [
+    // `<git>/cmd/git.exe` or `<git>/bin/git.exe` -> `<git>/bin/bash.exe`.
+    ...(gitExe ? [join(dirname(dirname(gitExe)), 'bin', 'bash.exe')] : []),
+    ...roots
+      .filter((root): root is string => root !== undefined && root !== '')
+      .map((root) => join(root, 'Git', 'bin', 'bash.exe')),
+  ];
+
+  const usable = candidates.find(
+    (candidate) => existsSync(candidate) && spawnSync(candidate, ['-c', 'exit 0']).status === 0,
+  );
+  if (usable !== undefined) return usable;
+
+  throw new Error(
+    'secret-leak-script.test.ts: no usable bash was found. The bare `bash` on PATH is the ' +
+      'WSL launcher, which cannot run this script. Install Git for Windows, or run the suite ' +
+      'where a POSIX bash is available.',
+  );
+}
+
+const BASH = resolveBash();
 
 /** Not a real key, and long enough to clear the script's MIN_SECRET_LENGTH. */
 const PLANTED = 'gsk_live_0123456789abcdefplanted';
@@ -33,15 +83,27 @@ interface RunResult {
 }
 
 function runScript(cwd: string, env: Record<string, string>, args: readonly string[]): RunResult {
-  const result = spawnSync('bash', [SCRIPT, ...args], {
+  const result = spawnSync(BASH, [SCRIPT, ...args], {
     cwd,
     encoding: 'utf8',
     // A clean environment plus exactly what the case supplies: inheriting the
     // developer's own shell could hand the script a real key from a `.env`
     // they happen to have exported, and the case would then pass or fail for
     // a reason that has nothing to do with the code.
-    env: { PATH: process.env['PATH'] ?? '', ...env },
+    // SystemRoot/COMSPEC are the two Windows variables a child process cannot
+    // start without; they carry no secret, so scrubbing them buys nothing and
+    // costs the whole suite.
+    env: {
+      PATH: process.env['PATH'] ?? '',
+      ...(process.env['SystemRoot'] === undefined ? {} : { SystemRoot: process.env['SystemRoot'] }),
+      ...(process.env['COMSPEC'] === undefined ? {} : { COMSPEC: process.env['COMSPEC'] }),
+      ...env,
+    },
   });
+  // A shell that never launched produces no output, which would silently
+  // satisfy every "does not contain the secret" assertion in this file --
+  // exactly the "looked for nothing" pass the header warns about.
+  if (result.error !== undefined) throw result.error;
   return { status: result.status ?? -1, output: `${result.stdout}${result.stderr}` };
 }
 
@@ -53,7 +115,15 @@ describe('scripts/assert-no-secret-leak.sh', () => {
   });
 
   afterEach(() => {
-    rmSync(workspace, { recursive: true, force: true });
+    // Retried and then swallowed: on Windows something (the just-exited
+    // shell, a sync client, an AV scanner) can hold the directory briefly,
+    // and a leaked temp directory under `tmpdir()` is harmless -- failing a
+    // case that already passed, from janitorial code, is not.
+    try {
+      rmSync(workspace, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+    } catch {
+      /* the OS reclaims it; never fail a passing case on cleanup. */
+    }
   });
 
   it('passes on a tree that does not contain the key', () => {
@@ -80,8 +150,11 @@ describe('scripts/assert-no-secret-leak.sh', () => {
     // the leak. This is the assertion that keeps the diagnostics honest.
     writeFileSync(join(workspace, 'leaked.json'), `${PLANTED}\n`);
 
-    const { output } = runScript(workspace, { GROQ_API_KEY: PLANTED }, ['GROQ_API_KEY']);
+    const { status, output } = runScript(workspace, { GROQ_API_KEY: PLANTED }, ['GROQ_API_KEY']);
 
+    // Asserted first: without it, a run that never found the plant would
+    // satisfy the "does not contain" check for the wrong reason.
+    expect(status).toBe(1);
     expect(output).not.toContain(PLANTED);
     expect(output).toContain('GROQ_API_KEY');
   });

@@ -1,0 +1,157 @@
+import { BASIS_POINTS_FULL, type RenderFrame } from '../replay/film';
+import type { Canvas2D } from './canvas2d';
+import type { JuiceFrame } from './juice';
+import { FLOOR_INSET, drawFrame, type DrawFrameOptions, type Viewport } from './renderer';
+import { THEME, type Theme } from './theme';
+
+/**
+ * Story 9.5: compositing the juice over a frame the renderer already knows how
+ * to draw.
+ *
+ * This file exists because of one hard constraint and one soft one.
+ *
+ * The hard one: `renderer.test.ts` asserts `drawFrame`'s exact call sequence,
+ * and that assertion is worth more than the convenience of reaching into it.
+ * So `drawFrame` is not touched. The shake is applied *around* it -- a
+ * `save`/`translate`/`restore` sandwich -- and the overlay is drawn inside the
+ * same transform so the sparks travel with the stage rather than sliding
+ * against it.
+ *
+ * The soft one: the `Canvas2D` port has no `rotate` and no path API by design
+ * (see `canvas2d.ts`), and this story is not the story that widens it. A shake
+ * is therefore a translation and nothing else, and a spark is a square. Both
+ * are honest to the house style: `docs/DESIGN.md` asks for chunky flat blocks,
+ * and a rectangular spark is what that looks like in motion.
+ *
+ * Nothing here is translucent either. The reflex when an effect must "fade" is
+ * to ramp `globalAlpha`, and `style-discipline.test.ts` bans exactly that
+ * outside `backdrop.ts` -- so a spark dies by shrinking to a pixel and then
+ * expiring on its tuned frame, which reads the same at five Decision Points a
+ * second and stays flat.
+ *
+ * ## Why the clear happens here, at identity
+ *
+ * `drawFrame` opens with a full-viewport `clearRect` plus a background fill --
+ * but *inside* a translated transform that would leave a band of stale pixels
+ * along whichever edge the shake moved away from, which reads as the stage
+ * tearing rather than shaking. So the surface is cleared and filled here,
+ * before the translate, and `drawFrame`'s own clear then redundantly covers
+ * the shifted rect. Redundant, cheap, and it is what keeps `drawFrame`
+ * unchanged.
+ */
+
+/**
+ * Colour and weight are read from the `Theme`; this file contains no colour of
+ * its own.
+ *
+ * This is where the one viewport multiplication happens, in the same spirit as
+ * `renderer.ts`'s `interpolatedX`: the juice track carries an impact point in
+ * basis points and a scatter in pixels, and only here -- where the viewport is
+ * actually in hand -- do the two become a screen coordinate. Both axes are
+ * then clamped so no square is ever drawn outside the stage, and both are
+ * rounded to whole pixels: a rect on a half-pixel is a blur, which is exactly
+ * what the flat-block house style is not.
+ */
+function paintSparks(
+  ctx: Canvas2D,
+  juiceFrame: JuiceFrame,
+  viewport: Viewport,
+  theme: Theme,
+): void {
+  const groundY = viewport.height - FLOOR_INSET;
+  for (const spark of juiceFrame.sparks) {
+    const size = Math.max(1, Math.round(spark.sizePx));
+    const centreX = (spark.positionBasisPoints * viewport.width) / BASIS_POINTS_FULL + spark.offsetPx;
+    const x = clamp(Math.round(centreX - size / 2), 0, Math.max(0, viewport.width - size));
+    const y = clamp(Math.round(groundY - spark.heightPx - size / 2), 0, Math.max(0, groundY - size));
+    ctx.fillStyle = theme.accent;
+    ctx.fillRect(x, y, size, size);
+  }
+}
+
+/** Half the width of the widest damage label, so a centred number stays on the stage. */
+const NUMBER_MARGIN_PX = 24;
+
+function clamp(value: number, low: number, high: number): number {
+  return Math.max(low, Math.min(high, value));
+}
+
+/**
+ * The floating number, in the display face rather than the mono one.
+ *
+ * Damage is the one number on screen that is meant to be read at a glance
+ * while everything else is moving, so it takes the loudest pairing the palette
+ * allows -- warn on the heavy display face -- rather than sitting in the same
+ * mono readout as the HUD it is trying to be noticed against.
+ */
+function paintNumbers(
+  ctx: Canvas2D,
+  juiceFrame: JuiceFrame,
+  viewport: Viewport,
+  theme: Theme,
+): void {
+  const groundY = viewport.height - FLOOR_INSET;
+  for (const number of juiceFrame.damageNumbers) {
+    // Same rule as `paintSparks`, for the same two reasons. A centred label at
+    // a wall-pinned fighter (`positionBasisPoints` at either end) would be
+    // drawn half off-canvas, and the one number the feature exists to make
+    // readable is the one that must never be clipped; the rounding keeps it
+    // off a half-pixel. `NUMBER_MARGIN_PX` leaves room for the half-width of
+    // the glyphs the centre alignment spreads either side.
+    const centreX = (number.positionBasisPoints * viewport.width) / BASIS_POINTS_FULL;
+    const x = clamp(
+      Math.round(centreX),
+      Math.min(NUMBER_MARGIN_PX, viewport.width),
+      Math.max(0, viewport.width - NUMBER_MARGIN_PX),
+    );
+    const y = clamp(Math.round(groundY - number.heightPx), 0, Math.max(0, groundY));
+    ctx.fillStyle = theme.warn;
+    ctx.font = theme.displayFont;
+    ctx.textAlign = 'center';
+    ctx.fillText(String(number.damage), x, y);
+  }
+}
+
+/** Draws the sparks and floating numbers for one clock frame. */
+export function drawJuiceOverlay(
+  ctx: Canvas2D,
+  juiceFrame: JuiceFrame,
+  viewport: Viewport,
+  theme: Theme = THEME,
+): void {
+  if (juiceFrame.sparks.length === 0 && juiceFrame.damageNumbers.length === 0) {
+    return;
+  }
+  paintSparks(ctx, juiceFrame, viewport, theme);
+  paintNumbers(ctx, juiceFrame, viewport, theme);
+}
+
+/**
+ * One film frame, shaken, with its juice on top.
+ *
+ * Purely presentational: `frame` is read and never written, and nothing this
+ * function touches is an input to `env.hash`. The intent is that swapping the
+ * tuning changes every call recorded here and no byte of
+ * `film.finalStateHash` (AD-15, INV-2). `juice-neutrality.test.ts` checks that
+ * on the demo Match -- by re-deriving the hash from the same log after the
+ * juiced paint has run -- rather than asserting it as a general theorem.
+ */
+export function drawJuicedFrame(
+  ctx: Canvas2D,
+  frame: RenderFrame,
+  juiceFrame: JuiceFrame,
+  options: DrawFrameOptions,
+): void {
+  const theme = options.theme ?? THEME;
+  const { viewport } = options;
+
+  ctx.clearRect(0, 0, viewport.width, viewport.height);
+  ctx.fillStyle = theme.bg;
+  ctx.fillRect(0, 0, viewport.width, viewport.height);
+
+  ctx.save();
+  ctx.translate(juiceFrame.shakeX, juiceFrame.shakeY);
+  drawFrame(ctx, frame, options);
+  drawJuiceOverlay(ctx, juiceFrame, viewport, theme);
+  ctx.restore();
+}

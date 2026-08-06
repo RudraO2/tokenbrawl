@@ -129,6 +129,14 @@ describe('shipped player source discipline', () => {
         // comes to a clock -- so it is the last file that should sit outside
         // the sweep that forbids one.
         'byok/pacing.ts',
+        // Story 9.5. Named here so the sweep is asserted to *cover* the juice
+        // layer, not to excuse it. Juice is the first thing in this app with
+        // an obvious reason to schedule -- "freeze for 80ms", "fade the
+        // number out over a quarter second" is how every other codebase
+        // writes it -- so the sweep must be shown to reach these two files
+        // rather than merely happening to walk them.
+        'render/juice.ts',
+        'render/juice-draw.ts',
       ]),
     );
     expect(paths.every((path) => !path.endsWith('.test.ts'))).toBe(true);
@@ -140,7 +148,7 @@ describe('shipped player source discipline', () => {
     // one-line edit away from making a Match's playback depend on how long a
     // Deployment took to think.
     const wallClock =
-      /\b(Date\.now|performance\.now|new Date\(|Date\.parse|process\.hrtime|setInterval)\b/;
+      /\b(Date\.now|performance\.now|new Date\(|Date\.parse|process\.hrtime|setInterval|setTimeout)\b/;
     expect(offendingLines(wallClock, WALL_CLOCK_EXEMPT)).toStrictEqual([]);
   });
 
@@ -178,7 +186,7 @@ describe('shipped player source discipline', () => {
     // whose per-frame path is the one INV-3 exists to protect -- is still
     // covered by the ordinary sweep.
     const wallClock =
-      /\b(Date\.now|performance\.now|new Date\(|Date\.parse|process\.hrtime|setInterval)\b/;
+      /\b(Date\.now|performance\.now|new Date\(|Date\.parse|process\.hrtime|setInterval|setTimeout)\b/;
     const otherSpectateFiles = shippedFiles().filter(
       (file) =>
         file.path.replace(/\\/g, '/').startsWith('spectate/') &&

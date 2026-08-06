@@ -58,7 +58,7 @@ export interface DrawFrameOptions {
  * black -- which reads as an unfinished layout rather than as space. A
  * fighting-game viewport is wide and short.
  */
-const FLOOR_INSET = 40;
+export const FLOOR_INSET = 40;
 /** Health and meter bars live in this band at the top. */
 const HUD_TOP = 24;
 const HUD_BAR_HEIGHT = 20;

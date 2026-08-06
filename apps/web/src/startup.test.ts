@@ -3,6 +3,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import type { CommandLog } from '@tokenbrawl/contracts';
+import { DEFAULT_FIGHTER_CONFIG } from '../../../packages/env-fighter/src/config';
 import type { Canvas2D } from './render/canvas2d';
 import type { MountPoint, MountPointChild } from './main';
 import { DEMO_REPLAY_URL, resolveSidecarUrl, startup, type BrowserGlobals } from './startup';
@@ -602,7 +603,11 @@ describe('hovering a fighter to read its reasoning (4.3)', () => {
     const harness = createHarness(log);
 
     const result = await startup(harness.globals);
-    harness.runFrames(result?.mounted.film.frames.length ?? 0);
+    // `frameCount`, not `film.frames.length`: Story 9.5's hitstop re-presents
+    // a film frame for several clock frames, so the clock's range is the
+    // film's length plus every hold. Running only the film's length would
+    // stop short of the end and leave a clock that is still running.
+    harness.runFrames(result?.mounted.frameCount ?? 0);
     expect(result?.mounted.clock.isRunning()).toBe(false);
 
     harness.root.fire('[data-agent="0"]', 'pointerenter');
@@ -854,14 +859,21 @@ describe('the timeline scrub (4.5)', () => {
     harness.root.fire(TIMELINE, 'input');
   }
 
-  it('spans the whole film, so every Decision Point is reachable', async () => {
+  it('spans the whole playback, so every Decision Point is reachable', async () => {
     const { log } = await buildDemoBundle();
     const harness = createHarness(log);
 
     const result = await startup(harness.globals);
 
+    // Story 9.5: the scrub's range is the *clock*'s, which is the film's
+    // length plus every hitstop hold. A handle that only spanned the film
+    // would run out before the fight did, by exactly the amount of juice the
+    // Match contained.
     expect(harness.root.attribute(TIMELINE, 'max')).toBe(
-      String((result?.mounted.film.frames.length ?? 0) - 1),
+      String((result?.mounted.frameCount ?? 0) - 1),
+    );
+    expect(result?.mounted.frameCount ?? 0).toBeGreaterThan(
+      result?.mounted.film.frames.length ?? 0,
     );
   });
 
@@ -943,7 +955,19 @@ describe('the timeline scrub (4.5)', () => {
 
     expect(atMiddle).not.toBe(atStart);
     expect(atMiddle).not.toContain('agent-0-tick-0');
-    expect(atMiddle).toContain('Tick 360');
+    // The readout is derived, not hard-coded. Story 9.5's hitstop means clock
+    // frame 150 is *not* film frame 150 any more, and how far behind it runs
+    // is a function of the juice tuning -- so pinning a literal tick here
+    // would make an unrelated tuning edit fail this scrub test with a message
+    // about the wrong subject. What this case is actually about is that the
+    // seek is exact: whatever film frame clock frame 150 presents, that is the
+    // Decision Point the readout names.
+    const filmIndex = result?.mounted.filmIndexAt(150) ?? 0;
+    const decisionPoint = result?.mounted.film.frames[filmIndex]?.decisionPoint ?? 0;
+    const { ticksPerDecision } = DEFAULT_FIGHTER_CONFIG;
+    expect(atMiddle).toContain(`Tick ${String(decisionPoint * ticksPerDecision)}`);
+    // And that the hold is real: the clock has run ahead of the film.
+    expect(filmIndex).toBeLessThan(150);
   });
 
   it('gives each card its own Agent Decision Point, never the other one', async () => {
@@ -1005,7 +1029,8 @@ describe('the timeline scrub (4.5)', () => {
     const harness = createHarness(log);
 
     const result = await startup(harness.globals);
-    harness.runFrames(result?.mounted.film.frames.length ?? 0);
+    // The clock's range, not the film's -- see Story 9.5's hitstop note above.
+    harness.runFrames(result?.mounted.frameCount ?? 0);
     expect(result?.mounted.clock.isRunning()).toBe(false);
 
     harness.root.fire('[data-toggle]', 'click');
