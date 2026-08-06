@@ -6,11 +6,17 @@
     "no rendering code changed. See docs/ASSETS.md for provenance.",
     "idle/walk repeat their 2 real frames (A,B,A,B) to meet the 4-frame",
     "minimum; attack/special phases borrow adjacent single-frame poses",
-    "(punch/kick/charge) duplicated to meet each phase's minimum."
+    "(punch/kick/charge) duplicated to meet each phase's minimum.",
+    "scale is 1, not the 3 the Martial Hero packs use. That 3 was derived for",
+    "a pack whose character fills roughly 80 of its 200 source pixels; these",
+    "frames are cropped tight and the character fills 171 of 208. Carried over",
+    "unchanged it drew a 513px fighter into a 400px arena -- the two fighters",
+    "overlapped and both ran off the top of the canvas. Re-derive this per pack",
+    "from the character's own pixel height, never by copying another pack's."
   ],
   "frameWidth": 208,
   "frameHeight": 208,
-  "scale": 3,
+  "scale": 1,
   "anchorY": 205,
   "clips": {
     "idle": {

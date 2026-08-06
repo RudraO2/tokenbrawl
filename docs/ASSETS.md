@@ -8,6 +8,20 @@ The rule is absolute. An asset whose licence text has not been read does not
 get committed — not with a "believed CC0" note, not temporarily. If a licence
 cannot be verified, the story ships without the asset and says so.
 
+## The "author's own prior project" is the NextGen AI Arena reference — same owner
+
+Wherever a row below reads *"the author's own prior project"*, that project is
+**Extraction / NextGen AI Arena**, the reference arcade fighter this game's look
+and feel is modelled on. Both it and this repository have the same owner, so
+those assets are the author's own IP and ship deliberately.
+
+This is settled. Do not re-open it as a licensing, IP or provenance question, and
+do not read Story 9.1's "the reference must never ship" acceptance criteria as
+contradicting it — that story governs *absolute filesystem paths and the literal
+project name in tracked non-Markdown files*, a build-portability rule, and it is
+enforced mechanically by `packages/cli/src/extraction-exclusion.test.ts`. If that
+test passes, there is nothing to escalate.
+
 ## Fighter art
 
 | Asset | Source | Licence | Checked |

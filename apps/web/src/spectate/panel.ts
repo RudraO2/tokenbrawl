@@ -1,7 +1,8 @@
 import { DEFAULT_FIGHTER_CONFIG } from '../../../../packages/env-fighter/src/config';
 import { createFighterEnvironment } from '../../../../packages/env-fighter/src/environment';
 import { escapeHtml, type CanvasSurface, type HostView } from '../main';
-import { createBlockArtist } from '../render/artist';
+import { createBlockArtist, type FighterArtist } from '../render/artist';
+import type { Backdrop } from '../render/backdrop';
 import { drawFrame } from '../render/renderer';
 import {
   fetchSpectateManifest,
@@ -74,6 +75,18 @@ export interface SpectatePanelDeps {
 export interface SpectatePanel {
   readonly currentEntryId: () => string | null;
   readonly pick: (entryId: string) => void;
+  /**
+   * Dresses one fighter, exactly as `MountedApp.setArtist` dresses the player's.
+   *
+   * This panel draws its own canvas rather than going through `renderApp`, and
+   * before Story 9.3's asset wiring landed that meant it never saw the sprite
+   * packs and backdrop `startup.ts` decodes: it hard-coded the block artist and
+   * passed no scenery, so the ambient stream played as coloured rectangles on
+   * flat ground while the player beside it ran the real art. The packs belong to
+   * the *page*, not to whichever surface happened to request them.
+   */
+  readonly setArtist: (agentIndex: 0 | 1, artist: FighterArtist) => void;
+  readonly setBackdrop: (backdrop: Backdrop) => void;
 }
 
 const CANVAS_WIDTH = 960;
@@ -149,6 +162,20 @@ export function mountSpectatePanel(host: SpectateHost, deps: SpectatePanelDeps):
   const blockArtist = createBlockArtist();
   const env = createFighterEnvironment();
 
+  /**
+   * The art, swapped in as it decodes. Mirrors `startup.ts`'s own `dressing`
+   * and for the same reason: the packs arrive after the first frame is already
+   * painted, so every slot starts empty and the block artist covers the gap.
+   *
+   * Both slots are filled explicitly rather than left sparse -- `drawFrame`
+   * falls back from a missing index to index 0, so a half-filled array would
+   * dress both fighters in pack one.
+   */
+  const dressing: {
+    artists: [FighterArtist, FighterArtist];
+    backdrop: Backdrop | undefined;
+  } = { artists: [blockArtist, blockArtist], backdrop: undefined };
+
   const say = (message: string): void => {
     status.innerHTML = escapeHtml(message);
   };
@@ -172,7 +199,8 @@ export function mountSpectatePanel(host: SpectateHost, deps: SpectatePanelDeps):
     drawFrame(ctx, frame, {
       config: DEFAULT_FIGHTER_CONFIG,
       viewport,
-      artists: [blockArtist, blockArtist],
+      artists: dressing.artists,
+      backdrop: dressing.backdrop,
     });
   };
 
@@ -280,6 +308,14 @@ export function mountSpectatePanel(host: SpectateHost, deps: SpectatePanelDeps):
     currentEntryId: (): string | null => state.walk?.currentEntryId() ?? null,
     pick: (entryId: string): void => {
       play(entryId);
+    },
+    // No repaint is forced here. The walk drives its own animation frame, so
+    // the next `paint` -- at most one frame away -- already reads these.
+    setArtist: (agentIndex: 0 | 1, artist: FighterArtist): void => {
+      dressing.artists[agentIndex] = artist;
+    },
+    setBackdrop: (backdrop: Backdrop): void => {
+      dressing.backdrop = backdrop;
     },
   });
 }

@@ -6,6 +6,12 @@ Stories are executed in the order below. Each is self-contained: an agent with n
 
 **Exit gate, identical for every story:** `npm test` green **AND** `bash scripts/audit-invariants.sh` exiting zero. A reviewer saying "looks good" is not a gate.
 
+**Visual gate, for every story that changes what the page looks like** (rendering, sprites, layout, HUD, VFX, audio-with-picture): the suite is **not** sufficient. Start the dev server, load the page, screenshot **all three rendering surfaces** — the replay player (`#app`), Arcade (`#arcade`) and Spectate (`#spectate`) — compare against the NextGen reference project's `shots/`, and record the finding in the story file. Screenshot all three even when the story names only one.
+
+*Why this rule exists.* Three defects shipped in Epic 9 with a fully green suite and were found by hand only afterwards: a sprite `scale: 3` that drew a 474px fighter into a 400px canvas; a Spectate panel that rendered coloured blocks on flat black because no artist or backdrop was ever wired to it; and a "four-character roster" story that wired two of four packs. The suite asserts canvas **call sequences**, and a wrong scale, a missing backdrop and an unwired asset all produce a perfectly valid call sequence — it is structurally incapable of catching this class of defect. `apps/web/src/render/artist.ts` already carried the lesson before this rule existed: *"Found by looking at the page during Story 4.3, not by any test."*
+
+A skipped visual check is **never** a pass. If no browser automation is available, say so and leave the story open. See `docs/stories/10.1-visual-verification-gate.md` and the runbook at `docs/VISUAL-CHECK.md`.
+
 **Frozen contracts.** Everything in `docs/contracts/` is frozen. A story that appears to require changing one must **stop and escalate**, never widen the interface — every parallel agent is building against it.
 
 **Review discipline.** Each story is reviewed by an agent with no context of having written the code. An agent reviewing its own work rubber-stamps it. Maximum three fix-and-re-review cycles, then escalate.
@@ -59,6 +65,13 @@ Stories are executed in the order below. Each is self-contained: an agent with n
 | 9.6 three-bus audio layer | E9 | 4.1, 9.1 | `(v2)` |
 | 9.7 four-character custom roster | E9 | 9.1 | `(v2)` |
 | 9.8 marketing landing page | E9 | 9.2, 9.3, 9.4, 7.2 | `(v2)` Capstone — exit gate includes a live UJ-5 walkthrough, not just engineering checks |
+| **10.1 visual verification gate** | E10 | — | `(v2)` **Goes first.** Guards every story below it — read its "why" section |
+| 10.2 Ultimate costs the whole bar | E10 | 10.1 | `(v2)` Balance change. Hashes change deliberately; no contract change |
+| 10.3 Super Gauge | E10 | 10.1, 10.2 | `(v2)` Hash-neutral |
+| 10.4 Ultimate cinematic | E10 | 10.1, 10.2, 9.5 | `(v2)` Highest translate-vs-reimplement risk — read the story's standing rule |
+| 10.5 Ultimate audio | E10 | 10.1, 10.2, 9.6 | `(v2)` Hash-neutral |
+| 10.6 Arcade Ultimate key (`L`) | E10 | 10.2, 10.3 | `(v2)` Cannot be verified by unit test alone |
+| **10.7 Ultimate skill-separation re-gate** | E10 | 10.2 | `(v2)` **Closes E10.** Escalate on failure; never lower the thresholds |
 
 **E6 (MicroRTS) has no stories.** It is optional and deferred; revisit once E7 publishes its first tournament and the site is live.
 

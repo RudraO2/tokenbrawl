@@ -587,20 +587,41 @@ export async function startup(globals: BrowserGlobals): Promise<StartupResult | 
       return mounted;
     };
 
+    /**
+     * The Spectate panel, once it exists.
+     *
+     * Held in a box rather than read from a `const` because the upgrade
+     * closures below are created *before* `mountSpectate` runs, and a decoded
+     * pack has to reach whichever surfaces are on screen when it lands. The
+     * panel draws its own canvas outside `renderApp`, so unlike BYOK and Arcade
+     * -- which re-mount through `mount` and are dressed by it at line ~577 --
+     * nothing else would ever hand it the art.
+     */
+    const panels: { spectate: SpectatePanel | null } = { spectate: null };
+
+    /** Records a decoded pack on the page and pushes it to every live surface. */
+    const dressArtist = (agentIndex: 0 | 1, artist: FighterArtist): void => {
+      dressing.artists[agentIndex] = artist;
+      player.mounted.setArtist(agentIndex, artist);
+      panels.spectate?.setArtist(agentIndex, artist);
+    };
+    const dressBackdrop = (backdrop: Backdrop): void => {
+      dressing.backdrop = backdrop;
+      player.mounted.setBackdrop(backdrop);
+      panels.spectate?.setBackdrop(backdrop);
+    };
+
     const upgrades: Promise<void>[] = SPRITE_LAYOUT_URLS.map(async (url, index) => {
       const artist = await loadArtist(globals, url);
       if (artist !== undefined) {
-        const agentIndex = index as 0 | 1;
-        dressing.artists[agentIndex] = artist;
-        player.mounted.setArtist(agentIndex, artist);
+        dressArtist(index as 0 | 1, artist);
       }
     });
     upgrades.push(
       (async (): Promise<void> => {
         const backdrop = await loadBackdrop(globals);
         if (backdrop !== undefined) {
-          dressing.backdrop = backdrop;
-          player.mounted.setBackdrop(backdrop);
+          dressBackdrop(backdrop);
         }
       })(),
     );
@@ -622,6 +643,22 @@ export async function startup(globals: BrowserGlobals): Promise<StartupResult | 
     const spectatePanel = mountSpectate(globals, () => {
       sink?.unlock();
     });
+    panels.spectate = spectatePanel;
+    // Adopt whatever already landed. The upgrades started before this mount, so
+    // on a warm cache a pack can resolve first and would otherwise be recorded
+    // in `dressing` and pushed to nobody -- Spectate would then play as blocks
+    // for the whole session precisely when the assets loaded *fastest*.
+    if (spectatePanel !== null) {
+      for (const agentIndex of [0, 1] as const) {
+        const artist = dressing.artists[agentIndex];
+        if (artist !== undefined) {
+          spectatePanel.setArtist(agentIndex, artist);
+        }
+      }
+      if (dressing.backdrop !== undefined) {
+        spectatePanel.setBackdrop(dressing.backdrop);
+      }
+    }
     const landingPanel = mountLanding(globals, arcadePanel, () => {
       sink?.unlock();
     });
