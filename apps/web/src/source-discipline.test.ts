@@ -137,6 +137,14 @@ describe('shipped player source discipline', () => {
         // rather than merely happening to walk them.
         'render/juice.ts',
         'render/juice-draw.ts',
+        // Story 9.6. Audio is the second thing in this app with an obvious
+        // reason to schedule, and it comes with its own clock built into the
+        // platform: `AudioContext.currentTime` is what every WebAudio tutorial
+        // ramps a gain and schedules a source against. Naming these two files
+        // here asserts the sweep *covers* them rather than merely happening to
+        // walk them.
+        'render/audio.ts',
+        'render/audio-bus.ts',
       ]),
     );
     expect(paths.every((path) => !path.endsWith('.test.ts'))).toBe(true);
@@ -147,8 +155,15 @@ describe('shipped player source discipline', () => {
     // for any of these to appear on the render path, and each of them is a
     // one-line edit away from making a Match's playback depend on how long a
     // Deployment took to think.
+    //
+    // `currentTime` joins them in Story 9.6. It is the audio-shaped way to
+    // re-introduce exactly the clock this sweep exists to forbid: the idiomatic
+    // WebAudio mix ramps a gain with `setTargetAtTime(x, ctx.currentTime, tau)`
+    // and schedules a source at `ctx.currentTime + delay`, and both of those are
+    // wall-clock reads wearing an audio hat. Gains are assigned and sources
+    // start at `0` instead.
     const wallClock =
-      /\b(Date\.now|performance\.now|new Date\(|Date\.parse|process\.hrtime|setInterval|setTimeout)\b/;
+      /\b(Date\.now|performance\.now|new Date\(|Date\.parse|process\.hrtime|setInterval|setTimeout|currentTime)\b/;
     expect(offendingLines(wallClock, WALL_CLOCK_EXEMPT)).toStrictEqual([]);
   });
 

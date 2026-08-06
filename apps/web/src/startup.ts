@@ -6,6 +6,7 @@ import { escapeHtml, renderApp, type HostView, type MountPoint, type MountedApp 
 import { validateReasoningSidecar } from './replay/sidecar';
 import { createSpriteArtist, type FighterArtist } from './render/artist';
 import { createBackdrop, validateBackdropLayout, type Backdrop } from './render/backdrop';
+import { createAudioBus, type AudioContextLike, type AudioFetchResponse } from './render/audio-bus';
 import { createSpriteSheet, validateSpriteSheetLayout } from './render/sprite-sheet';
 import { mountSpectatePanel, type SpectateHost, type SpectatePanel } from './spectate/panel';
 
@@ -92,6 +93,17 @@ export interface BrowserGlobals {
    * both as "there is nowhere to remember a key", which is the safe reading.
    */
   readonly localStorage?: KeyStorage;
+  /**
+   * The browser's WebAudio constructor (Story 9.6). Absent in a test, absent in
+   * an environment with no WebAudio at all, and `createAudioBus` answers both
+   * with `null` -- a player mounted with no sink is silent and identical in
+   * every other respect.
+   *
+   * Declared structurally for the same reason `window` is a `HostView` here
+   * rather than a `Window`: `tsconfig.base.json` has no DOM lib and must not
+   * gain one.
+   */
+  readonly AudioContext?: new () => AudioContextLike;
 }
 
 export interface StartupResult {
@@ -363,7 +375,7 @@ function mountArcade(
  * its own film/clock sequence entirely (`spectate/walk.ts`) rather than
  * replacing the `#app` player.
  */
-function mountSpectate(globals: BrowserGlobals): SpectatePanel | null {
+function mountSpectate(globals: BrowserGlobals, onGesture: () => void): SpectatePanel | null {
   const host = globals.document?.querySelector('#spectate');
   const view = globals.window;
   if (host == null || view == null || globals.fetch == null) {
@@ -372,6 +384,10 @@ function mountSpectate(globals: BrowserGlobals): SpectatePanel | null {
   try {
     return mountSpectatePanel(host as unknown as SpectateHost, {
       view,
+      // Story 9.6: this panel plays nothing, but a visitor whose only gesture
+      // is picking a Match here would otherwise leave the player's audio
+      // context suspended for the rest of the session.
+      onGesture,
       // Not `globals.fetch` handed through directly: a real browser's
       // `fetch` is a WebIDL operation branded to `Window`, and extracting it
       // as a bare reference detaches that binding. `startup.ts`'s own
@@ -457,7 +473,27 @@ export async function startup(globals: BrowserGlobals): Promise<StartupResult | 
       artists: (FighterArtist | undefined)[];
       backdrop: Backdrop | undefined;
     } = { artists: [undefined, undefined], backdrop: undefined };
-    const player: { mounted: MountedApp } = { mounted: renderApp(root, log, view) };
+    /**
+     * The audio graph, built once and held outside any one mount (Story 9.6),
+     * for exactly the reason the dressing above is: a BYOK or Arcade Match
+     * re-mounts the player, and the three buses belong to the *page*. Building
+     * a context per mount would leave every previous Match's graph alive and
+     * ungovernable.
+     *
+     * `null` on a browser with no WebAudio, and `null` under test. The cast is
+     * the boundary one: `startup.ts` describes a response as the shape *it*
+     * needs (`json()`), and the audio loader needs a different one
+     * (`arrayBuffer()`). One lookup cannot be typed as two structural shapes at
+     * once; the real `Response` satisfies both, and the loader treats a missing
+     * method as one more absent cue.
+     */
+    const sink = createAudioBus({
+      AudioContext: globals.AudioContext,
+      fetch: (url: string) =>
+        globals.fetch!(url) as unknown as Promise<AudioFetchResponse>,
+    });
+
+    const player: { mounted: MountedApp } = { mounted: renderApp(root, log, view, sink) };
 
     /** Re-mounts the player on a new log, stopping the old clock first. */
     const mount = (nextLog: CommandLog): MountedApp => {
@@ -465,7 +501,13 @@ export async function startup(globals: BrowserGlobals): Promise<StartupResult | 
       // alive, painting a canvas that is no longer in the document -- two
       // fights running at once, one of them invisible.
       player.mounted.clock.stop();
-      const mounted = renderApp(root, nextLog, view);
+      // A re-mount is always downstream of a gesture in a panel `main.ts` does
+      // not bind (BYOK's Run, Arcade's Play), so this is where those gestures
+      // reach the audio context. `mountPlayer` stops the outgoing Match's
+      // sources; this resumes a context that was never unlocked.
+      sink?.unlock();
+      // The same sink, not a new one: one graph per page (Story 9.6).
+      const mounted = renderApp(root, nextLog, view, sink);
       for (const agentIndex of [0, 1] as const) {
         const artist = dressing.artists[agentIndex];
         if (artist !== undefined) {
@@ -517,7 +559,9 @@ export async function startup(globals: BrowserGlobals): Promise<StartupResult | 
       dressed: Promise.all(upgrades).then(() => undefined),
       byok: mountByok(globals, mount),
       arcade: mountArcade(globals, mount),
-      spectate: mountSpectate(globals),
+      spectate: mountSpectate(globals, () => {
+        sink?.unlock();
+      }),
       current: (): MountedApp => player.mounted,
       showLog: mount,
     };

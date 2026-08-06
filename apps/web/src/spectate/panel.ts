@@ -60,6 +60,15 @@ export interface SpectatePanelDeps {
   readonly now?: () => number;
   /** Injectable so a test can supply a manifest with no network at all. */
   readonly loadManifest?: (fetchImpl: FetchLike) => Promise<SpectateManifest>;
+  /**
+   * Called on the visitor's gesture here (Story 9.6).
+   *
+   * This panel plays no audio of its own, so the hook exists for the *page*:
+   * browsers keep an audio context suspended until a gesture, and a visitor
+   * whose only interaction is picking a Match to Spectate would otherwise leave
+   * the player's context suspended for the whole session.
+   */
+  readonly onGesture?: () => void;
 }
 
 export interface SpectatePanel {
@@ -196,6 +205,7 @@ export function mountSpectatePanel(host: SpectateHost, deps: SpectatePanelDeps):
       // closes that gap the same way `escapeHtml` does for the markup above.
       const button = host.querySelector(`[data-spectate-pick="${escapeAttributeSelector(entry.id)}"]`);
       button?.addEventListener('click', () => {
+        deps.onGesture?.();
         // A visitor clicking twice fast (or clicking while a previous pick is
         // still loading) is handled entirely by `walk.ts`'s own generation
         // guard: the second call simply supersedes the first, and the first's

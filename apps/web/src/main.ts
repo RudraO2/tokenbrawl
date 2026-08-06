@@ -20,6 +20,12 @@ import type { Backdrop } from './render/backdrop';
 import { createIdentityArtist, deriveVisualIdentity } from './render/identity';
 import { DEFAULT_JUICE_TUNING, arenaFor, buildJuiceTrack } from './render/juice';
 import { drawJuicedFrame } from './render/juice-draw';
+import {
+  DEFAULT_AUDIO_TUNING,
+  buildAudioTrack,
+  createAudioDirector,
+  type AudioSink,
+} from './render/audio';
 import './styles/app.css';
 
 /**
@@ -185,6 +191,13 @@ export function mountPlayer(
   view: HostView,
   /** Called after every paint, so a panel showing per-Decision-Point data can follow playback. */
   onPaint?: (frameIndex: number) => void,
+  /**
+   * Story 9.6. Optional, and optional is the design: a page with no WebAudio,
+   * and every existing test, passes nothing and gets a player that behaves
+   * identically in every respect except that it is silent. That is also the
+   * configuration `audio-neutrality.test.ts` compares the attached one against.
+   */
+  sink?: AudioSink | null,
 ): MountedPlayer {
   const env = createFighterEnvironment();
   const film = buildReplayFilm(log, env);
@@ -285,6 +298,21 @@ export function mountPlayer(
     prefersReducedMotion(view),
   );
 
+  /**
+   * Story 9.6. The audio for this film, indexed on the *same* clock frames the
+   * juice track is -- built from that track rather than from a second diff of
+   * the film, because 9.5 and 9.6 must not each own a timer source.
+   *
+   * The director, not the track, is what knows the difference between playing
+   * and jumping: it re-applies bus gains on every frame and fires one-shots only
+   * on an ordinary forward advance, so scrubbing across a KO re-states the duck
+   * correctly and fires nothing.
+   */
+  const director = createAudioDirector({
+    track: buildAudioTrack(track, DEFAULT_AUDIO_TUNING),
+    sink,
+  });
+
   const paint = (index: number): void => {
     dressing.frameIndex = index;
     // Clock index in, film index out. With hitstop the two diverge, and this
@@ -313,6 +341,10 @@ export function mountPlayer(
       ],
       backdrop: dressing.backdrop,
     });
+    // Last, and after the draw: the audio describes the frame that is now on
+    // screen, and nothing in it may throw into the paint path -- every failure
+    // inside the sink is already a caught silence.
+    director.atFrame(index);
     onPaint?.(index);
   };
 
@@ -329,6 +361,13 @@ export function mountPlayer(
       paint(Math.min(Math.max(dressing.frameIndex, 0), track.frameCount - 1));
     }
   };
+
+  // The sink outlives this player: `startup.ts` builds one graph per page and
+  // hands the same one to every re-mount (BYOK, Arcade). Whatever the previous
+  // Match started -- above all its looping music bed -- is stopped here, before
+  // the first paint below starts this Match's, or each re-mount would layer
+  // another permanent bed over the last with nothing able to stop either.
+  sink?.stopAll();
 
   // Paint frame zero up front, so the stage is never blank while the first
   // animation frame is pending. This is the frame that has to arrive inside the
@@ -551,7 +590,19 @@ export function escapeHtml(value: string): string {
  * Wires the page. Kept a thin, obviously-correct sequence of DOM writes, with
  * every decision it displays computed by a pure function above.
  */
-export function renderApp(root: MountPoint, log: CommandLog, view: HostView): MountedApp {
+export function renderApp(
+  root: MountPoint,
+  log: CommandLog,
+  view: HostView,
+  /**
+   * Story 9.6. Threaded through rather than built here: one WebAudio graph per
+   * *page*, not one per Match, mirroring how `startup.ts` holds the sprite
+   * dressing outside any one mount. A BYOK or Arcade re-mount reuses the same
+   * three buses; building a second context per re-mount is how a page ends up
+   * with four fights' worth of gain nodes and no way to turn any of them down.
+   */
+  sink?: AudioSink | null,
+): MountedApp {
   // Each fighter target points at the panel with `aria-describedby`, so the
   // reasoning is reachable from the control that reveals it (4.3 AC5).
   //
@@ -745,8 +796,28 @@ export function renderApp(root: MountPoint, log: CommandLog, view: HostView): Mo
     // rather than an `innerHTML` write per frame.
     renderPanel();
     syncTimeline(frameIndex);
-  });
+  }, sink);
   shell.ready = true;
+
+  /**
+   * Resumes a suspended audio context on any gesture this *player* binds
+   * (Story 9.6).
+   *
+   * Browsers gate audio behind a gesture, so there is no honest way to start the
+   * music bed on load -- and no desire to: autoplaying sound at a visitor is the
+   * behaviour the gate exists to prevent. The five bound here are the transport
+   * buttons, the scrub and the two fighter targets.
+   *
+   * They are not the only controls on the page. `startup.ts` also mounts the
+   * BYOK, Arcade and Spectate panels, each with its own buttons, and a visitor
+   * whose first and only interaction is one of those would otherwise leave the
+   * context suspended for the whole session -- so `startup.ts` unlocks from its
+   * side too, on the re-mount those panels trigger and on the Spectate panel's
+   * own gesture hook.
+   */
+  const unlockAudio = (): void => {
+    sink?.unlock();
+  };
   // After `mountPlayer`, never before: this walks `log.decisions`, and
   // `replayCommandLog` (reached through `mountPlayer`) is what establishes that
   // the document is a version this player understands at all (AD-3).
@@ -789,6 +860,7 @@ export function renderApp(root: MountPoint, log: CommandLog, view: HostView): Mo
      * position that holds still long enough to be read.
      */
     const select = (): void => {
+      unlockAudio();
       if (selection.agentIndex === null) {
         selection.resumeOnRelease = mounted.clock.isRunning();
       }
@@ -877,6 +949,7 @@ export function renderApp(root: MountPoint, log: CommandLog, view: HostView): Mo
    * let go.
    */
   timeline.addEventListener('input', () => {
+    unlockAudio();
     // `seek` emits the frame, which reaches `paint` and therefore `onPaint`,
     // which redraws the panel and the readout. Only the announcement needs
     // asking for here: it is deliberately not on the paint path, because a
@@ -886,6 +959,7 @@ export function renderApp(root: MountPoint, log: CommandLog, view: HostView): Mo
   });
 
   toggle.addEventListener('click', () => {
+    unlockAudio();
     if (mounted.clock.isRunning()) {
       mounted.clock.stop();
     } else if (mounted.clock.frameIndex() >= mounted.frameCount - 1) {
@@ -902,6 +976,7 @@ export function renderApp(root: MountPoint, log: CommandLog, view: HostView): Mo
   });
 
   play.addEventListener('click', () => {
+    unlockAudio();
     // Clears the reading selection too. Without this a visitor who tapped a
     // fighter (touch selections are sticky, by design) and then pressed Replay
     // would watch the fight restart with `resumeOnRelease` still armed, and the

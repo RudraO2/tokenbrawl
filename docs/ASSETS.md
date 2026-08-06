@@ -90,6 +90,67 @@ origin, or over-runs its own image.
 frames generously and never agree on how much; get it wrong and the fighter
 floats above the floor or sinks through it.
 
+## Audio
+
+**No audio asset ships in this repository yet, and none is committed by Story
+9.6.** The rule at the top of this file is absolute: an asset whose licence text
+has not been read does not land. Story 9.7 owns the roster's SFX and voice sets
+and will record each one here with its generator, the date, and the prompt it
+was generated from, exactly as it does for the fighter art.
+
+So the shipped player runs the whole audio graph and plays nothing. That is not
+an oversight being deferred — it is the fail-soft path the story requires,
+exercised on every page load rather than only in a test: every cue 404s, each
+missing name is warned about once, cached as absent, and never fetched again,
+and the Match keeps playing silently. Exactly the shape `loadArtist` and
+`loadBackdrop` already use for a sprite pack that will not decode.
+
+### Bus layout
+
+Three independent WebAudio `GainNode`s, each connected straight to
+`destination`, so moving one leaves the other two untouched:
+
+| Bus | What goes on it | Base level | Ducked to |
+|---|---|---|---|
+| `music` | one looping bed, started at clock frame 0 | 0.80 | 0.25 under a voice line |
+| `sfx` | one-shot per hit, heavy hit and KO | 1.00 | — |
+| `voice` | one-shot per KO | 1.00 | — |
+
+Levels are tuned as integer basis points in
+`apps/web/src/render/audio.ts`'s `DEFAULT_AUDIO_TUNING`; the single division
+into a float happens at the `GainNode` boundary in `audio-bus.ts`. Every
+duration in the mix — the duck window, the per-fighter voice rate limit — is an
+integer count of *clock* frames, never milliseconds, so the sound of a Match is
+identical on a 60Hz laptop, a 144Hz monitor and a backgrounded tab (INV-1,
+INV-3).
+
+### Cue name → filename
+
+A cue carries a name, not a URL. `audio-bus.ts` resolves it to
+`apps/web/public/audio/<name>.mp3`, served from this origin — no CDN, for the
+same reason the typefaces are self-hosted: the site must render identically
+offline and in CI.
+
+The names the shipped tuning asks for:
+
+| Cue | Bus | File |
+|---|---|---|
+| `music_battle` | music | `public/audio/music_battle.mp3` |
+| `sfx_hit_l` | sfx | `public/audio/sfx_hit_l.mp3` |
+| `sfx_hit_h` | sfx | `public/audio/sfx_hit_h.mp3` |
+| `sfx_ko` | sfx | `public/audio/sfx_ko.mp3` |
+| `vo_ko` | voice | `public/audio/vo_ko.mp3` |
+
+Adding a sound is dropping a file at its path and recording it in the table
+above with its source, licence and the date the licence was read. Nothing in
+`apps/web/src` changes; a name with no file behind it is silent, and a file with
+no name asking for it is never fetched.
+
+Audio can be auditioned before Story 9.7 lands without committing anything:
+`apps/web/src/dev/local-sprites.ts` already serves `.mp3`/`.wav`/`.ogg` from the
+gitignored dev-reference config, which is a Vite dev-server plugin and is
+structurally absent from `vite build`'s output.
+
 ## Command Logs
 
 | Asset | Source | Licence | Checked |
