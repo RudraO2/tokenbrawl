@@ -853,3 +853,114 @@ body {
     transition: none;
   }
 }
+
+/* --- Story 9.8: the landing page --------------------------------------- */
+
+.tb-landing {
+  border-bottom: var(--tb-border-width) solid var(--tb-ink);
+  padding-bottom: var(--tb-space-4);
+  margin-bottom: var(--tb-space-4);
+}
+
+.tb-landing-hero {
+  padding: var(--tb-space-3) 0;
+}
+
+.tb-landing-title {
+  margin: 0 0 var(--tb-space-2);
+  font-size: clamp(48px, 9vw, 120px);
+  font-weight: 800;
+  letter-spacing: var(--tb-tracking-display);
+  text-transform: uppercase;
+  line-height: 0.9;
+}
+
+.tb-landing-tagline {
+  margin: 0 0 var(--tb-space-2);
+  font-family: var(--tb-font-mono);
+  color: var(--tb-accent);
+  text-transform: uppercase;
+}
+
+.tb-landing-pitch {
+  max-width: 60ch;
+  margin: 0 0 var(--tb-space-3);
+  color: var(--tb-ink);
+}
+
+.tb-landing-cta-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--tb-space-2);
+}
+
+.tb-landing-section-heading {
+  margin: 0 0 var(--tb-space-2);
+  font-size: clamp(24px, 4vw, 36px);
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.tb-landing-carousel,
+.tb-landing-leaderboard {
+  margin-bottom: var(--tb-space-4);
+}
+
+/* --- The clip carousel: a scrollable strip of committed videos, never a canvas. */
+
+.tb-carousel-list {
+  display: flex;
+  gap: var(--tb-space-2);
+  overflow-x: auto;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tb-carousel-item {
+  flex: 0 0 auto;
+  border: var(--tb-border-width) solid var(--tb-ink);
+  box-shadow: var(--tb-shadow);
+}
+
+.tb-carousel-video {
+  display: block;
+  width: 320px;
+  height: 180px;
+}
+
+.tb-carousel-empty {
+  border: var(--tb-border-width) solid var(--tb-ink);
+  padding: var(--tb-space-3);
+  color: var(--tb-muted);
+  font-family: var(--tb-font-mono);
+}
+
+/* --- The leaderboard view: a ranked table read from the committed report. */
+
+.tb-leaderboard-headline {
+  border: var(--tb-border-width) solid var(--tb-warn);
+  box-shadow: var(--tb-shadow-warn);
+  padding: var(--tb-space-2);
+  margin: 0 0 var(--tb-space-2);
+  font-weight: 800;
+}
+
+.tb-leaderboard-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--tb-font-mono);
+}
+
+.tb-leaderboard-cell {
+  border: var(--tb-border-width) solid var(--tb-ink);
+  padding: var(--tb-space-1) var(--tb-space-2);
+  text-align: left;
+}
+
+.tb-leaderboard-empty {
+  border: var(--tb-border-width) solid var(--tb-ink);
+  padding: var(--tb-space-3);
+  color: var(--tb-muted);
+  font-family: var(--tb-font-mono);
+}

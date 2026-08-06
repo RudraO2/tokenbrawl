@@ -222,6 +222,15 @@ function createHarness(
         if (selector === '#spectate') {
           return options.noSpectateHost === true ? null : spectateHost;
         }
+        // Story 9.8's landing page. Not what this suite's fixtures below are
+        // about (they predate it), and no `#landing` host exists in this
+        // harness -- returning `null` here is exactly "a page with no
+        // landing panel", the same reading `noByokHost`/`noArcadeHost`/
+        // `noSpectateHost` give their own panel when absent, and it keeps a
+        // fourth panel from silently sharing `root` with `#app`.
+        if (selector === '#landing') {
+          return null;
+        }
         return root;
       },
     },

@@ -51,6 +51,14 @@
     </style>
   </head>
   <body>
+    <!--
+      Story 9.8's landing page, the default above-the-fold view (UJ-5). It
+      sits before #app in document order so a first-time visitor with no
+      context reads the pitch, the clip carousel and the leaderboard before
+      the replay player -- and its two CTAs are wired to the existing
+      #arcade/#spectate panels rather than duplicating what they do.
+    -->
+    <section class="tb-landing" id="landing"></section>
     <div id="app"></div>
     <!--
       Story 4.6's BYOK panel, deliberately outside #app. `renderApp` rewrites

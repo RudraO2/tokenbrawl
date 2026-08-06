@@ -9,6 +9,7 @@ import { createBackdrop, validateBackdropLayout, type Backdrop } from './render/
 import { createAudioBus, type AudioContextLike, type AudioFetchResponse } from './render/audio-bus';
 import { createSpriteSheet, validateSpriteSheetLayout } from './render/sprite-sheet';
 import { mountSpectatePanel, type SpectateHost, type SpectatePanel } from './spectate/panel';
+import { mountLandingPanel, type LandingHost, type LandingPanel } from './landing/panel';
 
 /**
  * Story 4.2: the bootstrap, and the order it does things in.
@@ -128,6 +129,11 @@ export interface StartupResult {
    * (Story 9.3). Exposed for the same reason `byok` and `arcade` are.
    */
   readonly spectate: SpectatePanel | null;
+  /**
+   * The landing page, or `null` when the page has no `#landing` host (Story
+   * 9.8). Exposed for the same reason `byok`, `arcade` and `spectate` are.
+   */
+  readonly landing: LandingPanel | null;
   /** The player currently on screen. Changes when a BYOK Match replaces the demo. */
   readonly current: () => MountedApp;
   /**
@@ -414,6 +420,63 @@ function mountSpectate(globals: BrowserGlobals, onGesture: () => void): Spectate
   }
 }
 
+/** The optional structural shape a landing CTA needs of its scroll target -- nothing else. */
+interface ScrollableNode {
+  scrollIntoView?(): void;
+}
+
+/**
+ * Mounts the landing page, or returns `null` when this page has no host for
+ * it. Mirrors `mountByok`/`mountArcade`/`mountSpectate`'s warn-not-throw
+ * shape: the pitch is an entry point, not the page's central claim, so a
+ * browser that could not start it must still show the demo replay beneath.
+ *
+ * The two CTAs are deliberately thin here: "Play vs CPU" calls the real
+ * Arcade panel's own `play()` (the same Match `arcadeMarkup`'s own button
+ * starts) and scrolls its section into view; "Watch Spectate" only scrolls,
+ * since the Spectate stream is already playing ambiently the moment its
+ * panel mounts. Neither duplicates panel logic -- `landing/panel.ts` never
+ * imports `ArcadePanel` or `SpectatePanel`, only these two callbacks.
+ */
+function mountLanding(
+  globals: BrowserGlobals,
+  arcade: ArcadePanel | null,
+  onGesture: () => void,
+): LandingPanel | null {
+  const host = globals.document?.querySelector('#landing');
+  if (host == null || globals.fetch == null) {
+    return null;
+  }
+  const scrollTo = (selector: string): void => {
+    const target = globals.document?.querySelector(selector) as unknown as ScrollableNode | null;
+    target?.scrollIntoView?.();
+  };
+  try {
+    return mountLandingPanel(host as unknown as LandingHost, {
+      fetch: (url: string) => globals.fetch!(url),
+      onWarning: (message) => {
+        warn('Landing page', message);
+      },
+      onPlayCta: () => {
+        onGesture();
+        if (arcade === null) {
+          warn('Landing page', 'Play vs CPU is unavailable: the Arcade panel did not mount.');
+        } else {
+          arcade.play();
+        }
+        scrollTo('#arcade');
+      },
+      onSpectateCta: () => {
+        onGesture();
+        scrollTo('#spectate');
+      },
+    });
+  } catch (error) {
+    warn('Landing panel unavailable', error);
+    return null;
+  }
+}
+
 /**
  * The house-style failure card. A player that fails silently looks identical to
  * one still loading.
@@ -555,16 +618,23 @@ export async function startup(globals: BrowserGlobals): Promise<StartupResult | 
       );
     }
 
+    const arcadePanel = mountArcade(globals, mount);
+    const spectatePanel = mountSpectate(globals, () => {
+      sink?.unlock();
+    });
+    const landingPanel = mountLanding(globals, arcadePanel, () => {
+      sink?.unlock();
+    });
+
     return {
       mounted: demoPlayer,
       // `then(() => undefined)` rather than the array: callers await completion,
       // not results, and every upgrade already handles its own failure.
       dressed: Promise.all(upgrades).then(() => undefined),
       byok: mountByok(globals, mount),
-      arcade: mountArcade(globals, mount),
-      spectate: mountSpectate(globals, () => {
-        sink?.unlock();
-      }),
+      arcade: arcadePanel,
+      spectate: spectatePanel,
+      landing: landingPanel,
       current: (): MountedApp => player.mounted,
       showLog: mount,
     };
