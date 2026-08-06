@@ -64,10 +64,38 @@ const HUD_TOP = 24;
 const HUD_BAR_HEIGHT = 20;
 const HUD_BAR_WIDTH = 320;
 const HUD_SIDE_INSET = 32;
-const METER_HEIGHT = 10;
 const METER_GAP = 8;
+/**
+ * Story 10.3. The Super Gauge's height, raised from the 10px it shipped at.
+ *
+ * Ten pixels drew a hairline the width of the health bar, in `theme.ink` --
+ * which is the colour every *border* and every *rule* on the canvas is drawn
+ * in. It read as a divider between the health bar and the readout beneath it,
+ * and a visitor had no reason to think it was a resource at all. Eighteen is
+ * deliberately short of the health bar's twenty: the gauge is a second thing
+ * being accumulated, not a second health bar, and it still leaves room for the
+ * armed state's word at the mono face's real size.
+ */
+const METER_HEIGHT = 18;
+const METER_TOP = HUD_TOP + HUD_BAR_HEIGHT + METER_GAP;
+/**
+ * Frames the armed gauge holds each half of its blink.
+ *
+ * Counted, never timed (INV-1, INV-3). Twelve is `FRAMES_PER_DECISION`, so one
+ * half-period is exactly one Decision Point and the blink stays locked to the
+ * fight's own cadence rather than to a refresh rate. The value is not imported
+ * from `replay/film.ts`: this is a presentation cadence that happens to agree
+ * with the film's, and coupling them would mean a later change to the film's
+ * sampling silently retuned the HUD.
+ *
+ * Because the phase is `frame.index`'s alone, a scrub to frame 90 draws the
+ * same half of the blink as a play-through that reaches frame 90 -- which is
+ * the property Story 4.5's seek-equals-play tests already assert over the whole
+ * film, and the reason this is a counter rather than a `Date`.
+ */
+const ARMED_PULSE_FRAMES = 12;
 /** Baseline of the `HP … MTR …` readout under the two simulation bars. */
-const HUD_LABEL_BASELINE = HUD_TOP + HUD_BAR_HEIGHT + METER_GAP + METER_HEIGHT + 20;
+const HUD_LABEL_BASELINE = METER_TOP + METER_HEIGHT + 20;
 /**
  * Story 4.4. The Token Bank sits at the bottom of the same stack, under health,
  * meter and their readout -- the two resources a fighter spends, then the one
@@ -247,6 +275,77 @@ function drawTokenBank(
 }
 
 /**
+ * Draws the Super Gauge for one fighter (Story 10.3).
+ *
+ * Two states, and the whole story is that they are *two*. Charging is an
+ * ordinary proportional bar. At the point the Ultimate becomes affordable the
+ * bar inverts to a solid `--tb-warn` block carrying the words ULTIMATE READY in
+ * ground ink -- the same warn-as-fill pattern `drawTokenBank` uses for REFLEX,
+ * borrowed on purpose rather than reinvented: the page has already taught a
+ * viewer that an inverted, filled bar with a word in it means a threshold has
+ * been crossed, and a second visual language for the same idea would have to
+ * teach it again.
+ *
+ * Red for a *good* thing is not a slip. `docs/DESIGN.md` reserves warn for the
+ * loud end of the palette, and this HUD is drawn for both fighters: an armed
+ * gauge on the far side is 22 damage the viewer cannot block. It is the alarm.
+ *
+ * The threshold read is `specialMeterCost`, not `maxMeter`, because
+ * ULTIMATE READY is a claim about the Action being legal and `specialMeterCost`
+ * is the number `legalActionsFor` actually gates on -- reading the same field is
+ * what stops the HUD asserting something the simulation would refuse. Story
+ * 10.2 set the two equal, so under the shipped config the gauge arms at exactly
+ * full and at no other value; a later story that lowers the cost gets a gauge
+ * that still tells the truth rather than one that goes quietly out of date.
+ *
+ * Nothing here is a duration. The blink counts `frame.index` and the level is
+ * read off state the simulation already produced, so the gauge is a pure
+ * function of the frame (INV-1, INV-3, AD-15). No `packages/` value is written,
+ * and no Final-State Hash can move because of anything in this function.
+ */
+function drawSuperGauge(
+  ctx: Canvas2D,
+  theme: Theme,
+  x: number,
+  meter: number,
+  config: FighterConfig,
+  frameIndex: number,
+): void {
+  if (meter >= config.specialMeterCost) {
+    ctx.fillStyle = theme.warn;
+    ctx.fillRect(x, METER_TOP, HUD_BAR_WIDTH, METER_HEIGHT);
+
+    // The one thing on the HUD that moves, and it moves by switching rather
+    // than by easing: the border alternates between ink and the live accent on
+    // a fixed frame count. A flat border swap is the only kind of pulse the
+    // house style leaves available -- a glow, a fade or a scale would each need
+    // something docs/DESIGN.md bans outright, and `style-discipline.test.ts`
+    // enforces the ban on translucency directly.
+    const lit = Math.floor(frameIndex / ARMED_PULSE_FRAMES) % 2 === 0;
+    ctx.strokeStyle = lit ? theme.accent : theme.ink;
+    ctx.lineWidth = theme.borderWidth;
+    ctx.strokeRect(x, METER_TOP, HUD_BAR_WIDTH, METER_HEIGHT);
+
+    ctx.fillStyle = theme.bg;
+    ctx.font = theme.monoFont;
+    ctx.textAlign = 'left';
+    ctx.fillText('ULTIMATE READY', x + METER_GAP, METER_TOP + METER_HEIGHT - theme.borderWidth);
+    return;
+  }
+
+  drawBar(
+    ctx,
+    theme,
+    x,
+    METER_TOP,
+    HUD_BAR_WIDTH,
+    METER_HEIGHT,
+    meter / config.maxMeter,
+    theme.ink,
+  );
+}
+
+/**
  * Draws one frame of the film.
  *
  * Order is fixed and asserted: clear, floor, both fighters, both HUD blocks.
@@ -336,16 +435,7 @@ export function drawFrame(ctx: Canvas2D, frame: RenderFrame, options: DrawFrameO
       agentIndex === 0 ? theme.accent : theme.warn,
     );
 
-    drawBar(
-      ctx,
-      theme,
-      x,
-      HUD_TOP + HUD_BAR_HEIGHT + METER_GAP,
-      HUD_BAR_WIDTH,
-      METER_HEIGHT,
-      frame.from.meter[agentIndex] / config.maxMeter,
-      theme.ink,
-    );
+    drawSuperGauge(ctx, theme, x, frame.from.meter[agentIndex], config, frame.index);
 
     ctx.fillStyle = theme.ink;
     ctx.font = theme.monoFont;

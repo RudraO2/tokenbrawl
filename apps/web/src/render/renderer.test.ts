@@ -203,6 +203,9 @@ describe('drawing a frame', () => {
     // HUD stacks populated, one Token Bank draining and one exhausted. Drawing
     // the plain frame here would have left Story 4.4's two new colour paths
     // outside the sweep entirely.
+    // Story 10.3 extends the same sweep to the armed Super Gauge: p1 is at
+    // exactly `maxMeter`, which is the one meter value that takes the
+    // warn-as-fill branch and the only one that ever sets an accent stroke.
     drawFrame(
       ctx,
       frameWith(
@@ -210,7 +213,7 @@ describe('drawing a frame', () => {
           committedAction: [COMMITTED_ATTACK, COMMITTED_SPECIAL],
           commitmentRemaining: [20, 40],
           health: [55, 12],
-          meter: [80, 15],
+          meter: [DEFAULT_FIGHTER_CONFIG.maxMeter, 15],
         }),
         stateWith(),
       ),
@@ -378,6 +381,191 @@ describe('the Token Bank meter (4.4)', () => {
     // hinting at how long a Deployment thought.
     const ctx = drawWithBanks([reading(12_500), reading(0)]);
     for (const text of texts(ctx)) {
+      expect(text).not.toMatch(/\b(ms|sec|second|per|rate|elapsed)\b/i);
+    }
+  });
+});
+
+/**
+ * Story 10.3: the Super Gauge.
+ *
+ * Before this story a meter at 18 and a meter at 100 drew the same 10px
+ * hairline in `theme.ink`, and the only way to tell an armed Ultimate from an
+ * empty one was to read the `MTR` number beside it. The suite could not have
+ * caught that -- both produce a perfectly valid call sequence -- so what is
+ * pinned here is the part that *is* mechanical: that the armed state is
+ * reachable at exactly one meter value, that it is a different sequence rather
+ * than a slightly longer bar, that its one moving part counts `frame.index`,
+ * and that Story 4.4's Token Bank row still sits clear beneath it.
+ *
+ * Appearance itself remains the visual gate's job (`docs/VISUAL-CHECK.md`).
+ */
+describe('the Super Gauge (10.3)', () => {
+  /** `HUD_SIDE_INSET` and `HUD_BAR_WIDTH`. Renderer-local, so mirrored rather than imported. */
+  const LEFT_INSET = 32;
+  const GAUGE_WIDTH = 320;
+  const FULL = DEFAULT_FIGHTER_CONFIG.maxMeter;
+
+  function drawMeter(
+    meter: number,
+    index = 0,
+    banks?: readonly (BankReading | null)[],
+  ): RecordingCanvas {
+    const ctx = createRecordingCanvas();
+    drawFrame(
+      ctx,
+      { ...frameWith(stateWith({ meter: [meter, 0] }), stateWith()), index },
+      { config: DEFAULT_FIGHTER_CONFIG, viewport: VIEWPORT, banks },
+    );
+    return ctx;
+  }
+
+  /**
+   * p1's HUD bars in draw order: health, gauge, and the Token Bank when one is
+   * supplied. Selected by the left inset *and* the bar width together -- a
+   * fighter's own border is a `strokeRect` too, and it is never 320 wide.
+   */
+  function hudBars(ctx: RecordingCanvas): readonly RecordedCall[] {
+    return ctx
+      .calls()
+      .filter(
+        (call) =>
+          call.op === 'strokeRect' && call.args[0] === LEFT_INSET && call.args[2] === GAUGE_WIDTH,
+      );
+  }
+
+  function gauge(ctx: RecordingCanvas): RecordedCall {
+    return hudBars(ctx)[1];
+  }
+
+  function texts(ctx: RecordingCanvas): readonly string[] {
+    return ctx
+      .calls()
+      .filter((call) => call.op === 'fillText')
+      .map((call) => String(call.args[0]));
+  }
+
+  it('is sized as a resource rather than as a rule (AC1)', () => {
+    // The defect this story exists for was a 10px hairline. The floor is set
+    // against the health bar beside it (20px): a gauge that reads as a third of
+    // its neighbour reads as a divider between two things, which is exactly what
+    // a visitor took it for.
+    expect(gauge(drawMeter(50)).args[3] as number).toBeGreaterThanOrEqual(16);
+  });
+
+  it('fills proportionally while charging (AC1)', () => {
+    const filledWidth = (meter: number): number => {
+      const ctx = drawMeter(meter);
+      const top = gauge(ctx).args[1];
+      const fill = ctx
+        .calls()
+        .find(
+          (call) =>
+            call.op === 'fillRect' &&
+            call.args[0] === LEFT_INSET &&
+            call.args[1] === top &&
+            call.fillStyle === THEME.ink,
+        );
+      return fill?.args[2] as number;
+    };
+
+    expect(filledWidth(25)).toBeGreaterThan(0);
+    expect(filledWidth(75)).toBeGreaterThan(filledWidth(25));
+    expect(filledWidth(75)).toBeLessThan(GAUGE_WIDTH);
+  });
+
+  it('arms at exactly full and at no other value (AC2)', () => {
+    expect(texts(drawMeter(FULL))).toContain('ULTIMATE READY');
+    expect(texts(drawMeter(FULL - 1)).some((text) => text.includes('ULTIMATE'))).toBe(false);
+  });
+
+  it('draws a full gauge as a different sequence, not as a longer bar (AC2)', () => {
+    // The property the test plan names: the armed state is actually reachable
+    // and actually distinct. A bar that merely reached its right edge would
+    // satisfy neither.
+    expect(drawMeter(FULL).calls()).not.toStrictEqual(drawMeter(FULL - 1).calls());
+  });
+
+  it('puts ground ink on the warn fill, never warn text on the ground (AC2)', () => {
+    // Same pair drawTokenBank uses for REFLEX, and for the same measured reason:
+    // --tb-warn on --tb-bg is 4.26:1 and misses the 4.5:1 floor.
+    const armed = drawMeter(FULL);
+
+    const label = armed
+      .calls()
+      .find((call) => call.op === 'fillText' && String(call.args[0]).includes('ULTIMATE'));
+    expect(label?.fillStyle).toBe(THEME.bg);
+
+    const inverted = armed
+      .calls()
+      .find(
+        (call) =>
+          call.op === 'fillRect' &&
+          call.args[0] === LEFT_INSET &&
+          call.args[2] === GAUGE_WIDTH &&
+          call.fillStyle === THEME.warn,
+      );
+    expect(inverted).toBeDefined();
+  });
+
+  it('pulses off the frame counter, never off a clock (AC3)', () => {
+    const stroke = (index: number): string => gauge(drawMeter(FULL, index)).strokeStyle;
+
+    // A replay seeked to the same frame twice must draw the identical gauge.
+    expect(drawMeter(FULL, 7).calls()).toStrictEqual(drawMeter(FULL, 7).calls());
+    // It holds for a whole half-period and then flips -- stepped, not eased.
+    expect(stroke(0)).toBe(stroke(11));
+    expect(stroke(0)).not.toBe(stroke(12));
+    expect(stroke(0)).toBe(stroke(24));
+  });
+
+  it('leaves the charging gauge with nothing that moves (AC3)', () => {
+    // Only the armed state animates. A charging bar that blinked would be a
+    // second thing competing for the eye at every meter value.
+    expect(drawMeter(50, 0).calls()).toStrictEqual(drawMeter(50, 137).calls());
+  });
+
+  it('keeps the Token Bank row clear beneath it (AC5)', () => {
+    const bank: BankReading = {
+      remaining: 9_000,
+      start: 25_000,
+      filledBasisPoints: 3_600,
+      exhausted: false,
+    };
+    const ctx = drawMeter(FULL, 0, [bank, null]);
+    const bars = hudBars(ctx);
+
+    // health, gauge, bank -- still three, still in that order.
+    expect(bars).toHaveLength(3);
+    const [, gaugeBar, bankBar] = bars;
+    expect(bankBar.args[1] as number).toBeGreaterThanOrEqual(
+      (gaugeBar.args[1] as number) + (gaugeBar.args[3] as number),
+    );
+    expect(texts(ctx)).toContain('BANK 9000');
+  });
+
+  it('shows a Baseline Bot no bank even with its gauge armed (AC5)', () => {
+    const ctx = drawMeter(FULL);
+    expect(texts(ctx).some((text) => text.startsWith('BANK'))).toBe(false);
+    expect(texts(ctx)).toContain('ULTIMATE READY');
+  });
+
+  it('arms both fighters independently and keeps drawing the fight', () => {
+    const ctx = createRecordingCanvas();
+    drawFrame(ctx, frameWith(stateWith({ meter: [FULL, FULL] }), stateWith()), {
+      config: DEFAULT_FIGHTER_CONFIG,
+      viewport: VIEWPORT,
+    });
+
+    const armed = ctx
+      .calls()
+      .filter((call) => call.op === 'fillText' && String(call.args[0]) === 'ULTIMATE READY');
+    expect(armed).toHaveLength(2);
+    expect(ctx.calls()[0].op).toBe('clearRect');
+  });
+
+  it('says nothing about time (INV-3)', () => {
+    for (const text of texts(drawMeter(FULL))) {
       expect(text).not.toMatch(/\b(ms|sec|second|per|rate|elapsed)\b/i);
     }
   });
