@@ -55,6 +55,20 @@ import type { JuiceKind, JuiceTrack } from './juice';
  * that did not yet exist -- the fail-soft path the story's AC2 asked for was
  * exercised on every load, not only in a test. Story 9.7 is what fills those
  * files in.
+ *
+ * ## The Ultimate's cue lands in Story 10.5
+ *
+ * `tuning.ultimate` is the sixth cue, and the one place this module reads
+ * `juiceTrack.cinematics` rather than `juiceTrack.events`. Its trigger is
+ * `CinematicEvent.filmIndex` -- the exact film frame Story 10.4's freeze opens
+ * on -- so audio and picture are keyed off one index and cannot drift apart on
+ * a seek. That is the story's AC2, and keying it this way makes the claim true
+ * by construction rather than by two layers happening to agree.
+ *
+ * It is its own sample rather than `sfx.heavy` at a higher level. An Ultimate
+ * that sounds like a heavy hit teaches a listener nothing, which is the whole
+ * reason the cue exists: the Ultimate has to read for a visitor who is not
+ * looking directly at the stage.
  */
 
 /** The three independent mix buses. One `GainNode` each, all three straight to `destination`. */
@@ -85,6 +99,20 @@ export interface AudioTuning {
    * story adds a kind by adding a key, with no call site to find.
    */
   readonly voice: Partial<Readonly<Record<JuiceKind, string>>>;
+  /**
+   * Story 10.5. The Ultimate's cue, on the SFX bus.
+   *
+   * Its own key rather than a fourth entry in `sfx`, because the Ultimate is
+   * not a `JuiceKind`: kinds grade *damage taken*, and the cinematic fires on
+   * the caster's active phase whether or not the Ultimate connects. Widening
+   * `JuiceKind` to carry it would have put a non-damage event into the table
+   * that drives hitstop, sparks and damage numbers.
+   *
+   * Required rather than optional, unlike `voice`: a tuning that forgot it
+   * should fail to compile rather than ship a silent Ultimate, and the one
+   * thing this story exists to prevent is the Ultimate being inaudible.
+   */
+  readonly ultimate: string;
   readonly sfxGainBasisPoints: number;
   readonly voiceGainBasisPoints: number;
   /** How many clock frames a voice line holds the music down for. */
@@ -115,6 +143,7 @@ export const DEFAULT_AUDIO_TUNING: AudioTuning = Object.freeze({
   music: Object.freeze({ name: 'music_battle', gainBasisPoints: 8000 }),
   sfx: Object.freeze({ hit: 'sfx_hit_l', heavy: 'sfx_hit_h', ko: 'sfx_ko' }),
   voice: Object.freeze({ ko: 'vo_ko' }),
+  ultimate: 'sfx_special',
   sfxGainBasisPoints: BASIS_POINTS_FULL,
   voiceGainBasisPoints: BASIS_POINTS_FULL,
   duckFrames: 90,
@@ -261,6 +290,42 @@ export function buildAudioTrack(
     for (let ducked = clockIndex; ducked < end; ducked += 1) {
       musicGains[ducked] = tuning.duckBasisPoints;
     }
+  }
+
+  // Story 10.5. The Ultimate's cue, from the same track's `cinematics` stream
+  // and through the same `firstClockOf` map every other cue goes through.
+  //
+  // `CinematicEvent.filmIndex` is the film frame the Ultimate's active phase
+  // opens on, which is precisely the frame Story 10.4's freeze starts on. So
+  // the cue lands on the clock frame the picture stops on, and on none of the
+  // 90 holds that follow it -- the same "first clock frame, never a hold" rule
+  // the hit SFX already obey, asked of the one index both layers key off. AC2
+  // ("audio and picture cannot drift apart on a seek") is that shared index,
+  // not a second reconstruction that happens to agree.
+  //
+  // Deliberately independent of `cinematic.freezeFrames`. That number is the
+  // *visual* layer's, and a build that shortened or removed the freeze should
+  // still announce the Ultimate: `tuning.ultimate` is the audio layer's own
+  // switch, in the audio layer's own table.
+  const announced = new Set<number>();
+  for (const cinematic of juiceTrack.cinematics) {
+    // One cue per film frame. Two fighters whose Ultimates go active on the
+    // same frame is the case `buildJuiceTrack` already resolves to one freeze
+    // carrying one caster; two copies of one sample started on one frame is a
+    // flam, not a bigger sound, so the audio layer collapses it the same way.
+    if (announced.has(cinematic.filmIndex)) {
+      continue;
+    }
+    announced.add(cinematic.filmIndex);
+    const clockIndex = firstClockOf.get(cinematic.filmIndex);
+    if (clockIndex === undefined) {
+      // Same reasoning as the dropped juice event above: a track built from a
+      // different film cannot have its cue placed truthfully, so it gets none.
+      continue;
+    }
+    cuesByClock[clockIndex].push(
+      Object.freeze({ bus: 'sfx', name: tuning.ultimate, loop: false }),
+    );
   }
 
   // Playback stops on the last clock frame and rests there indefinitely. A KO --

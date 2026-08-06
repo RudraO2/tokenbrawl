@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
   COMMITTED_NONE,
@@ -10,7 +11,12 @@ import { BASIS_POINTS_FULL, FRAMES_PER_DECISION, type RenderFrame } from '../rep
 import { buildReplayFilm } from '../replay/film';
 import { buildDemoLog } from '../testing/demo-log';
 import { createPlaybackClock } from '../player/clock';
-import { buildJuiceTrack, type JuiceTrack } from './juice';
+import {
+  DEFAULT_JUICE_TUNING,
+  buildJuiceTrack,
+  type CinematicEvent,
+  type JuiceTrack,
+} from './juice';
 import {
   DEFAULT_AUDIO_TUNING,
   buildAudioTrack,
@@ -491,6 +497,186 @@ describe('the director tells playing apart from jumping (AC2)', () => {
       director.atFrame(1);
       director.atFrame(-4);
       director.atFrame(Number.NaN);
+    }).not.toThrow();
+  });
+});
+
+/**
+ * Story 10.5: the Ultimate's cue.
+ *
+ * `spectate-03` rather than a hand-built film, and for exactly the reason
+ * `cinematic-neutrality.test.ts` gives: no Baseline Bot in
+ * `packages/env-fighter/src/bots.ts` ever submits `special`, so a case built on
+ * a synthesised film would either pass with the code under test unreached, or
+ * need `liveWindow`'s phase reconstruction transcribed into this file. It is the
+ * one committed Command Log in this repository that contains an Ultimate -- the
+ * random bot spends a full bar at Tick 870 and connects.
+ */
+function ultimateFilm(): readonly RenderFrame[] {
+  const log: unknown = JSON.parse(
+    readFileSync(`${process.cwd()}/public/replays/spectate-03.command-log.json`, 'utf8'),
+  );
+  return buildReplayFilm(log, createFighterEnvironment()).frames;
+}
+
+/** The clock frames on which a cue of the given name begins. */
+function framesNaming(track: ReturnType<typeof buildAudioTrack>, name: string): readonly number[] {
+  const found: number[] = [];
+  for (let clockIndex = 0; clockIndex < track.frameCount; clockIndex += 1) {
+    if (track.at(clockIndex).cues.some((cue) => cue.name === name)) {
+      found.push(clockIndex);
+    }
+  }
+  return found;
+}
+
+describe("the Ultimate's cue (Story 10.5)", () => {
+  it('is its own sample on the SFX bus, not a reuse of the heavy hit (AC1)', () => {
+    // The acceptance criterion is about *teaching a listener*, so the assertion
+    // is that the name differs from every other cue in the table -- a distinct
+    // name is what buys a distinct file, and `docs/ASSETS.md` records that the
+    // two files are different samples from the same source project.
+    const juice = buildJuiceTrack(ultimateFilm());
+    expect(juice.cinematics).toHaveLength(1);
+    const audio = buildAudioTrack(juice);
+
+    const fired = framesNaming(audio, DEFAULT_AUDIO_TUNING.ultimate);
+    expect(fired).toHaveLength(1);
+    const cue = audio
+      .at(fired[0])
+      .cues.find((entry) => entry.name === DEFAULT_AUDIO_TUNING.ultimate);
+    expect(cue?.bus).toBe('sfx');
+    // A looping one-shot is a stuck sound, and this one would be stuck under a
+    // 90-frame freeze with nothing to end it.
+    expect(cue?.loop).toBe(false);
+
+    expect(DEFAULT_AUDIO_TUNING.ultimate).not.toBe(DEFAULT_AUDIO_TUNING.sfx.heavy);
+    const others = [
+      DEFAULT_AUDIO_TUNING.music.name,
+      ...Object.values(DEFAULT_AUDIO_TUNING.sfx),
+      ...Object.values(DEFAULT_AUDIO_TUNING.voice),
+    ];
+    expect(others).not.toContain(DEFAULT_AUDIO_TUNING.ultimate);
+  });
+
+  it('fires on the frame the cinematic freeze opens on, and on none of its holds (AC2)', () => {
+    // The story's second criterion, stated as the one index both layers key
+    // off. If this ever drifts, the sound and the picture have stopped agreeing
+    // about where the Ultimate is.
+    const juice = buildJuiceTrack(ultimateFilm());
+    const audio = buildAudioTrack(juice);
+    const cinematic = juice.cinematics[0];
+    const [fired] = framesNaming(audio, DEFAULT_AUDIO_TUNING.ultimate);
+
+    expect(juice.filmIndexAt(fired)).toBe(cinematic.filmIndex);
+    // The live frame of the freeze, not one of the re-presents: age zero and
+    // not flagged frozen.
+    expect(juice.at(fired).frozen).toBe(false);
+    expect(juice.at(fired).cinematic?.age).toBe(0);
+
+    // And every hold that follows is silent. The whole freeze is 90 frames of
+    // one film frame re-presented; a cue keyed on the film would fire on all of
+    // them, which is the machine-gun failure the clock indexing exists to
+    // prevent.
+    const freeze = DEFAULT_JUICE_TUNING.cinematic.freezeFrames;
+    for (let held = 1; held <= freeze; held += 1) {
+      expect(juice.at(fired + held).filmIndex).toBe(cinematic.filmIndex);
+      expect(audio.at(fired + held).cues).toStrictEqual([]);
+    }
+  });
+
+  it('announces two Ultimates opening on one film frame exactly once', () => {
+    // `buildJuiceTrack` already collapses this case to one freeze carrying one
+    // caster. Two copies of one sample started on one frame is a flam, not a
+    // bigger sound, so the audio layer collapses it the same way. Built by
+    // handing the builder a track whose `cinematics` stream is doubled, because
+    // no committed Command Log contains simultaneous Ultimates.
+    const juice = buildJuiceTrack(ultimateFilm());
+    const first = juice.cinematics[0];
+    const doubled: JuiceTrack = Object.freeze({
+      ...juice,
+      cinematics: Object.freeze([
+        first,
+        Object.freeze({
+          ...first,
+          agentIndex: first.agentIndex === 0 ? 1 : 0,
+        }) as CinematicEvent,
+      ]),
+    });
+
+    expect(framesNaming(buildAudioTrack(doubled), DEFAULT_AUDIO_TUNING.ultimate)).toHaveLength(1);
+  });
+
+  it('names the cue nowhere at all in a Match with no Ultimate', async () => {
+    // The other half of the promise, and the guard against the cue leaking onto
+    // ordinary hits. The demo Match is Baseline Bot vs Baseline Bot.
+    const film = buildReplayFilm(await buildDemoLog(), createFighterEnvironment());
+    const juice = buildJuiceTrack(film.frames);
+    expect(juice.cinematics).toStrictEqual([]);
+    expect(framesNaming(buildAudioTrack(juice), DEFAULT_AUDIO_TUNING.ultimate)).toStrictEqual([]);
+  });
+
+  it('does not stack or retrigger under repeated seeks across it (AC4)', () => {
+    const juice = buildJuiceTrack(ultimateFilm());
+    const audio = buildAudioTrack(juice);
+    const [fired] = framesNaming(audio, DEFAULT_AUDIO_TUNING.ultimate);
+    const sink = createRecordingSink();
+    const director = createAudioDirector({ track: audio, sink });
+
+    director.atFrame(0);
+    const afterMount = sink.played().length;
+
+    // Scrubbing back and forth over the Ultimate. None of these indexes is the
+    // previous one plus one, so every one of them is a jump -- and a jump
+    // re-applies the gains and fires nothing.
+    for (let pass = 0; pass < 5; pass += 1) {
+      director.atFrame(fired + 20);
+      director.atFrame(fired - 20);
+      director.atFrame(fired);
+      director.atFrame(fired + 60);
+    }
+
+    expect(sink.played()).toHaveLength(afterMount);
+    // Non-vacuous: the gains were written every one of those frames, so the
+    // director really did present them.
+    expect(sink.gains()).toHaveLength(1 + 20);
+  });
+
+  it('still fires it on the first ordinary advance into the frame', () => {
+    // The other side of the case above: a scrub that stops just short of the
+    // Ultimate and is released must still play it, or "no stacking" would have
+    // been bought by never playing the cue at all.
+    const juice = buildJuiceTrack(ultimateFilm());
+    const audio = buildAudioTrack(juice);
+    const [fired] = framesNaming(audio, DEFAULT_AUDIO_TUNING.ultimate);
+    const sink = createRecordingSink();
+    const director = createAudioDirector({ track: audio, sink });
+
+    director.atFrame(0);
+    director.atFrame(fired - 1);
+    const before = sink
+      .played()
+      .filter((entry) => entry.endsWith(DEFAULT_AUDIO_TUNING.ultimate)).length;
+    expect(before).toBe(0);
+
+    director.atFrame(fired);
+    expect(
+      sink.played().filter((entry) => entry.endsWith(DEFAULT_AUDIO_TUNING.ultimate)),
+    ).toStrictEqual([`sfx:${DEFAULT_AUDIO_TUNING.ultimate}`]);
+  });
+
+  it('plays the Ultimate silently and throws nothing with no sink at all (AC3)', () => {
+    // `createAudioBus` returns `null` on a browser with no WebAudio, a blocked
+    // context or a constructor that throws, and `main.ts` mounts with it. The
+    // whole cinematic must be walkable in that configuration.
+    const juice = buildJuiceTrack(ultimateFilm());
+    const audio = buildAudioTrack(juice);
+    const director = createAudioDirector({ track: audio, sink: null });
+
+    expect(() => {
+      for (let index = 0; index < audio.frameCount; index += 1) {
+        director.atFrame(index);
+      }
     }).not.toThrow();
   });
 });

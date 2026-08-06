@@ -132,8 +132,8 @@ floats above the floor or sinks through it.
 ## Audio
 
 Story 9.7 lands the five cues `apps/web/src/render/audio.ts`'s
-`DEFAULT_AUDIO_TUNING` names — the bus wiring itself shipped silent in Story
-9.6.
+`DEFAULT_AUDIO_TUNING` named at the time — the bus wiring itself shipped silent
+in Story 9.6. Story 10.5 adds the sixth, `sfx_special`, for the Ultimate.
 
 | Asset | Source | Licence | Checked |
 |---|---|---|---|
@@ -142,20 +142,32 @@ Story 9.7 lands the five cues `apps/web/src/render/audio.ts`'s
 | `apps/web/public/audio/sfx_hit_h.mp3` | authored in this repo — the author's own prior project's SFX (own IP) | **Author-owned, used with permission** | 2026-08-06 |
 | `apps/web/public/audio/sfx_ko.mp3` | authored in this repo — the author's own prior project's SFX (own IP) | **Author-owned, used with permission** | 2026-08-06 |
 | `apps/web/public/audio/vo_ko.mp3` | authored in this repo — the author's own prior project's voice line (own IP) | **Author-owned, used with permission** | 2026-08-06 |
+| `apps/web/public/audio/sfx_special.mp3` | authored in this repo — the author's own prior project's Ultimate SFX (own IP), copied byte-for-byte from its `audio/sfx_special.mp3` | **Author-owned, used with permission** | 2026-08-07 |
+
+`sfx_special.mp3` is a genuinely different sample from `sfx_hit_h.mp3`, not a
+re-encode or a louder copy — the two files' MD5s differ
+(`9bbc6a26…` against `c93bae72…`), and Story 10.5's whole point is that an
+Ultimate which sounds like a heavy hit teaches a listener nothing. It comes
+from the same source project and the same owner as the five cues above, and
+ships on the same basis.
 
 `DEFAULT_AUDIO_TUNING` is global, not per-fighter: one hit SFX pair, one KO SFX,
-one KO voice line regardless of which two packs are loaded. The source project
-ships per-character variants (`sfx_clawde_hit_l.mp3`, `vo_chatty_ko.mp3`, …);
+one KO voice line, one Ultimate SFX regardless of which two packs are loaded.
+The source project ships per-character variants (`sfx_clawde_hit_l.mp3`,
+`vo_chatty_ko.mp3`, `sfx_<id>_ult.mp3`, …);
 only its generic, character-neutral files are used here, matching the cue
 names this codebase already calls by. A later story that makes audio
 per-fighter would draw from the same source and add rows here the same way.
 
-So the shipped player runs the whole audio graph and plays nothing. That is not
-an oversight being deferred — it is the fail-soft path the story requires,
-exercised on every page load rather than only in a test: every cue 404s, each
-missing name is warned about once, cached as absent, and never fetched again,
-and the Match keeps playing silently. Exactly the shape `loadArtist` and
-`loadBackdrop` already use for a sprite pack that will not decode.
+Between Story 9.6 and Story 9.7 the shipped player ran the whole audio graph
+and played nothing, and that was not an oversight being deferred — it was the
+fail-soft path the story requires, exercised on every page load rather than
+only in a test: every cue 404s, each missing name is warned about once, cached
+as absent, and never fetched again, and the Match keeps playing silently.
+Exactly the shape `loadArtist` and `loadBackdrop` already use for a sprite pack
+that will not decode. That path is still what a name with no file behind it
+takes, and it is still what the whole layer degrades to on a browser with no
+WebAudio or a context no gesture ever unlocked.
 
 ### Bus layout
 
@@ -165,7 +177,7 @@ Three independent WebAudio `GainNode`s, each connected straight to
 | Bus | What goes on it | Base level | Ducked to |
 |---|---|---|---|
 | `music` | one looping bed, started at clock frame 0 | 0.80 | 0.25 under a voice line |
-| `sfx` | one-shot per hit, heavy hit and KO | 1.00 | — |
+| `sfx` | one-shot per hit, heavy hit, KO and Ultimate | 1.00 | — |
 | `voice` | one-shot per KO | 1.00 | — |
 
 Levels are tuned as integer basis points in
@@ -192,11 +204,19 @@ The names the shipped tuning asks for:
 | `sfx_hit_h` | sfx | `public/audio/sfx_hit_h.mp3` |
 | `sfx_ko` | sfx | `public/audio/sfx_ko.mp3` |
 | `vo_ko` | voice | `public/audio/vo_ko.mp3` |
+| `sfx_special` | sfx | `public/audio/sfx_special.mp3` |
+
+`sfx_special` is the only cue that is not keyed on a `JuiceKind`. It fires on
+`CinematicEvent.filmIndex` — the film frame Story 10.4's Ultimate freeze opens
+on — so the sound and the picture are driven off one index and cannot drift
+apart when a visitor scrubs the timeline across it.
 
 Adding a sound is dropping a file at its path and recording it in the table
 above with its source, licence and the date the licence was read. Nothing in
 `apps/web/src` changes; a name with no file behind it is silent, and a file with
-no name asking for it is never fetched.
+no name asking for it is never fetched. `docs-discipline.test.ts` sweeps
+`public/audio/` against the provenance table above, so a file dropped in
+without a row fails the suite.
 
 Audio can be auditioned before Story 9.7 lands without committing anything:
 `apps/web/src/dev/local-sprites.ts` already serves `.mp3`/`.wav`/`.ogg` from the

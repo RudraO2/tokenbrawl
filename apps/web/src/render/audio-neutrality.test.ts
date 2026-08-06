@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_FIGHTER_CONFIG } from '../../../../packages/env-fighter/src/config';
 import { createFighterEnvironment } from '../../../../packages/env-fighter/src/environment';
@@ -133,6 +134,7 @@ const RETUNED: AudioTuning = Object.freeze({
   music: Object.freeze({ name: 'music_alt', gainBasisPoints: 4_000 }),
   sfx: Object.freeze({ hit: 'sfx_alt_l', heavy: 'sfx_alt_h', ko: 'sfx_alt_ko' }),
   voice: Object.freeze({ hit: 'vo_alt_hit', heavy: 'vo_alt_heavy', ko: 'vo_alt_ko' }),
+  ultimate: 'sfx_alt_ult',
   sfxGainBasisPoints: 6_000,
   voiceGainBasisPoints: 9_000,
   duckFrames: 5,
@@ -221,6 +223,60 @@ describe('the audio layer is hash-neutral on the demo Match (AC3, INV-2, AD-15)'
 
     expect(first.cues).toStrictEqual(second.cues);
     expect(first.gains).toStrictEqual(second.gains);
+  });
+});
+
+/**
+ * Story 10.5, AC6. The demo Match above cannot make this claim about the
+ * Ultimate's cue, because neither Baseline Bot ever submits `special` -- every
+ * case there would pass with `tuning.ultimate` never once emitted.
+ * `spectate-03` is the one committed Command Log in this repository containing
+ * an Ultimate, which is why `cinematic-neutrality.test.ts` uses it and why the
+ * audio half of the same claim is made against it here.
+ */
+function ultimateLog(): unknown {
+  return JSON.parse(
+    readFileSync(`${process.cwd()}/public/replays/spectate-03.command-log.json`, 'utf8'),
+  );
+}
+
+describe("the Ultimate's cue is hash-neutral too (Story 10.5, AC6, AD-15)", () => {
+  it('re-derives the same hash after a Match containing an Ultimate has played', () => {
+    const log = ultimateLog();
+    const film = buildReplayFilm(log, createFighterEnvironment());
+    const before = film.finalStateHash;
+    expect(film.matchesRecordedHash).toBe(true);
+    const options = { config: DEFAULT_FIGHTER_CONFIG, viewport: VIEWPORT };
+
+    for (const tuning of [DEFAULT_AUDIO_TUNING, RETUNED]) {
+      const ctx = createSilentCanvas();
+      const sink = createRecordingSink();
+      const juice = buildJuiceTrack(film.frames);
+      const director = createAudioDirector({ track: buildAudioTrack(juice, tuning), sink });
+      for (let index = 0; index < juice.frameCount; index += 1) {
+        drawJuicedFrame(ctx, film.frames[juice.filmIndexAt(index)], juice.at(index), options);
+        director.atFrame(index);
+      }
+      // Non-vacuous: the Ultimate's cue really was among what played.
+      expect(sink.cues().filter((cue) => cue.name === tuning.ultimate)).toHaveLength(1);
+
+      const rederived = buildReplayFilm(log, createFighterEnvironment());
+      expect(rederived.finalStateHash).toBe(before);
+      expect(rederived.finalStateHash).toBe((log as { finalStateHash: string }).finalStateHash);
+      expect(rederived.matchesRecordedHash).toBe(true);
+      expect(film.finalStateHash).toBe(before);
+      expect(film.matchesRecordedHash).toBe(true);
+    }
+  });
+
+  it('leaves the clock exactly as long with the cue attached as without it', () => {
+    // Audio is not allowed to lengthen the transport. The 90-frame freeze is
+    // Story 10.4's and is already on the clock before this layer is built; the
+    // cue rides an existing frame rather than adding one.
+    const film = buildReplayFilm(ultimateLog(), createFighterEnvironment());
+    const juice = buildJuiceTrack(film.frames);
+    expect(buildAudioTrack(juice, DEFAULT_AUDIO_TUNING).frameCount).toBe(juice.frameCount);
+    expect(buildAudioTrack(juice, RETUNED).frameCount).toBe(juice.frameCount);
   });
 });
 

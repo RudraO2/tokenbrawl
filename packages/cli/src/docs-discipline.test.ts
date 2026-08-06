@@ -156,6 +156,19 @@ describe('the asset manifest is complete (AC6)', () => {
     expect(faces.filter((face) => !manifest.includes(face.replace('.woff2', '')))).toStrictEqual([]);
   });
 
+  it('records every audio cue that is actually on disk', () => {
+    // Added by Story 10.5, whose AC5 makes "provenance in a later commit" a
+    // story failure rather than a tidy-up. Sprite packs and typefaces have had
+    // this sweep since Story 7.4; audio landed in 9.7 without one, so a sixth
+    // `.mp3` could be dropped into `public/audio/` with a green suite and no
+    // row beside it. That is the exact failure `docs/ASSETS.md`'s own rule
+    // exists to prevent, and it was one file away from happening.
+    const manifest = assets();
+    const cues = readdirSync(join(publicDir, 'audio')).filter((entry) => entry.endsWith('.mp3'));
+    expect(cues.length).toBeGreaterThan(0);
+    expect(cues.filter((cue) => !manifest.includes(cue))).toStrictEqual([]);
+  });
+
   it('keeps the licence text on disk for every sprite pack', () => {
     // Either beside the art, which is how the two fighter packs ship it, or in
     // `docs/licences/` under the pack's own name -- which is where the arena
