@@ -1,0 +1,83 @@
+{
+  "_comment": [
+    "Gemini -- authored in this repo's author's own prior",
+    "project (also owned by the author). Cropped and re-assembled from that",
+    "project's own spritesheet into this project's per-clip strip format;",
+    "no rendering code changed. See docs/ASSETS.md for provenance.",
+    "idle/walk repeat their 2 real frames (A,B,A,B) to meet the 4-frame",
+    "minimum; attack/special phases borrow adjacent single-frame poses",
+    "(punch/kick/charge) duplicated to meet each phase's minimum."
+  ],
+  "frameWidth": 208,
+  "frameHeight": 208,
+  "scale": 3,
+  "anchorY": 205,
+  "clips": {
+    "idle": {
+      "image": "/sprites/gemini/idle.png",
+      "x": 0,
+      "y": 0,
+      "frames": 4
+    },
+    "walk": {
+      "image": "/sprites/gemini/walk.png",
+      "x": 0,
+      "y": 0,
+      "frames": 4
+    },
+    "block": {
+      "image": "/sprites/gemini/block.png",
+      "x": 0,
+      "y": 0,
+      "frames": 1
+    },
+    "attack-startup": {
+      "image": "/sprites/gemini/attack-startup.png",
+      "x": 0,
+      "y": 0,
+      "frames": 2
+    },
+    "attack-active": {
+      "image": "/sprites/gemini/attack-active.png",
+      "x": 0,
+      "y": 0,
+      "frames": 2
+    },
+    "attack-recovery": {
+      "image": "/sprites/gemini/attack-recovery.png",
+      "x": 0,
+      "y": 0,
+      "frames": 2
+    },
+    "special-startup": {
+      "image": "/sprites/gemini/special-startup.png",
+      "x": 0,
+      "y": 0,
+      "frames": 3
+    },
+    "special-active": {
+      "image": "/sprites/gemini/special-active.png",
+      "x": 0,
+      "y": 0,
+      "frames": 2
+    },
+    "special-recovery": {
+      "image": "/sprites/gemini/special-recovery.png",
+      "x": 0,
+      "y": 0,
+      "frames": 2
+    },
+    "hit": {
+      "image": "/sprites/gemini/hit.png",
+      "x": 0,
+      "y": 0,
+      "frames": 1
+    },
+    "ko": {
+      "image": "/sprites/gemini/ko.png",
+      "x": 0,
+      "y": 0,
+      "frames": 1
+    }
+  }
+}

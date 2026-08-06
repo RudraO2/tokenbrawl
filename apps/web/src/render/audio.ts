@@ -47,14 +47,14 @@ import type { JuiceKind, JuiceTrack } from './juice';
  * per fighter. Facts, not expression: none of its code is reproduced here, and
  * every value is a field in a frozen table rather than a literal at a call site.
  *
- * ## No asset ships with this story
+ * ## Assets land in Story 9.7
  *
- * No file behind any cue name in `DEFAULT_AUDIO_TUNING` exists in this repo, and
- * none is added here: `docs/ASSETS.md`'s rule is that an asset lands with its
- * licence read, and Story 9.7 is the story that generates the roster's audio. So
- * the shipped page builds this whole track, runs the whole graph, and plays
- * nothing -- which is precisely the fail-soft path the story's AC2 asks for,
- * exercised on every load rather than only in a test.
+ * Every cue name in `DEFAULT_AUDIO_TUNING` now has a file behind it, provenanced
+ * in `docs/ASSETS.md` per that doc's licence-read rule. Story 9.6 shipped this
+ * module building the whole track and running the whole graph against files
+ * that did not yet exist -- the fail-soft path the story's AC2 asked for was
+ * exercised on every load, not only in a test. Story 9.7 is what fills those
+ * files in.
  */
 
 /** The three independent mix buses. One `GainNode` each, all three straight to `destination`. */

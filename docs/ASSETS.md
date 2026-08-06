@@ -12,8 +12,33 @@ cannot be verified, the story ships without the asset and says so.
 
 | Asset | Source | Licence | Checked |
 |---|---|---|---|
+| Clawde (`apps/web/public/sprites/clawde/`) | authored in this repo — cropped/re-assembled from the author's own prior project's spritesheet (`clawde_f0_sheet.png`, own IP) into this project's per-clip strip format | **Author-owned, used with permission** | 2026-08-06 |
+| Chatty (`apps/web/public/sprites/chatty/`) | authored in this repo — cropped/re-assembled from the author's own prior project's spritesheet (`chatty_f0_sheet.png`, own IP) into this project's per-clip strip format | **Author-owned, used with permission** | 2026-08-06 |
+| Gemini (`apps/web/public/sprites/gemini/`) | authored in this repo — cropped/re-assembled from the author's own prior project's spritesheet (`gemini_f0_sheet.png`, own IP) into this project's per-clip strip format | **Author-owned, used with permission** | 2026-08-06 |
+| Grokk (`apps/web/public/sprites/grokk/`) | authored in this repo — cropped/re-assembled from the author's own prior project's spritesheet (`grokk_f0_sheet.png`, own IP) into this project's per-clip strip format | **Author-owned, used with permission** | 2026-08-06 |
+
+Story 9.7's four-character roster. The source spritesheets are frames from the
+author's own prior fighting-game project (also owned by the author), each a
+5×5 grid of 208×208 poses. `idle`/`walk` repeat their 2 real frames (A,B,A,B)
+to satisfy this project's 4-frame minimum; `attack-*`/`special-*` phases
+borrow adjacent single-pose frames (punch/kick/charge) duplicated to satisfy
+each phase's minimum — an interim mapping this story exists to make honest,
+not a claim the source had eleven distinct combat phases. `LICENSE.txt` ships
+beside each pack. Only two packs load into a live Match at a time
+(`apps/web/src/startup.ts`'s `SPRITE_LAYOUT_URLS`, currently `clawde` +
+`chatty`); `gemini` and `grokk` ship ready for a future character-select story.
+
+**Superseded, not deleted:**
+
+| Asset | Source | Licence | Checked |
+|---|---|---|---|
 | Martial Hero (`apps/web/public/sprites/martial-hero/`) — p1 | https://luizmelo.itch.io/martial-hero | **Creative Commons Zero (CC-0)** | 2026-08-01 |
 | Martial Hero 2 (`apps/web/public/sprites/martial-hero-2/`) — p2 | https://luizmelo.itch.io/martial-hero-2 | **Creative Commons Zero (CC-0)** | 2026-08-01 |
+
+Kept as historical provenance record per this doc's own rule — reconstructing
+provenance later is how licence problems become real ones. No longer wired
+into `SPRITE_LAYOUT_URLS` as of 2026-08-06 (Story 9.7); the pack directories
+and their `layout.json`/`LICENSE.txt` stay on disk.
 
 This is the pack the brief and PRD named from the start. The licence was read
 from the archive itself, not inferred from the store page — `LICENSE.txt` ships
@@ -92,11 +117,24 @@ floats above the floor or sinks through it.
 
 ## Audio
 
-**No audio asset ships in this repository yet, and none is committed by Story
-9.6.** The rule at the top of this file is absolute: an asset whose licence text
-has not been read does not land. Story 9.7 owns the roster's SFX and voice sets
-and will record each one here with its generator, the date, and the prompt it
-was generated from, exactly as it does for the fighter art.
+Story 9.7 lands the five cues `apps/web/src/render/audio.ts`'s
+`DEFAULT_AUDIO_TUNING` names — the bus wiring itself shipped silent in Story
+9.6.
+
+| Asset | Source | Licence | Checked |
+|---|---|---|---|
+| `apps/web/public/audio/music_battle.mp3` | authored in this repo — the author's own prior project's music bed (own IP) | **Author-owned, used with permission** | 2026-08-06 |
+| `apps/web/public/audio/sfx_hit_l.mp3` | authored in this repo — the author's own prior project's SFX (own IP) | **Author-owned, used with permission** | 2026-08-06 |
+| `apps/web/public/audio/sfx_hit_h.mp3` | authored in this repo — the author's own prior project's SFX (own IP) | **Author-owned, used with permission** | 2026-08-06 |
+| `apps/web/public/audio/sfx_ko.mp3` | authored in this repo — the author's own prior project's SFX (own IP) | **Author-owned, used with permission** | 2026-08-06 |
+| `apps/web/public/audio/vo_ko.mp3` | authored in this repo — the author's own prior project's voice line (own IP) | **Author-owned, used with permission** | 2026-08-06 |
+
+`DEFAULT_AUDIO_TUNING` is global, not per-fighter: one hit SFX pair, one KO SFX,
+one KO voice line regardless of which two packs are loaded. The source project
+ships per-character variants (`sfx_clawde_hit_l.mp3`, `vo_chatty_ko.mp3`, …);
+only its generic, character-neutral files are used here, matching the cue
+names this codebase already calls by. A later story that makes audio
+per-fighter would draw from the same source and add rows here the same way.
 
 So the shipped player runs the whole audio graph and plays nothing. That is not
 an oversight being deferred — it is the fail-soft path the story requires,

@@ -1,0 +1,83 @@
+{
+  "_comment": [
+    "Clawde -- authored in this repo's author's own prior",
+    "project (also owned by the author). Cropped and re-assembled from that",
+    "project's own spritesheet into this project's per-clip strip format;",
+    "no rendering code changed. See docs/ASSETS.md for provenance.",
+    "idle/walk repeat their 2 real frames (A,B,A,B) to meet the 4-frame",
+    "minimum; attack/special phases borrow adjacent single-frame poses",
+    "(punch/kick/charge) duplicated to meet each phase's minimum."
+  ],
+  "frameWidth": 208,
+  "frameHeight": 208,
+  "scale": 3,
+  "anchorY": 205,
+  "clips": {
+    "idle": {
+      "image": "/sprites/clawde/idle.png",
+      "x": 0,
+      "y": 0,
+      "frames": 4
+    },
+    "walk": {
+      "image": "/sprites/clawde/walk.png",
+      "x": 0,
+      "y": 0,
+      "frames": 4
+    },
+    "block": {
+      "image": "/sprites/clawde/block.png",
+      "x": 0,
+      "y": 0,
+      "frames": 1
+    },
+    "attack-startup": {
+      "image": "/sprites/clawde/attack-startup.png",
+      "x": 0,
+      "y": 0,
+      "frames": 2
+    },
+    "attack-active": {
+      "image": "/sprites/clawde/attack-active.png",
+      "x": 0,
+      "y": 0,
+      "frames": 2
+    },
+    "attack-recovery": {
+      "image": "/sprites/clawde/attack-recovery.png",
+      "x": 0,
+      "y": 0,
+      "frames": 2
+    },
+    "special-startup": {
+      "image": "/sprites/clawde/special-startup.png",
+      "x": 0,
+      "y": 0,
+      "frames": 3
+    },
+    "special-active": {
+      "image": "/sprites/clawde/special-active.png",
+      "x": 0,
+      "y": 0,
+      "frames": 2
+    },
+    "special-recovery": {
+      "image": "/sprites/clawde/special-recovery.png",
+      "x": 0,
+      "y": 0,
+      "frames": 2
+    },
+    "hit": {
+      "image": "/sprites/clawde/hit.png",
+      "x": 0,
+      "y": 0,
+      "frames": 1
+    },
+    "ko": {
+      "image": "/sprites/clawde/ko.png",
+      "x": 0,
+      "y": 0,
+      "frames": 1
+    }
+  }
+}

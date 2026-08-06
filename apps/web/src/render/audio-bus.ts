@@ -90,10 +90,10 @@ export interface AudioBusConfig {
  * `style-discipline.test.ts` has nothing to find and the site keeps rendering
  * identically with no network.
  *
- * Nothing is behind these paths yet -- Story 9.7 owns the roster's audio, and
- * `docs/ASSETS.md`'s licence rule is absolute -- so every one of them 404s on
- * the shipped page and every one of them is cached as absent after exactly one
- * attempt.
+ * Story 9.7 landed the roster's audio behind these paths, provenanced in
+ * `docs/ASSETS.md` per that doc's licence rule. A path that 404s (e.g. a name
+ * not yet in `DEFAULT_AUDIO_TUNING`'s shipped set) is still cached as absent
+ * after exactly one attempt.
  */
 function defaultUrlFor(name: string): string {
   // Encoded rather than interpolated raw. Every name in `DEFAULT_AUDIO_TUNING`

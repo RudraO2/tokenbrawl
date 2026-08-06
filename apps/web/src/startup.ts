@@ -57,11 +57,14 @@ import { mountSpectatePanel, type SpectateHost, type SpectatePanel } from './spe
 
 /** Same-origin, so both are covered by the no-remote-asset sweep in `style-discipline.test.ts`. */
 export const DEMO_REPLAY_URL = '/replays/demo.command-log.json';
-/** One pack per agent index, so the two fighters are told apart by silhouette. */
-const SPRITE_LAYOUT_URLS = [
-  '/sprites/martial-hero/layout.json',
-  '/sprites/martial-hero-2/layout.json',
-] as const;
+/**
+ * One pack per agent index, so the two fighters are told apart by silhouette.
+ * Story 9.7: the four-character roster (`clawde`, `chatty`, `gemini`, `grokk`)
+ * supersedes the Martial Hero CC0 pair; a live Match still only shows two
+ * fighters at once, so this names the default pair and the other two packs
+ * ship ready for a future character-select story to point here instead.
+ */
+const SPRITE_LAYOUT_URLS = ['/sprites/clawde/layout.json', '/sprites/chatty/layout.json'] as const;
 const BACKDROP_LAYOUT_URL = '/sprites/mountain-dusk/layout.json';
 
 interface LoadedImage {

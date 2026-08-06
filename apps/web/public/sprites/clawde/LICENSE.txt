@@ -1,0 +1,4 @@
+This character's art is authored in this repository's author's own prior
+project, which the author also owns. It is used here under the author's
+own rights; see docs/ASSETS.md for the provenance entry (source, date,
+prompt/derivation).

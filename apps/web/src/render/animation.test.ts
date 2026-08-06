@@ -32,10 +32,12 @@ import { createSpriteSheet, validateSpriteSheetLayout } from './sprite-sheet';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SPRITES_ROOT = join(HERE, '..', '..', 'public', 'sprites');
-/** Both shipped packs. p1 and p2 use different characters, and both must satisfy the same contract. */
-const PACKS = ['martial-hero', 'martial-hero-2'] as const;
-const LAYOUT_PATH = join(SPRITES_ROOT, PACKS[0], 'layout.json');
-const SPRITES_DIR = join(SPRITES_ROOT, PACKS[0]);
+/** The two legacy CC0 packs, retained on disk (superseded, not wired in). */
+const LEGACY_PACKS = ['martial-hero', 'martial-hero-2'] as const;
+/** Every pack on disk -- legacy plus Story 9.7's roster -- must satisfy the same layout contract. */
+const PACKS = [...LEGACY_PACKS, 'clawde', 'chatty', 'gemini', 'grokk'] as const;
+const LAYOUT_PATH = join(SPRITES_ROOT, LEGACY_PACKS[0], 'layout.json');
+const SPRITES_DIR = join(SPRITES_ROOT, LEGACY_PACKS[0]);
 
 function input(overrides: Partial<AnimationInput> = {}): AnimationInput {
   return {
@@ -291,8 +293,8 @@ describe.each(PACKS)('sprite pack %s', (pack) => {
     return images;
   }
 
-  it('ships its own CC0 licence text', () => {
-    expect(readFileSync(join(dir, 'LICENSE.txt'), 'utf8')).toContain('Creative Commons Zero');
+  it('ships a LICENSE.txt', () => {
+    expect(readFileSync(join(dir, 'LICENSE.txt'), 'utf8').length).toBeGreaterThan(0);
   });
 
   it('satisfies every clip the animation can ask for', () => {
@@ -311,17 +313,27 @@ describe.each(PACKS)('sprite pack %s', (pack) => {
   });
 
   it('starts each Commitment Window phase on a different frame', () => {
-    // Pack 2 has only four attack frames, so its phases overlap. What must hold
-    // for both packs is that startup, active and recovery each *begin*
-    // somewhere different -- otherwise a viewer cannot tell a punishable
+    // Pack 2 has only four attack frames, so its phases overlap. The 9.7 packs
+    // instead give each phase its own image file, so "different frame" means a
+    // different (image, sx) pair, not a bare sx -- two clips backed by
+    // different images both legitimately start at sx 0. What must hold for
+    // every pack is that startup, active and recovery each *begin* somewhere
+    // visually different -- otherwise a viewer cannot tell a punishable
     // recovery from an active hitbox, which is the whole point of the sprite
     // work.
     const sheet = createSpriteSheet(realImages(), layout());
-    const starts = (['attack-startup', 'attack-active', 'attack-recovery'] as const).map(
-      (clip) => sheet.frameFor(clip, 0).sx,
-    );
+    const starts = (['attack-startup', 'attack-active', 'attack-recovery'] as const).map((clip) => {
+      const frame = sheet.frameFor(clip, 0);
+      return `${frame.image}@${frame.sx}`;
+    });
     expect(new Set(starts).size).toBe(3);
-    expect(starts).toStrictEqual([...starts].sort((a, b) => a - b));
+  });
+});
+
+describe.each(LEGACY_PACKS)('sprite pack %s licence', (pack) => {
+  it('ships its own CC0 licence text', () => {
+    const dir = join(SPRITES_ROOT, pack);
+    expect(readFileSync(join(dir, 'LICENSE.txt'), 'utf8')).toContain('Creative Commons Zero');
   });
 });
 
