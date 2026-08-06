@@ -7,7 +7,7 @@
     "id": "fighter-1v1",
     "version": "1.0.0"
   },
-  "configHash": "24f5f97e1c88a3f3a9b66405c569c076ba30994ac93dbc69429c3b8780bdc0f7",
+  "configHash": "1024a4dc9375cbc0710a1dcb4e4c15824fda350376e9e456ff5dd19932b3db9f",
   "matches": 600,
   "ratedMatches": 600,
   "excludedMatches": 0,
@@ -45,14 +45,14 @@
       "kind": "bot",
       "track": "main",
       "matches": 400,
-      "ratingBasisPoints": 4862,
-      "ciLowerBasisPoints": 4400,
-      "ciUpperBasisPoints": 5350,
+      "ratingBasisPoints": 4775,
+      "ciLowerBasisPoints": 4300,
+      "ciUpperBasisPoints": 5275,
       "opponents": [
         {
           "opponent": "random",
           "matches": 200,
-          "scoreBasisPoints": 9725
+          "scoreBasisPoints": 9550
         },
         {
           "opponent": "spacing-aware",
@@ -66,14 +66,14 @@
       "kind": "bot",
       "track": "main",
       "matches": 400,
-      "ratingBasisPoints": 137,
-      "ciLowerBasisPoints": 37,
-      "ciUpperBasisPoints": 262,
+      "ratingBasisPoints": 225,
+      "ciLowerBasisPoints": 100,
+      "ciUpperBasisPoints": 375,
       "opponents": [
         {
           "opponent": "aggressive",
           "matches": 200,
-          "scoreBasisPoints": 275
+          "scoreBasisPoints": 450
         },
         {
           "opponent": "spacing-aware",

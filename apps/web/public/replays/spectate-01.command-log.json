@@ -1,12 +1,12 @@
 {
   "schemaVersion": "1.0.0",
-  "matchId": "3753964a902cf29dfc0036b9cea6a44f41430a1f3f71dd8c0040581b29085528",
+  "matchId": "979cc199f6fe074c9045c10e8a3997be5888f12e349eb6a2f8e1306c95ab7e51",
   "environment": {
     "id": "fighter-1v1",
     "version": "1.0.0"
   },
   "seed": 9301,
-  "configHash": "24f5f97e1c88a3f3a9b66405c569c076ba30994ac93dbc69429c3b8780bdc0f7",
+  "configHash": "1024a4dc9375cbc0710a1dcb4e4c15824fda350376e9e456ff5dd19932b3db9f",
   "agents": [
     {
       "id": "bot:aggressive:1",

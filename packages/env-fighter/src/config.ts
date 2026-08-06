@@ -129,8 +129,36 @@ export const DEFAULT_FIGHTER_CONFIG: FighterConfig = {
   attackRange: 80,
   attackDamage: 7,
   specialRange: 140,
-  specialDamage: 16,
-  specialMeterCost: 50,
+  /**
+   * Story 10.2: the Ultimate's damage, and it is deliberately a small change.
+   *
+   * The obvious plan -- "the reference game's super does 280 and ours does 16,
+   * so crank it" -- is wrong, and measuring it is what kept this story small.
+   * That 280 is dealt against a 5000-point health bar: **5.6%**. This 16 was
+   * already dealt against 100: **16%**, nearly three times the share. The
+   * Action never failed to be powerful. It failed to be *legible* -- it cost
+   * half a bar, carried no protection, and was over before a viewer noticed.
+   *
+   * So the number moves only to match the reference's internal ratio rather
+   * than its absolute value: its super deals 3.1x its basic attack (280/90),
+   * and `attackDamage` (7) x 3.1 rounds to 22. Derived from the reference, not
+   * chosen for drama, and still under a quarter of a health bar so the Ultimate
+   * decides an exchange without deciding the Match.
+   */
+  specialDamage: 22,
+  /**
+   * The whole bar, equal to `maxMeter` (Story 10.2).
+   *
+   * At the previous 50 an Ultimate was available roughly twice as often, which
+   * is what made it read as a heavy poke rather than as an event. Charging the
+   * full bar is the entire reason the Super Gauge arming means something.
+   *
+   * Exactly equal to `maxMeter` is intentional and legal: `assertIntegerConfig`
+   * rejects only `specialMeterCost > maxMeter`, the case that would make the
+   * Action unreachable forever. At equality it is reachable at precisely one
+   * meter value, which is the mechanic.
+   */
+  specialMeterCost: 100,
   attackWindow: { startup: 4, active: 4, recovery: 32 },
   specialWindow: { startup: 10, active: 5, recovery: 45 },
   /**

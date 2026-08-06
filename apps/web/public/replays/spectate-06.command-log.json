@@ -1,12 +1,12 @@
 {
   "schemaVersion": "1.0.0",
-  "matchId": "40af8eb98aa715b56a2dbe96a1efc671c7c900eaf94a03832016d3f576f2004e",
+  "matchId": "83dc20a7243ab478ff05ab92b0b81d7b48c6e2140bb440bb3226246dfbc6921c",
   "environment": {
     "id": "fighter-1v1",
     "version": "1.0.0"
   },
   "seed": 9306,
-  "configHash": "24f5f97e1c88a3f3a9b66405c569c076ba30994ac93dbc69429c3b8780bdc0f7",
+  "configHash": "1024a4dc9375cbc0710a1dcb4e4c15824fda350376e9e456ff5dd19932b3db9f",
   "agents": [
     {
       "id": "bot:random:1",
@@ -543,9 +543,9 @@
     {
       "tick": 1050,
       "agentIndex": 0,
-      "action": "attack",
+      "action": "retreat",
       "reasoning": null,
-      "rawResponse": "random:attack",
+      "rawResponse": "random:retreat",
       "provider": "bot",
       "endpoint": "bot"
     },
@@ -560,19 +560,46 @@
     },
     {
       "tick": 1080,
-      "agentIndex": 1,
-      "action": "attack",
+      "agentIndex": 0,
+      "action": "retreat",
       "reasoning": null,
-      "rawResponse": "spacing:attack",
+      "rawResponse": "random:retreat",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 1080,
+      "agentIndex": 1,
+      "action": "block",
+      "reasoning": null,
+      "rawResponse": "spacing:block",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 1110,
+      "agentIndex": 0,
+      "action": "block",
+      "reasoning": null,
+      "rawResponse": "random:block",
+      "provider": "bot",
+      "endpoint": "bot"
+    },
+    {
+      "tick": 1110,
+      "agentIndex": 1,
+      "action": "block",
+      "reasoning": null,
+      "rawResponse": "spacing:block",
       "provider": "bot",
       "endpoint": "bot"
     },
     {
       "tick": 1140,
       "agentIndex": 0,
-      "action": "block",
+      "action": "advance",
       "reasoning": null,
-      "rawResponse": "random:block",
+      "rawResponse": "random:advance",
       "provider": "bot",
       "endpoint": "bot"
     },
@@ -609,9 +636,9 @@
     "endTick": 1200,
     "endReason": "timeout",
     "healthRemaining": [
-      62,
+      70,
       100
     ]
   },
-  "finalStateHash": "5075dc97ac6df0a377dda934920711429d01d1ce651afa6740509eba9b6cdf30"
+  "finalStateHash": "710dcc7beb1e652b0bfd62f112b68f70874d0130bc2ad089d2ac57959862572e"
 }

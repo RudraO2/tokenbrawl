@@ -8,7 +8,7 @@ only within a table, and only as far as the two Agents met comparable opposition
 opponent count and the full per-opponent breakdown are published with every row.
 
 - Environment: `fighter-1v1` v1.0.0
-- Frame-data config hash: `24f5f97e1c88a3f3a9b66405c569c076ba30994ac93dbc69429c3b8780bdc0f7`
+- Frame-data config hash: `1024a4dc9375cbc0710a1dcb4e4c15824fda350376e9e456ff5dd19932b3db9f`
 - Corpus: the Baseline Bot ladder — 600 Matches over 100 seeds from seed base 20260731, every seed played from both sides (AD-12)
 - Matches: 600 total, 600 rated, 0 excluded
 - Confidence interval: seeded percentile bootstrap, 2000 resamples, seed 20260802, 0.9500 coverage (AD-5)
@@ -18,8 +18,8 @@ opponent count and the full per-opponent breakdown are published with every row.
 | Agent | Kind | Matches | Opponents | Rating | CI |
 | --- | --- | --- | --- | --- | --- |
 | spacing-aware | bot | 400 | 2 | 1.0000 | 1.0000 – 1.0000 |
-| aggressive | bot | 400 | 2 | 0.4862 | 0.4400 – 0.5350 |
-| random | bot | 400 | 2 | 0.0137 | 0.0037 – 0.0262 |
+| aggressive | bot | 400 | 2 | 0.4775 | 0.4300 – 0.5275 |
+| random | bot | 400 | 2 | 0.0225 | 0.0100 – 0.0375 |
 
 ## Reflex Track
 

@@ -19,6 +19,7 @@ import {
   PHASE_STARTUP,
   ZONE_NONE,
   damageForCode,
+  isInvulnerable,
   juggleChainTicksElapsed,
   juggleDamageFor,
   juggleHitstunFor,
@@ -404,6 +405,25 @@ export function createFighterEnvironment(
           }
 
           const opponentIndex = opponentOf(agentIndex);
+
+          // Story 10.2: the Ultimate is untouchable through its startup and
+          // active phases, so a strike aimed at a fighter inside one simply
+          // whiffs -- no damage, no meter for either side, and `hitLanded` is
+          // deliberately left clear so the attacker's remaining active Ticks can
+          // still connect once the invulnerability lapses.
+          //
+          // Read from `preHitCommitted`, not `committed`, for the same reason
+          // the chain-continuation check below is: two fighters who both throw
+          // an Ultimate on the same Tick must each be judged against the other's
+          // *pre-Tick* state, or whichever agentIndex iterates first would be
+          // measured against a state the second has already moved on from. With
+          // both invulnerable, neither connects -- which is the clash the
+          // reference stages as a minigame, expressed here as simple mutual
+          // immunity.
+          if (isInvulnerable(config, preHitCommitted[opponentIndex], remaining[opponentIndex])) {
+            continue;
+          }
+
           // Story 8.3: a `block` only prevents damage when its Zone matches
           // the incoming strike's -- wrong-Zone or no block at all reduce to
           // the same full-damage outcome (AC3). `ZONE_NONE === ZONE_NONE`

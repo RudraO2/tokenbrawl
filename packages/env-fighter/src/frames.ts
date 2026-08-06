@@ -138,6 +138,28 @@ export function phaseOf(config: FighterConfig, code: number, remaining: number):
 }
 
 /**
+ * Whether a fighter is untouchable right now (Story 10.2).
+ *
+ * The Ultimate is the only Action that grants this, and it grants it across
+ * `startup` and `active` **but never `recovery`** -- mirroring the reference
+ * game's 12-frame super invulnerability. That asymmetry is the whole point: a
+ * full-bar Action that could be thrown out safely would be strictly correct to
+ * throw out on cooldown, and the fight would collapse into waiting for meter.
+ * Leaving recovery exposed keeps a whiffed Ultimate the worst punish in the
+ * game, which is what makes spending the bar a real decision.
+ *
+ * A pure function of the same two integers every other window question reads,
+ * so nothing is added to `FighterState` and nothing new is hashed.
+ */
+export function isInvulnerable(config: FighterConfig, code: number, remaining: number): boolean {
+  if (code !== COMMITTED_SPECIAL) {
+    return false;
+  }
+  const phase = phaseOf(config, code, remaining);
+  return phase === PHASE_STARTUP || phase === PHASE_ACTIVE;
+}
+
+/**
  * Inclusive ceiling of the range band an Action connects within.
  *
  * Throws for `COMMITTED_NONE` rather than returning `0`: a caller that asks

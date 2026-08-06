@@ -30,7 +30,7 @@ How the fight works:
 - advance closes the distance to your opponent; retreat opens it. Neither commits you to anything.
 - block reduces the damage you take, for this Decision Point only.
 - attack and special commit you: for several Ticks afterwards you cannot move, cannot block, and are not asked to act again. A commitment that misses leaves you open, so an opponent who is mid-commitment is the safest thing to hit.
-- special costs Super Meter and is offered to you only when you have enough to pay for it. It is spent whether or not it connects.
+- special is your Ultimate. It costs your entire Super Meter, so it is offered to you only when the meter is completely full, and it is spent whether or not it connects. It deals roughly three times an attack's damage, and while it winds up and strikes you cannot be hurt at all -- but that protection ends the instant the strike does, and its recovery is the longest in the game. An Ultimate thrown at nothing is the worst position you can put yourself in.
 - You are told how much of the opponent's commitment remains. Nothing else about their intent is visible to you.
 
 Your token budget is finite and shared across the entire fight. Reasoning costs tokens out of it. When it is empty you will still fight, but you will be asked for a single bare word and given room for nothing else.

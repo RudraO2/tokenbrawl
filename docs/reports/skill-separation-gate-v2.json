@@ -5,7 +5,7 @@
     "id": "fighter-1v1",
     "version": "1.0.0"
   },
-  "configHash": "24f5f97e1c88a3f3a9b66405c569c076ba30994ac93dbc69429c3b8780bdc0f7",
+  "configHash": "1024a4dc9375cbc0710a1dcb4e4c15824fda350376e9e456ff5dd19932b3db9f",
   "seedBase": 20260731,
   "seedCount": 100,
   "totalMatches": 600,
@@ -43,11 +43,11 @@
       "stronger": "aggressive",
       "weaker": "random",
       "matches": 200,
-      "koMatches": 42,
+      "koMatches": 22,
       "thresholdBasisPoints": 5000,
-      "winRateBasisPoints": 9725,
-      "ciLowerBasisPoints": 9500,
-      "ciUpperBasisPoints": 9925,
+      "winRateBasisPoints": 9550,
+      "ciLowerBasisPoints": 9275,
+      "ciUpperBasisPoints": 9800,
       "meetsThreshold": true
     }
   ],
@@ -62,16 +62,16 @@
     {
       "agent": "aggressive",
       "matches": 400,
-      "winRateBasisPoints": 4862,
-      "ciLowerBasisPoints": 4375,
-      "ciUpperBasisPoints": 5362
+      "winRateBasisPoints": 4775,
+      "ciLowerBasisPoints": 4287,
+      "ciUpperBasisPoints": 5275
     },
     {
       "agent": "random",
       "matches": 400,
-      "winRateBasisPoints": 137,
-      "ciLowerBasisPoints": 25,
-      "ciUpperBasisPoints": 262
+      "winRateBasisPoints": 225,
+      "ciLowerBasisPoints": 100,
+      "ciUpperBasisPoints": 375
     }
   ],
   "failures": []

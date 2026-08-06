@@ -1,7 +1,7 @@
 {
   "schemaVersion": "1.0.0",
   "loopStartEpochMs": 1754000000000,
-  "totalLoopDurationMs": 47600,
+  "totalLoopDurationMs": 48000,
   "entries": [
     {
       "id": "spectate-01",
@@ -19,7 +19,7 @@
       "id": "spectate-03",
       "commandLogUrl": "/replays/spectate-03.command-log.json",
       "schemaVersion": "1.0.0",
-      "frameCount": 456
+      "frameCount": 480
     },
     {
       "id": "spectate-04",
