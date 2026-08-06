@@ -296,6 +296,11 @@ export function mountPlayer(
     DEFAULT_JUICE_TUNING,
     arenaFor(DEFAULT_FIGHTER_CONFIG),
     prefersReducedMotion(view),
+    // Story 10.4. The same `FighterConfig` the paint path below draws the
+    // Commitment Window phases from, so the cinematic freezes on the film
+    // frame the fighter is actually drawn mid-Ultimate on rather than on one
+    // derived from a different copy of the frame data.
+    DEFAULT_FIGHTER_CONFIG,
   );
 
   /**

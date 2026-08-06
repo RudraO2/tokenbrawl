@@ -8,8 +8,13 @@ import {
 import type { FighterState } from '../../../../packages/env-fighter/src/state';
 import { BASIS_POINTS_FULL, type RenderFrame } from '../replay/film';
 import type { Canvas2D } from './canvas2d';
-import { drawJuiceOverlay, drawJuicedFrame } from './juice-draw';
-import type { JuiceFrame } from './juice';
+import {
+  drawCinematicPlate,
+  drawCinematicStage,
+  drawJuiceOverlay,
+  drawJuicedFrame,
+} from './juice-draw';
+import type { JuiceCinematic, JuiceFrame } from './juice';
 import { FLOOR_INSET } from './renderer';
 import { THEME } from './theme';
 
@@ -101,6 +106,7 @@ function juiceFrame(overrides: Partial<JuiceFrame> = {}): JuiceFrame {
     shakeY: 0,
     sparks: [],
     damageNumbers: [],
+    cinematic: null,
     ...overrides,
   };
 }
@@ -273,5 +279,140 @@ describe('drawJuiceOverlay places sparks and numbers', () => {
     expect(number.fillStyle).toBe(THEME.warn);
     expect(ctx.textAlign).toBe('center');
     expect(ctx.font).toBe(THEME.displayFont);
+  });
+});
+
+/**
+ * Story 10.4. The cinematic's compositing, which is the half `cinematic.ts`'s
+ * own tests cannot see: *where* each part of it lands relative to the shake.
+ */
+function cinematicWith(overrides: Partial<JuiceCinematic> = {}): JuiceCinematic {
+  return {
+    agentIndex: 0,
+    casterBasisPoints: 2_500,
+    targetBasisPoints: 7_500,
+    connected: true,
+    age: 0,
+    frames: 91,
+    flash: false,
+    title: false,
+    reachBasisPoints: 0,
+    bandPx: 16,
+    heightPx: 108,
+    streaks: [],
+    ...overrides,
+  };
+}
+
+describe('the Ultimate cinematic composites in two halves (Story 10.4)', () => {
+  it('draws nothing at all when no cinematic owns the frame', () => {
+    // The Baseline Bot promise, at the drawing layer: a Match with no Ultimate
+    // must issue the exact call sequence it issued before this story.
+    const withCinematic = createRecordingCanvas();
+    const without = createRecordingCanvas();
+    drawJuicedFrame(withCinematic, FRAME, juiceFrame(), OPTIONS);
+    drawJuicedFrame(without, FRAME, juiceFrame({ cinematic: null }), OPTIONS);
+    expect(withCinematic.calls).toStrictEqual(without.calls);
+  });
+
+  it('paints the stage half inside the shake and the plate half at identity', () => {
+    // The split the whole file exists to get right. The impact mark is struck
+    // at a fighter's position and must travel with the camera; the plate is a
+    // full-viewport fill that must cover the *unshaken* viewport, or a 16px
+    // kick leaves a stale band along one edge.
+    const ctx = createRecordingCanvas();
+    drawJuicedFrame(
+      ctx,
+      FRAME,
+      juiceFrame({
+        shakeX: 9,
+        shakeY: -9,
+        cinematic: cinematicWith({ flash: true, title: true, reachBasisPoints: 1_400, streaks: [{ offsetPx: 40, heightPx: 120, sizePx: 7 }] }),
+      }),
+      OPTIONS,
+    );
+
+    const restoreAt = ctx.calls.findIndex((call) => call.op === 'restore');
+    expect(restoreAt).toBeGreaterThan(0);
+
+    // The mark and the streak are inside the transform...
+    const markAt = ctx.calls.findIndex(
+      (call) => call.op === 'fillRect' && call.fillStyle === THEME.accent,
+    );
+    expect(markAt).toBeGreaterThan(0);
+    expect(markAt).toBeLessThan(restoreAt);
+
+    // ...and the plate is after the restore, covering the whole viewport.
+    const plate = ctx.calls
+      .slice(restoreAt)
+      .find((call) => call.op === 'fillRect' && call.fillStyle === THEME.ink);
+    expect(plate?.args).toStrictEqual([0, 0, VIEWPORT.width, VIEWPORT.height]);
+
+    // As is the banner, in the warn-as-fill language the armed gauge uses.
+    const word = ctx.calls.slice(restoreAt).find((call) => call.op === 'fillText');
+    expect(word?.args[0]).toBe('ULTIMATE');
+    expect(word?.fillStyle).toBe(THEME.bg);
+  });
+
+  it('draws no impact mark for a whiffed Ultimate', () => {
+    // Against the two halves directly, not through `drawJuicedFrame`: the
+    // block artist paints agent 0's body in the same accent, so a sweep over
+    // the whole composited frame would answer about the fighter rather than
+    // about the mark.
+    const stage = createRecordingCanvas();
+    drawCinematicStage(stage, cinematicWith({ connected: false, reachBasisPoints: 0 }), VIEWPORT, THEME);
+    expect(stage.calls).toStrictEqual([]);
+
+    // The freeze still happened, and it still says so.
+    const plate = createRecordingCanvas();
+    drawCinematicPlate(plate, cinematicWith({ connected: false, title: true }), VIEWPORT, THEME);
+    expect(plate.calls.some((call) => call.args[0] === 'ULTIMATE')).toBe(true);
+  });
+
+  it('keeps every cinematic square and band inside the stage', () => {
+    const ctx = createRecordingCanvas();
+    drawCinematicStage(
+      ctx,
+      cinematicWith({
+        casterBasisPoints: BASIS_POINTS_FULL,
+        targetBasisPoints: BASIS_POINTS_FULL,
+        reachBasisPoints: 9_000,
+        heightPx: 9_000,
+        streaks: [
+          { offsetPx: 9_000, heightPx: 9_000, sizePx: 7 },
+          { offsetPx: -9_000, heightPx: 0, sizePx: 7 },
+        ],
+      }),
+      VIEWPORT,
+      THEME,
+    );
+
+    expect(ctx.calls.length).toBeGreaterThan(0);
+    for (const call of ctx.calls) {
+      const [x, y, w, h] = call.args as readonly number[];
+      expect(x).toBeGreaterThanOrEqual(0);
+      expect(y).toBeGreaterThanOrEqual(0);
+      expect(x + w).toBeLessThanOrEqual(VIEWPORT.width);
+      expect(y + h).toBeLessThanOrEqual(GROUND_Y);
+      expect(Number.isInteger(x) && Number.isInteger(y)).toBe(true);
+    }
+  });
+
+  it('balances every save with a restore, cinematic included', () => {
+    const ctx = createRecordingCanvas();
+    drawJuicedFrame(
+      ctx,
+      FRAME,
+      juiceFrame({
+        shakeX: 4,
+        cinematic: cinematicWith({ flash: true, title: true, reachBasisPoints: 1_200 }),
+      }),
+      OPTIONS,
+    );
+    const depth = ctx.calls.reduce(
+      (open, call) => (call.op === 'save' ? open + 1 : call.op === 'restore' ? open - 1 : open),
+      0,
+    );
+    expect(depth).toBe(0);
   });
 });

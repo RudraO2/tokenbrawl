@@ -1,5 +1,11 @@
 import { DEFAULT_FIGHTER_CONFIG, type FighterConfig } from '../../../../packages/env-fighter/src/config';
+import {
+  COMMITTED_SPECIAL,
+  PHASE_ACTIVE,
+  phaseOf,
+} from '../../../../packages/env-fighter/src/frames';
 import { BASIS_POINTS_FULL, type RenderFrame } from '../replay/film';
+import { liveWindow, ticksIntoDecision } from './renderer';
 
 /**
  * Story 9.5: the juice layer, as an indexed table rather than as a simulation.
@@ -55,6 +61,35 @@ import { BASIS_POINTS_FULL, type RenderFrame } from '../replay/film';
  * expression: none of its code is reproduced here, and every value below is a
  * field in a frozen table rather than a literal at a call site, which is what
  * AC2 asks for and what makes a retune a one-line data edit.
+ *
+ * ## Story 10.4: the Ultimate cinematic, hung on the same three properties
+ *
+ * The reference stops **both fighters for 90 ticks inside its simulation**
+ * (`CINEMATIC_FREEZE = 90`). Porting that literally would change Tick counts,
+ * Match length, the Decision Point budget and every Final-State Hash in this
+ * repository -- a presentation flourish rewritten as a balance change, and
+ * every committed Command Log invalidated with it.
+ *
+ * So the freeze is held **here**, over playback frames, and the simulation is
+ * untouched. It is not a second mechanism either: hitstop above already
+ * re-presents a film frame for N extra clock frames, and the cinematic is that
+ * same hold, longer, keyed on a different trigger. The three properties carry
+ * over unchanged -- the freeze is an integer frame count, the whole cinematic
+ * is precomputed into the same table, and it is derived one way from the film.
+ * `filmIndexAt` still visits every film frame exactly once as a live frame,
+ * so the fight plays in full; only the number of callbacks it takes changes.
+ *
+ * The duration is the reference's own 90, re-homed: its loop and this player's
+ * clock both advance one frame per animation-frame callback, so 90 there and
+ * 90 here are the same length of held picture. What differs is *who owns it*.
+ *
+ * The look is translated rather than transliterated, per the story's standing
+ * rule. The reference's VFX run on a real-time loop with a particle pool and
+ * its own RNG; neither survives INV-1 or AD-15. The flash, the streaks and the
+ * impact mark below are all indexed integer arithmetic over
+ * `(filmIndex, agentIndex, ordinal)` through the same `scramble`/`jitter` the
+ * sparks already use, so the cinematic drawn at clock frame 400 is the same
+ * picture whether playback arrived there or a scrub jumped there.
  */
 
 /**
@@ -109,6 +144,73 @@ export interface SparkBurst {
   readonly lifeFrames: number;
 }
 
+/**
+ * Story 10.4. The Ultimate cinematic, entirely in frames and pixels.
+ *
+ * Every field is a count of **clock** frames or a pixel extent. Nothing here
+ * is a millisecond, a ratio of a second, or an easing curve with a duration
+ * baked into it (INV-1, INV-3). Setting `freezeFrames` to `0` removes the
+ * cinematic completely -- no hold, no record on any frame, no drawn call --
+ * which is the configuration `cinematic-neutrality.test.ts` compares the
+ * shipped one against.
+ */
+export interface CinematicTuning {
+  /**
+   * Extra clock frames the Ultimate's active film frame is held for.
+   *
+   * The reference's `CINEMATIC_FREEZE`, moved from its simulation to this
+   * renderer. `0` disables the cinematic outright.
+   */
+  readonly freezeFrames: number;
+  /**
+   * Opening frames that paint a full-stage plate.
+   *
+   * One solid plate, deliberately **not** a strobe. An alternating flash is
+   * the obvious arcade idiom and it is also a photosensitivity trigger at the
+   * frequency it would run at here (a plate every other frame is 30Hz); a
+   * single 3-frame plate reads as the same impact and repeats nothing.
+   */
+  readonly flashFrames: number;
+  /** First frame the title banner appears on, and how long it stays. */
+  readonly titleFromFrame: number;
+  readonly titleFrames: number;
+  /** Frames the impact mark takes to reach its full extent. It then holds. */
+  readonly impactFrames: number;
+  /**
+   * How far past the fighter it landed on the mark reaches, in basis points.
+   *
+   * Basis points across the arena, and derived from the *separation* rather
+   * than being a fixed length, because a fixed one cannot be right at both
+   * ends of the range. The first draft reached a flat 300px and the visual
+   * gate caught it immediately: these two fighters were `minSeparation` apart,
+   * so the mark drove straight through the opponent and ended in empty stage
+   * -- a laser that missed, drawn on the frame the Ultimate connected.
+   */
+  readonly impactOvershootBasisPoints: number;
+  /**
+   * The shortest the mark may ever be, in basis points.
+   *
+   * A point-blank Ultimate has almost no separation to derive a length from,
+   * and a two-pixel mark on the biggest Action in the game reads as nothing
+   * having happened.
+   */
+  readonly impactMinBasisPoints: number;
+  /** The impact mark's thickness, in pixels. */
+  readonly impactBandPx: number;
+  /** Height above the arena floor the impact mark is struck at, in pixels. */
+  readonly impactHeightPx: number;
+  /** Peak stage offset at the instant the Ultimate lands, in pixels. */
+  readonly shakeMagnitude: number;
+  /** Frames that shake decays to nothing over. */
+  readonly shakeFrames: number;
+  /** Squares thrown off the caster, and how far they may travel. */
+  readonly streakCount: number;
+  readonly streakReachPx: number;
+  /** How high above the floor the streak field spans, in pixels. */
+  readonly streakHeightPx: number;
+  readonly streakSizePx: number;
+}
+
 export interface JuiceTuning {
   /**
    * Frames the film index is held on a hit, by kind.
@@ -154,6 +256,8 @@ export interface JuiceTuning {
   readonly damageNumberFrames: number;
   /** How far the number drifts upward across its whole life, in pixels. */
   readonly damageNumberRisePx: number;
+  /** Story 10.4. The Ultimate's cinematic. */
+  readonly cinematic: CinematicTuning;
 }
 
 /**
@@ -176,6 +280,27 @@ export const DEFAULT_JUICE_TUNING: JuiceTuning = Object.freeze({
   }),
   damageNumberFrames: 24,
   damageNumberRisePx: 28,
+  // 90 is the reference's own `CINEMATIC_FREEZE`, held by the renderer instead
+  // of by the simulation. The segments inside it are laid out so the hold is
+  // never a still picture: plate, then banner and expanding mark, then a
+  // streak field that outlives both and carries the stage to the resume.
+  cinematic: Object.freeze({
+    freezeFrames: 90,
+    flashFrames: 3,
+    titleFromFrame: 3,
+    titleFrames: 78,
+    impactFrames: 22,
+    impactOvershootBasisPoints: 1_000,
+    impactMinBasisPoints: 1_200,
+    impactBandPx: 16,
+    impactHeightPx: 108,
+    shakeMagnitude: 16,
+    shakeFrames: 26,
+    streakCount: 14,
+    streakReachPx: 320,
+    streakHeightPx: 210,
+    streakSizePx: 7,
+  }),
 });
 
 /** The arena bounds a position is scaled against. */
@@ -242,6 +367,74 @@ export interface JuiceNumber {
 }
 
 /**
+ * Story 10.4. One Ultimate, at the film frame its active phase opens on.
+ *
+ * `filmIndex` is the *first* frame of the active run rather than every frame
+ * in it. Under the shipped frame data the run is exactly one film frame wide
+ * -- `specialWindow` is `10/5/45` ticks and the film samples 12 frames across
+ * a 30-tick Decision Point, so ticks 10..14 are visible on one frame and one
+ * only -- but a retuned window would widen it, and a cinematic that re-fired
+ * on each frame of the run would freeze the stage several times over.
+ */
+export interface CinematicEvent {
+  /** The film frame the Ultimate's active phase opens on. */
+  readonly filmIndex: number;
+  /** The *caster*, unlike `JuiceEvent.agentIndex`, which names the struck fighter. */
+  readonly agentIndex: 0 | 1;
+  readonly casterBasisPoints: number;
+  readonly targetBasisPoints: number;
+  /**
+   * Whether the Ultimate took health off the opponent across this Decision
+   * Point.
+   *
+   * The freeze happens either way -- AC1 keys it on the active phase, and an
+   * Ultimate that is *about to whiff* is exactly as worth stopping for -- but
+   * the impact mark and the extra shake are the connecting case's, per AC5.
+   * A whiffed full-bar Action that still drew a hit mark would be the juice
+   * layer telling the viewer something the simulation did not do.
+   */
+  readonly connected: boolean;
+}
+
+/** One square in the cinematic's streak field. */
+export interface JuiceStreak {
+  /** Signed pixel offset from the caster. */
+  readonly offsetPx: number;
+  /** Height above the arena floor, in pixels. Never negative. */
+  readonly heightPx: number;
+  readonly sizePx: number;
+}
+
+/** Everything the cinematic needs on one clock frame, or `null` on every other frame. */
+export interface JuiceCinematic {
+  readonly agentIndex: 0 | 1;
+  readonly casterBasisPoints: number;
+  readonly targetBasisPoints: number;
+  readonly connected: boolean;
+  /** Clock frames since the freeze opened. `0` on the one live frame. */
+  readonly age: number;
+  /** Total clock frames this cinematic occupies: the live frame plus every hold. */
+  readonly frames: number;
+  /** This frame paints the full-stage plate. */
+  readonly flash: boolean;
+  /** This frame carries the title banner. */
+  readonly title: boolean;
+  /**
+   * How far the impact mark reaches from the caster, in basis points across
+   * the arena. `0` draws nothing.
+   *
+   * Basis points rather than pixels, for the reason the whole module gives:
+   * `juice-draw.ts` owns the one multiplication that turns this into a screen
+   * coordinate, because it is the only file that has a viewport.
+   */
+  readonly reachBasisPoints: number;
+  /** The impact mark's thickness in pixels, and the height it is struck at. */
+  readonly bandPx: number;
+  readonly heightPx: number;
+  readonly streaks: readonly JuiceStreak[];
+}
+
+/**
  * Everything the overlay needs for one *clock* frame.
  *
  * Note "clock", not "film": with hitstop the two indexes diverge, and keeping
@@ -257,6 +450,8 @@ export interface JuiceFrame {
   readonly shakeY: number;
   readonly sparks: readonly JuiceSpark[];
   readonly damageNumbers: readonly JuiceNumber[];
+  /** Story 10.4. The Ultimate cinematic on this clock frame, or `null`. */
+  readonly cinematic: JuiceCinematic | null;
 }
 
 export interface JuiceTrack {
@@ -268,6 +463,8 @@ export interface JuiceTrack {
   readonly at: (clockIndex: number) => JuiceFrame;
   /** The derived stream this track was built from. Exposed for tests and diagnostics. */
   readonly events: readonly JuiceEvent[];
+  /** Story 10.4. The Ultimates this film contains, in film order. Same standing as `events`. */
+  readonly cinematics: readonly CinematicEvent[];
 }
 
 /** The frame a film with no hits, or no frames at all, resolves to. */
@@ -278,6 +475,7 @@ const NEUTRAL_FRAME: JuiceFrame = Object.freeze({
   shakeY: 0,
   sparks: Object.freeze([]),
   damageNumbers: Object.freeze([]),
+  cinematic: null,
 });
 
 /**
@@ -351,6 +549,75 @@ export function deriveJuiceEvents(
           agentIndex,
           damage,
           positionBasisPoints: positionBasisPoints(frame.to.position[agentIndex], arena),
+        }),
+      );
+    }
+  }
+
+  return Object.freeze(events);
+}
+
+/**
+ * Diffs the film into the Ultimates it contains (Story 10.4).
+ *
+ * Every frame is inspected, not only the first of each Decision Point, because
+ * that is the whole point: `specialWindow` is `10/5/45` ticks and a Decision
+ * Point is 30, so the Ultimate's active phase opens and closes *strictly
+ * between two samples* of the simulation. The same problem `liveWindow` was
+ * written for in `renderer.ts` -- and the reason this asks that function
+ * rather than reproducing it. A census over the demo Match found
+ * `attack-active` played on zero of 360 frames before that reconstruction
+ * existed; keying a 90-frame freeze off `frame.from` would have the cinematic
+ * fire on a fighter already deep in recovery, or never.
+ *
+ * Only the *first* frame of each active run is emitted. Under the shipped
+ * frame data a run is one frame wide, but a retuned window would widen it and
+ * a freeze per frame of the run would stop the stage several times over.
+ *
+ * `connected` is read from the opponent's health across the Decision Point,
+ * which is the same signal `deriveJuiceEvents` grades a hit on and the same
+ * one for the same reason: `windowHitLanded` stays set for the rest of the
+ * window and is true of a blocked hit as well as a damaging one.
+ */
+export function deriveCinematicEvents(
+  frames: readonly RenderFrame[],
+  config: FighterConfig = DEFAULT_FIGHTER_CONFIG,
+  arena: ArenaBounds = DEFAULT_ARENA,
+): readonly CinematicEvent[] {
+  const events: CinematicEvent[] = [];
+  // Whether each fighter's previous frame was already inside an active run, so
+  // a run that spans several frames fires once. A local array in a pure
+  // function, not a module binding -- `source-discipline.test.ts` bans the
+  // latter and this is per-call state besides.
+  const inRun = [false, false];
+
+  for (const frame of frames) {
+    const ticksElapsed = ticksIntoDecision(frame, config);
+    for (const agentIndex of [0, 1] as const) {
+      const open = liveWindow(frame, agentIndex, config, ticksElapsed);
+      const active =
+        open.committedAction === COMMITTED_SPECIAL &&
+        phaseOf(config, open.committedAction, open.remaining) === PHASE_ACTIVE;
+
+      if (!active) {
+        inRun[agentIndex] = false;
+        continue;
+      }
+      if (inRun[agentIndex]) {
+        continue;
+      }
+      inRun[agentIndex] = true;
+
+      const targetIndex = agentIndex === 0 ? 1 : 0;
+      const before = frame.from.health[targetIndex];
+      const after = frame.to.health[targetIndex];
+      events.push(
+        Object.freeze({
+          filmIndex: frame.index,
+          agentIndex,
+          casterBasisPoints: positionBasisPoints(frame.to.position[agentIndex], arena),
+          targetBasisPoints: positionBasisPoints(frame.to.position[targetIndex], arena),
+          connected: before > 0 && after < before,
         }),
       );
     }
@@ -482,6 +749,13 @@ const SPARK_MAX_OFFSET_PX = 240;
  */
 const SEED_AGENT_STRIDE = 97;
 const SEED_FRAME_STRIDE = 1021;
+/**
+ * Offset that keeps a cinematic's streak seeds clear of the spark seeds drawn
+ * from the same `(filmIndex, agentIndex)` pair. Larger than the largest
+ * `sparks[*].count` and than `SEED_AGENT_STRIDE`, so no streak ordinal can
+ * land on a spark ordinal's seed and produce a pixel-identical clone of it.
+ */
+const SEED_CINEMATIC_OFFSET = 524_287;
 
 /** The burst tuning for a kind, falling back to the light one for an unknown kind. */
 function sparkBurstFor(tuning: JuiceTuning, kind: JuiceKind): SparkBurst {
@@ -546,6 +820,131 @@ function numberFor(event: JuiceEvent, age: number, tuning: JuiceTuning): JuiceNu
 }
 
 /**
+ * The streak field around the caster at one age (Story 10.4).
+ *
+ * The reference throws particles from a pool, each with its own lifetime and
+ * its own draw from a shared RNG. Neither survives here: a pool is stepped
+ * state, which a scrub cannot rewind, and an ungoverned RNG makes the same
+ * frame draw differently on two viewings. So the field is *phase-offset*
+ * instead -- every square owns a fixed slice of the cycle, derived from its
+ * ordinal, and its position at any age is that slice plus the age, modulo the
+ * cycle. The field therefore looks continuously alive while being a pure
+ * function of `(filmIndex, agentIndex, ordinal, age)`, which is what makes
+ * seeking into the middle of a freeze show the same picture playing into it
+ * does.
+ */
+function streaksFor(
+  event: CinematicEvent,
+  age: number,
+  tuning: JuiceTuning,
+): readonly JuiceStreak[] {
+  const shape = tuning.cinematic;
+  const cycle = Math.max(1, shape.freezeFrames);
+  const spanPx = Math.max(0, shape.streakHeightPx);
+  const toward = event.targetBasisPoints >= event.casterBasisPoints ? 1 : -1;
+
+  const streaks: JuiceStreak[] = [];
+  for (let ordinal = 0; ordinal < Math.max(0, shape.streakCount); ordinal += 1) {
+    const seed =
+      event.filmIndex * SEED_FRAME_STRIDE +
+      event.agentIndex * SEED_AGENT_STRIDE +
+      SEED_CINEMATIC_OFFSET +
+      ordinal;
+    const phase = (age + (scramble(seed, 11) % cycle)) % cycle;
+    const travelledPx = Math.floor((Math.max(0, shape.streakReachPx) * phase) / cycle);
+    // Mostly outward toward the opponent, one square in five thrown back the
+    // other way: a field that all travels one direction reads as a scrolling
+    // background rather than as debris coming off a fighter.
+    const direction = scramble(seed, 12) % 5 === 0 ? -toward : toward;
+    streaks.push(
+      Object.freeze({
+        offsetPx: direction * travelledPx,
+        heightPx: spanPx === 0 ? 0 : scramble(seed, 13) % (spanPx + 1),
+        // Shrinks across its slice, the same way a spark dies: the flat-block
+        // way to say "fading" when `docs/DESIGN.md` bans translucency outright.
+        sizePx: Math.max(
+          1,
+          Math.max(1, shape.streakSizePx) -
+            Math.floor((Math.max(1, shape.streakSizePx) * phase) / (cycle * 2)),
+        ),
+      }),
+    );
+  }
+  return Object.freeze(streaks);
+}
+
+/**
+ * How far the impact mark reaches at full extension, in basis points.
+ *
+ * The separation between the two fighters plus a fixed overshoot, floored so a
+ * point-blank Ultimate still leaves a mark and capped at the arena so it can
+ * never be drawn off-stage.
+ */
+function fullReachFor(event: CinematicEvent, tuning: JuiceTuning): number {
+  const shape = tuning.cinematic;
+  const separation = Math.abs(event.targetBasisPoints - event.casterBasisPoints);
+  return Math.min(
+    BASIS_POINTS_FULL,
+    Math.max(
+      Math.max(0, shape.impactMinBasisPoints),
+      separation + Math.max(0, shape.impactOvershootBasisPoints),
+    ),
+  );
+}
+
+/** The whole cinematic record for one event at one age. */
+function cinematicAt(event: CinematicEvent, age: number, tuning: JuiceTuning): JuiceCinematic {
+  const shape = tuning.cinematic;
+  // Expands to full reach and then *stays* there: AC5 asks for an impact
+  // mark, and a mark that retracted would be a second flash.
+  const reachBasisPoints = event.connected
+    ? Math.floor(
+        (fullReachFor(event, tuning) *
+          Math.min(Math.max(0, age), Math.max(1, shape.impactFrames))) /
+          Math.max(1, shape.impactFrames),
+      )
+    : 0;
+
+  return Object.freeze({
+    agentIndex: event.agentIndex,
+    casterBasisPoints: event.casterBasisPoints,
+    targetBasisPoints: event.targetBasisPoints,
+    connected: event.connected,
+    age,
+    frames: Math.max(0, shape.freezeFrames) + 1,
+    flash: age < shape.flashFrames,
+    title: age >= shape.titleFromFrame && age < shape.titleFromFrame + shape.titleFrames,
+    reachBasisPoints,
+    bandPx: shape.impactBandPx,
+    heightPx: shape.impactHeightPx,
+    streaks: streaksFor(event, age, tuning),
+  });
+}
+
+/**
+ * The cinematic a reduced-motion viewer gets: the same beat, standing still.
+ *
+ * The freeze itself is kept -- the track's shape is never flattened, for the
+ * reason `buildJuiceTrack`'s `reducedMotion` note gives -- but the plate, the
+ * streak field and the mark's expansion all go. What is left is a still title
+ * card with the mark already drawn at full reach, which says the same thing
+ * without any of the three motions that made it worth switching off: a
+ * full-stage luminance change, a moving particle field, and a camera shake.
+ */
+function stilled(
+  cinematic: JuiceCinematic,
+  event: CinematicEvent,
+  tuning: JuiceTuning,
+): JuiceCinematic {
+  return Object.freeze({
+    ...cinematic,
+    flash: false,
+    reachBasisPoints: cinematic.connected ? fullReachFor(event, tuning) : 0,
+    streaks: Object.freeze([]),
+  });
+}
+
+/**
  * Builds the whole track: one entry per clock frame, hitstop holds included.
  *
  * The mapping is the load-bearing idea. A hitstop does not *skip* film frames
@@ -577,8 +976,19 @@ export function buildJuiceTrack(
    * this flag has to switch off.
    */
   reducedMotion = false,
+  /**
+   * Story 10.4. The frame data the Ultimate's active phase is located against.
+   *
+   * Passed rather than assumed for the same reason `arena` is: a Match run
+   * under a retuned `specialWindow` would otherwise have its cinematic fire on
+   * the wrong film frame -- or on none -- while the fighter itself drew the
+   * correct phase, because `renderer.ts` reads the live config and this would
+   * have snapshotted the shipped one at module load.
+   */
+  config: FighterConfig = DEFAULT_FIGHTER_CONFIG,
 ): JuiceTrack {
   const events = deriveJuiceEvents(frames, tuning, arena);
+  const cinematics = deriveCinematicEvents(frames, config, arena);
 
   // Which events fire on which film frame, and the longest hold that film
   // frame owes. Two fighters can trade in one Decision Point; the stage cannot
@@ -594,9 +1004,27 @@ export function buildJuiceTrack(
     bucket.push(event);
   }
 
+  // Which film frame each Ultimate opens on. First event wins: two fighters
+  // whose Ultimates go active on the same film frame is a double-KO-shaped
+  // coincidence the stage cannot express twice, and one freeze carrying one
+  // caster is a truthful picture where two overlaid cinematics would be a
+  // smear. `freezeFrames <= 0` removes the cinematic outright -- no hold, no
+  // record, and therefore a call sequence byte-identical to the one this
+  // player drew before Story 10.4.
+  const freezeFrames = Math.max(0, tuning.cinematic.freezeFrames);
+  const cinematicByFilmIndex = new Map<number, CinematicEvent>();
+  if (freezeFrames > 0) {
+    for (const cinematic of cinematics) {
+      if (!cinematicByFilmIndex.has(cinematic.filmIndex)) {
+        cinematicByFilmIndex.set(cinematic.filmIndex, cinematic);
+      }
+    }
+  }
+
   // Every event's first clock frame, so ages are a subtraction rather than a
   // search. Built in the same walk that builds the track.
   const startedAt = new Map<JuiceEvent, number>();
+  const cinematicStartedAt = new Map<CinematicEvent, number>();
   const filmIndexes: number[] = [];
   const frozenFlags: boolean[] = [];
 
@@ -605,12 +1033,21 @@ export function buildJuiceTrack(
     for (const event of fired) {
       startedAt.set(event, filmIndexes.length);
     }
+    const cinematic = cinematicByFilmIndex.get(frame.index);
+    if (cinematic !== undefined) {
+      cinematicStartedAt.set(cinematic, filmIndexes.length);
+    }
     filmIndexes.push(frame.index);
     frozenFlags.push(false);
 
-    const hold = fired.reduce(
-      (longest, event) => Math.max(longest, tuning.hitstopFrames[event.kind] ?? 0),
-      0,
+    // One hold, not two. A hit and an Ultimate can land on the same film frame
+    // -- and the longer of the two wins, exactly as two simultaneous hits
+    // already resolve to the longer hitstop. Summing them would produce a
+    // freeze nobody tuned, and the cinematic's own count is the one the
+    // reference chose.
+    const hold = Math.max(
+      fired.reduce((longest, event) => Math.max(longest, tuning.hitstopFrames[event.kind] ?? 0), 0),
+      cinematic === undefined ? 0 : freezeFrames,
     );
     for (let held = 0; held < hold; held += 1) {
       filmIndexes.push(frame.index);
@@ -648,10 +1085,31 @@ export function buildJuiceTrack(
     }
   }
 
+  // Which cinematic, if any, owns each clock frame. Bucketed the same way the
+  // hit events are, and for the same reason: `at(n)` must be an array read, so
+  // that seeking to a frame and playing to it are the same operation.
+  const cinematicByClock: (CinematicEvent | null)[] = filmIndexes.map(() => null);
+  for (const cinematic of cinematicByFilmIndex.values()) {
+    const start = cinematicStartedAt.get(cinematic);
+    if (start === undefined) {
+      continue;
+    }
+    const end = Math.min(filmIndexes.length, start + freezeFrames + 1);
+    for (let clockIndex = Math.max(0, start); clockIndex < end; clockIndex += 1) {
+      cinematicByClock[clockIndex] = cinematic;
+    }
+  }
+
   const lastClockIndex = filmIndexes.length - 1;
 
   const track: JuiceFrame[] = filmIndexes.map((filmIndex, clockIndex) => {
     const frozen = frozenFlags[clockIndex];
+
+    const owner = cinematicByClock[clockIndex];
+    const cinematic =
+      owner === null
+        ? null
+        : cinematicAt(owner, clockIndex - (cinematicStartedAt.get(owner) ?? 0), tuning);
     // Two cases resolve to a still stage.
     //
     // Reduced motion: the viewer asked for it, and it must hold on a scrub as
@@ -670,6 +1128,14 @@ export function buildJuiceTrack(
         shakeY: 0,
         sparks: Object.freeze([]),
         damageNumbers: Object.freeze([]),
+        // The final clock frame drops the cinematic entirely, for the same
+        // reason it drops the shake: playback rests there indefinitely, and a
+        // title banner or a half-drawn impact mark left on screen forever
+        // reads as a broken layout rather than as a finished Match.
+        cinematic:
+          clockIndex === lastClockIndex || cinematic === null || owner === null
+            ? null
+            : stilled(cinematic, owner, tuning),
       });
     }
 
@@ -721,13 +1187,33 @@ export function buildJuiceTrack(
       .map((agentIndex) => latestNumber.get(agentIndex)?.number)
       .filter((number): number is JuiceNumber => number !== undefined);
 
+    // The cinematic's shake is added *after* the hit shake is clamped, and
+    // bounded by its own magnitude rather than folded into `maxMagnitude`.
+    // Widening that cap instead would let two ordinary simultaneous hits sum
+    // higher than they do today -- a silent retune of every Match that has
+    // never seen an Ultimate, which is exactly what this story must not do.
+    const cinematicMagnitude =
+      cinematic === null
+        ? 0
+        : decayed(
+            Math.max(0, tuning.cinematic.shakeMagnitude),
+            cinematic.age,
+            Math.max(0, tuning.cinematic.shakeFrames),
+          );
+    const cinematicSalt = cinematic === null ? 0 : cinematic.agentIndex * 13 + 2_003;
+
     return Object.freeze({
       filmIndex,
       frozen,
-      shakeX: Math.max(-maxMagnitude, Math.min(maxMagnitude, shake.x)),
-      shakeY: Math.max(-maxMagnitude, Math.min(maxMagnitude, shake.y)),
+      shakeX:
+        Math.max(-maxMagnitude, Math.min(maxMagnitude, shake.x)) +
+        jitter(clockIndex, cinematicSalt, cinematicMagnitude),
+      shakeY:
+        Math.max(-maxMagnitude, Math.min(maxMagnitude, shake.y)) +
+        jitter(clockIndex, cinematicSalt + 613, cinematicMagnitude),
       sparks: Object.freeze(sparks),
       damageNumbers: Object.freeze(damageNumbers),
+      cinematic,
     });
   });
 
@@ -741,6 +1227,7 @@ export function buildJuiceTrack(
   return Object.freeze({
     frameCount: track.length,
     events,
+    cinematics,
     // A film with no frames has no juice and no film index to hold: both
     // accessors answer with the neutral value rather than throwing, so an
     // empty log renders a blank stage instead of killing the page.

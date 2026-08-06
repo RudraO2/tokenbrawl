@@ -108,6 +108,15 @@ const HUD_LABEL_BASELINE = METER_TOP + METER_HEIGHT + 20;
  */
 const BANK_HEIGHT = HUD_BAR_HEIGHT;
 const BANK_TOP = HUD_LABEL_BASELINE + METER_GAP;
+/**
+ * The first row of pixels below every HUD block (Story 10.4).
+ *
+ * Derived rather than written down, so a later story that grows the gauge
+ * again -- 10.3 has already done it once -- moves everything hung beneath the
+ * HUD with it instead of leaving the cinematic's banner overlapping a Token
+ * Bank that quietly got taller.
+ */
+export const HUD_BOTTOM = BANK_TOP + BANK_HEIGHT;
 
 /**
  * Interpolates one fighter's arena position between two simulated states.
@@ -145,9 +154,24 @@ function interpolatedX(
 }
 
 /** The Commitment Window a fighter is inside partway through a Decision Point. */
-interface LiveWindow {
+export interface LiveWindow {
   readonly committedAction: number;
   readonly remaining: number;
+}
+
+/**
+ * Ticks elapsed within this Decision Point at this film frame.
+ *
+ * Extracted and exported for Story 10.4. The juice layer has to answer the
+ * same question this file already answers -- *which phase is this fighter's
+ * Commitment Window in, right now* -- in order to find the film frame an
+ * Ultimate goes active on, and the reconstruction below is subtle enough
+ * (see `liveWindow`'s docblock) that a second copy of it in `juice.ts` would
+ * be a second thing to keep correct. Presentation arithmetic over state the
+ * simulation already produced: no clock, no feedback, no hash (AD-15).
+ */
+export function ticksIntoDecision(frame: RenderFrame, config: FighterConfig): number {
+  return Math.floor((frame.progressBasisPoints * config.ticksPerDecision) / BASIS_POINTS_FULL);
 }
 
 /**
@@ -174,7 +198,7 @@ interface LiveWindow {
  * It reads no clock, feeds nothing back, and changes no hash -- the same
  * standing as position interpolation.
  */
-function liveWindow(
+export function liveWindow(
   frame: RenderFrame,
   agentIndex: 0 | 1,
   config: FighterConfig,
@@ -384,9 +408,7 @@ export function drawFrame(ctx: Canvas2D, frame: RenderFrame, options: DrawFrameO
     ),
   );
 
-  const ticksElapsed = Math.floor(
-    (frame.progressBasisPoints * config.ticksPerDecision) / BASIS_POINTS_FULL,
-  );
+  const ticksElapsed = ticksIntoDecision(frame, config);
 
   for (const agentIndex of [0, 1] as const) {
     const window = liveWindow(frame, agentIndex, config, ticksElapsed);

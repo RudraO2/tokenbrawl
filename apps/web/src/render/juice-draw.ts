@@ -1,7 +1,13 @@
 import { BASIS_POINTS_FULL, type RenderFrame } from '../replay/film';
 import type { Canvas2D } from './canvas2d';
-import type { JuiceFrame } from './juice';
-import { FLOOR_INSET, drawFrame, type DrawFrameOptions, type Viewport } from './renderer';
+import type { JuiceCinematic, JuiceFrame } from './juice';
+import {
+  FLOOR_INSET,
+  HUD_BOTTOM,
+  drawFrame,
+  type DrawFrameOptions,
+  type Viewport,
+} from './renderer';
 import { THEME, type Theme } from './theme';
 
 /**
@@ -112,6 +118,128 @@ function paintNumbers(
   }
 }
 
+/**
+ * Story 10.4. The Ultimate cinematic, in two halves.
+ *
+ * The split is not cosmetic. The impact mark and the streak field belong to
+ * the *stage*: they are struck at a fighter's position and must travel with
+ * the shake, or a 16px camera kick would slide the beam off the fighter that
+ * threw it. The plate and the banner belong to the *screen*: a letterboxed
+ * title that rattled with the camera reads as a broken overlay rather than as
+ * framing, and the plate is a full-viewport fill that must not leave a stale
+ * band along whichever edge the translate moved away from -- the same reason
+ * the clear happens at identity above.
+ *
+ * So `drawCinematicStage` runs inside the transform, next to the sparks, and
+ * `drawCinematicPlate` runs after the `restore`, at identity.
+ *
+ * Everything below is a `fillRect` or a `fillText` in a palette colour. The
+ * reference's super does this with additive blending, a radial gradient and an
+ * alpha ramp; `docs/DESIGN.md` bans all three and `style-discipline.test.ts`
+ * enforces the alpha half directly. A solid plate for three frames, a hard
+ * accent band and a field of shrinking squares say the same thing flat.
+ */
+export function drawCinematicStage(
+  ctx: Canvas2D,
+  cinematic: JuiceCinematic,
+  viewport: Viewport,
+  theme: Theme = THEME,
+): void {
+  const groundY = viewport.height - FLOOR_INSET;
+  const casterX = (cinematic.casterBasisPoints * viewport.width) / BASIS_POINTS_FULL;
+
+  // The impact mark: a hard accent band struck from the caster toward whoever
+  // it landed on, with a heavier cap at the leading edge so it reads as
+  // something thrown rather than as a stray rule. Absent on a whiff, because
+  // `reachBasisPoints` is zero there.
+  if (cinematic.reachBasisPoints > 0) {
+    const toward = cinematic.targetBasisPoints >= cinematic.casterBasisPoints ? 1 : -1;
+    const band = Math.max(1, Math.round(cinematic.bandPx));
+    // The one viewport multiplication for the mark, in the same place and for
+    // the same reason as `paintSparks`': the track carries basis points, and
+    // only here is there a viewport to turn them into pixels with.
+    const reach = Math.round(
+      (cinematic.reachBasisPoints * viewport.width) / BASIS_POINTS_FULL,
+    );
+    const y = clamp(Math.round(groundY - cinematic.heightPx - band / 2), 0, Math.max(0, groundY - band));
+    const near = Math.round(casterX);
+    const far = near + toward * reach;
+    const left = clamp(Math.min(near, far), 0, viewport.width);
+    const right = clamp(Math.max(near, far), 0, viewport.width);
+
+    ctx.fillStyle = theme.accent;
+    ctx.fillRect(left, y, Math.max(0, right - left), band);
+
+    const capX = clamp(
+      Math.round(far - band),
+      0,
+      Math.max(0, viewport.width - band * 2),
+    );
+    ctx.fillRect(capX, clamp(y - band, 0, Math.max(0, groundY - band * 3)), band * 2, band * 3);
+  }
+
+  for (const streak of cinematic.streaks) {
+    const size = Math.max(1, Math.round(streak.sizePx));
+    const x = clamp(Math.round(casterX + streak.offsetPx - size / 2), 0, Math.max(0, viewport.width - size));
+    const y = clamp(Math.round(groundY - streak.heightPx - size / 2), 0, Math.max(0, groundY - size));
+    ctx.fillStyle = theme.accent;
+    ctx.fillRect(x, y, size, size);
+  }
+}
+
+/** Gap between the lowest HUD block and the title banner. */
+const BANNER_GAP_PX = 12;
+/** The banner's height. Tall enough for the display face plus its own inset. */
+const BANNER_HEIGHT_PX = 44;
+/**
+ * The word the banner carries.
+ *
+ * `ULTIMATE`, deliberately the same word Story 10.3 put on the armed gauge.
+ * The gauge says ULTIMATE READY for as long as the bar is full; this is the
+ * payoff to that arming rather than a separate idea, and a viewer who has been
+ * watching a red bar say READY should see the same word when it is spent.
+ */
+const BANNER_WORD = 'ULTIMATE';
+
+export function drawCinematicPlate(
+  ctx: Canvas2D,
+  cinematic: JuiceCinematic,
+  viewport: Viewport,
+  theme: Theme = THEME,
+): void {
+  // One solid plate, three frames, no repeat -- see `CinematicTuning.flashFrames`
+  // for why this is not a strobe.
+  if (cinematic.flash) {
+    ctx.fillStyle = theme.ink;
+    ctx.fillRect(0, 0, viewport.width, viewport.height);
+  }
+
+  if (!cinematic.title) {
+    return;
+  }
+
+  // Warn-as-fill with the word in ground ink: the same pairing `drawSuperGauge`
+  // and `drawTokenBank` already use for a crossed threshold, and the one
+  // direction of that pair `docs/DESIGN.md` measured as legible (warn *on* bg
+  // is 4.26:1 and misses the 4.5:1 floor; bg on warn does not).
+  const top = clamp(HUD_BOTTOM + BANNER_GAP_PX, 0, Math.max(0, viewport.height - BANNER_HEIGHT_PX));
+  ctx.fillStyle = theme.warn;
+  ctx.fillRect(0, top, viewport.width, BANNER_HEIGHT_PX);
+
+  ctx.strokeStyle = theme.ink;
+  ctx.lineWidth = theme.borderWidth;
+  ctx.strokeRect(0, top, viewport.width, BANNER_HEIGHT_PX);
+
+  ctx.fillStyle = theme.bg;
+  ctx.font = theme.displayFont;
+  ctx.textAlign = 'center';
+  ctx.fillText(
+    BANNER_WORD,
+    Math.round(viewport.width / 2),
+    Math.round(top + BANNER_HEIGHT_PX - theme.borderWidth * 3),
+  );
+}
+
 /** Draws the sparks and floating numbers for one clock frame. */
 export function drawJuiceOverlay(
   ctx: Canvas2D,
@@ -152,6 +280,16 @@ export function drawJuicedFrame(
   ctx.save();
   ctx.translate(juiceFrame.shakeX, juiceFrame.shakeY);
   drawFrame(ctx, frame, options);
+  if (juiceFrame.cinematic !== null) {
+    drawCinematicStage(ctx, juiceFrame.cinematic, viewport, theme);
+  }
   drawJuiceOverlay(ctx, juiceFrame, viewport, theme);
   ctx.restore();
+
+  // At identity, and after the restore. The plate must cover the whole
+  // viewport rather than the shaken one, and the banner is framing rather
+  // than scenery -- see `drawCinematicStage`'s docblock for the split.
+  if (juiceFrame.cinematic !== null) {
+    drawCinematicPlate(ctx, juiceFrame.cinematic, viewport, theme);
+  }
 }
