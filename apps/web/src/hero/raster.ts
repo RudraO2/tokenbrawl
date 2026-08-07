@@ -19,8 +19,9 @@ import { GLYPH_HEIGHT, GLYPH_SPACING, GLYPH_WIDTH, glyphRows, measureText } from
  * `fillStyle` with no palette entry **throws**. A later story that puts a sixth
  * colour on the canvas breaks the hero build loudly rather than having it
  * silently quantised to whatever was nearest. Colours arrive from `THEME`; no
- * literal appears here, because `style-discipline.test.ts` allows a hex in two
- * files and this is not one of them.
+ * literal appears here, because `style-discipline.test.ts` allows a hex in
+ * three declared colour sources -- `styles/tokens.css`, `render/theme.ts` and
+ * (since Story 11.1) `render/arena-palette.ts` -- and this is none of them.
  *
  * ## What is not implemented
  *

@@ -7,16 +7,22 @@ import {
 /**
  * The canvas half of the design system.
  *
- * `tokens.css` is the single source of every colour in the app, but a canvas
- * cannot cheaply read a CSS custom property -- `getComputedStyle` per frame is
+ * `tokens.css` is the single source of every colour the *page* uses, but a
+ * canvas cannot cheaply read a CSS custom property -- `getComputedStyle` per frame is
  * a layout read sixty times a second, and it does not exist at all under the
  * `node` test environment. So the five colours are mirrored here, and
  * `style-discipline.test.ts` asserts that every value below still appears in
  * `tokens.css`. The mirror is machine-checked rather than assumed, which is
  * the only way two sources of one truth are survivable.
  *
- * This file and `tokens.css` are the ONLY places in `apps/web` where a hex
- * literal may appear. The same test enforces that too.
+ * This file holds the **brand**, and it is not the only palette any more.
+ * Story 11.1 split the app into two regimes: page chrome, which uses these
+ * five colours and nothing else, and the arena under `render/`, whose health
+ * tiers, super meter and per-fighter auras are not brand colours at all and
+ * live in `render/arena-palette.ts`. Those three files -- `tokens.css`, this
+ * one, and the arena palette -- are the only places in `apps/web/src` where a
+ * hex literal may appear, and `style-discipline.test.ts` enforces that. See
+ * `docs/DESIGN.md`, "Two regimes: the page and the arena".
  */
 
 export interface Theme {

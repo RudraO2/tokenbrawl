@@ -351,11 +351,13 @@ export interface JuiceSpark {
   /**
    * Shrinks as the burst ages, which is how it dies.
    *
-   * A square that shrank is the flat-block way to say "fading". Actually
-   * fading it is not available: `docs/DESIGN.md` bans translucency and
-   * `style-discipline.test.ts` enforces that by banning any `globalAlpha`
-   * assignment other than `1` outside `backdrop.ts`. Shrinking reads the same
-   * at five Decision Points a second and stays inside the house style.
+   * A square that shrank is the flat-block way to say "fading". When this was
+   * written, actually fading it was not available: `style-discipline.test.ts`
+   * banned any `globalAlpha` assignment other than `1` outside `backdrop.ts`.
+   * **Story 11.1 released `render/` from that rule**, so a real alpha ramp is
+   * now legal here. Shrinking stays until a drawing story replaces it on
+   * purpose -- 11.2 owns impact FX. Nothing in this file is shrinking because
+   * a rule still says so.
    */
   readonly sizePx: number;
 }

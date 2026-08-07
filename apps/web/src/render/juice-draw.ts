@@ -30,10 +30,11 @@ import { THEME, type Theme } from './theme';
  * and a rectangular spark is what that looks like in motion.
  *
  * Nothing here is translucent either. The reflex when an effect must "fade" is
- * to ramp `globalAlpha`, and `style-discipline.test.ts` bans exactly that
- * outside `backdrop.ts` -- so a spark dies by shrinking to a pixel and then
- * expiring on its tuned frame, which reads the same at five Decision Points a
- * second and stays flat.
+ * to ramp `globalAlpha`, and when this was written `style-discipline.test.ts`
+ * banned exactly that outside `backdrop.ts` -- so a spark dies by shrinking to
+ * a pixel and then expiring on its tuned frame. **Story 11.1 released
+ * `render/` from that ban**; the shrink stays because nothing has replaced it
+ * yet, not because it is still the only option. Story 11.2 owns that change.
  *
  * ## Why the clear happens here, at identity
  *
@@ -135,9 +136,11 @@ function paintNumbers(
  *
  * Everything below is a `fillRect` or a `fillText` in a palette colour. The
  * reference's super does this with additive blending, a radial gradient and an
- * alpha ramp; `docs/DESIGN.md` bans all three and `style-discipline.test.ts`
- * enforces the alpha half directly. A solid plate for three frames, a hard
- * accent band and a field of shrinking squares say the same thing flat.
+ * alpha ramp; when this was written `docs/DESIGN.md` banned all three inside
+ * the arena too. **Story 11.1 lifted that**, and Story 11.4 is where the
+ * Ultimate's cinematic is meant to use it. Until then a solid plate for three
+ * frames, a hard accent band and a field of shrinking squares say the same
+ * thing flat.
  */
 export function drawCinematicStage(
   ctx: Canvas2D,

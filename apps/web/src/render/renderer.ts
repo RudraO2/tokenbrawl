@@ -341,10 +341,11 @@ function drawSuperGauge(
 
     // The one thing on the HUD that moves, and it moves by switching rather
     // than by easing: the border alternates between ink and the live accent on
-    // a fixed frame count. A flat border swap is the only kind of pulse the
-    // house style leaves available -- a glow, a fade or a scale would each need
-    // something docs/DESIGN.md bans outright, and `style-discipline.test.ts`
-    // enforces the ban on translucency directly.
+    // a fixed frame count. A flat border swap was the only kind of pulse the
+    // house style left available when this was written -- a glow or a fade
+    // needed translucency, which `style-discipline.test.ts` banned here too.
+    // **Story 11.1 released `render/` from that**, so a glow is legal now;
+    // Story 11.3 owns the arcade HUD and is where this pulse gets reconsidered.
     const lit = Math.floor(frameIndex / ARMED_PULSE_FRAMES) % 2 === 0;
     ctx.strokeStyle = lit ? theme.accent : theme.ink;
     ctx.lineWidth = theme.borderWidth;
