@@ -72,6 +72,31 @@ A skipped visual check is **never** a pass. If no browser automation is availabl
 | 10.5 Ultimate audio | E10 | 10.1, 10.2, 9.6 | `(v2)` Hash-neutral |
 | 10.6 Arcade Ultimate key (`L`) | E10 | 10.2, 10.3 | `(v2)` Cannot be verified by unit test alone |
 | **10.7 Ultimate skill-separation re-gate** | E10 | 10.2 | `(v2)` **Closes E10.** Escalate on failure; never lower the thresholds |
+| **11.1 the arena is allowed to glow** | E11 | — | `(v2)` **Goes first.** Moves the flat-surface fence; draws nothing |
+| 11.2 impact FX sheet | E11 | 11.1, 9.5 | `(v2)` Hash-neutral. Highest felt change per unit of work — fires every exchange |
+| 11.3 arcade HUD | E11 | 11.1 | `(v2)` Hash-neutral. Canvas only; the page chrome stays flat |
+| 11.4 Ultimate cinematic, three acts | E11 | 11.1, 11.2, 10.4 | `(v2)` Highest translate-vs-reimplement risk in E11 — read the story's standing rule |
+| 11.5 Ultimate voice and music duck | E11 | 10.5 | `(v2)` Hash-neutral |
+| 11.6 Spectate gets the juice layer | E11 | 11.2, 9.5, 9.6 | `(v2)` **Closes E11.** Must reconcile `manifest.json`'s `frameCount` — read the story first |
+
+**E11 is the presentation epic, and it exists because of one ruling.** On
+2026-08-07 the owner ruled that `docs/DESIGN.md`'s flat-surface rules were meant
+for **the UI, not the game canvas** — *"All the rules that we have made for
+design.md and other things were for the UI not for the game itself inside Token
+Brawl."* The arena may now use translucency, gradients and additive blending;
+page chrome may not. Two further decisions came with it: the canvas-drawn HUD
+counts as **game**, and the Ultimate's *presentation* is **per-character**.
+
+**E11 changes no mechanic.** The simulation keeps exactly one `special` Action
+with one cost, one damage number and one frame window. Per-character means art
+and colour, never moves — so no `packages/env-fighter` file is touched, no
+skill-separation gate is re-run, and no committed Command Log is invalidated.
+Four things from the reference must be **translated rather than copied**, and
+every E11 story repeats them: its 90-tick freeze lives inside its own `step()`
+and would move every Final-State Hash; its particle pool is stepped and cannot
+be scrubbed backwards; its scatter comes from an ungoverned RNG; and its audio
+runs on wall clocks (`setTimeout`, `performance.now()`, `ctx.currentTime`). Each
+already has a solved replacement here, from Stories 9.5, 9.6 and 10.4.
 
 **E6 (MicroRTS) has no stories.** It is optional and deferred; revisit once E7 publishes its first tournament and the site is live.
 
