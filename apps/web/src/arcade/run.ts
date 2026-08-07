@@ -34,6 +34,24 @@ export interface ArcadeRunConfig {
   readonly botKind?: BaselineBotKind;
   /** Maps a raw keydown/tap id to an Action; unrecognised input maps to `null`. */
   readonly mapInput: InputMapper;
+  /**
+   * Story 10.6. Called with the human side's `legalActions` at the start of
+   * every Decision Point they are polled on.
+   *
+   * The panel needs this for one reason: an Arcade Match runs *headlessly*
+   * (`startup.ts` re-mounts the player only once it has finished), so while a
+   * visitor is playing there is no canvas and therefore no Super Gauge on
+   * screen. Without this the player cannot know their bar is full, and AC3's
+   * "the panel surfaces the affordance" would have nothing to surface.
+   *
+   * `legalActions` is the *environment's own* answer -- `legalActionsFor`
+   * returns every Action once `meter >= specialMeterCost` and drops `special`
+   * below it -- so "does this list contain `special`" is exactly "is the gauge
+   * full", read from the simulation rather than recomputed beside it. This is
+   * deliberately a report, not a second clamp: `createHumanAgent` is still the
+   * one place an input becomes an Action or is dropped (AD-14).
+   */
+  readonly onLegalActions?: (legalActions: readonly Action[]) => void;
 }
 
 export interface ArcadeMatchHandle {
@@ -83,8 +101,33 @@ export function runArcadeMatch(config: ArcadeRunConfig): ArcadeMatchHandle {
   const { agent: humanAgent, feedInput } = createHumanAgent(humanId, config.mapInput);
   const botAgent = createBaselineBot(botKind, botId, config.seed);
 
+  // Story 10.6. A read-only tee on the human side's `observe`, so the panel can
+  // be told what the environment already told the Agent.
+  //
+  // Wrapped here rather than inside `createHumanAgent` for the reason that
+  // file's docblock gives: it is deliberately free of anything host-shaped and
+  // owns the clamp alone. This wrapper adds no decision and changes no
+  // `Observation` -- it forwards the same object to the same method and passes
+  // the list on. A throw from the panel's listener is contained rather than
+  // allowed to fail the Decision Point, since a UI callback must not be able to
+  // break a Match in progress.
+  const watchedHuman: Agent = {
+    ...humanAgent,
+    observe: (observation, budgetRemaining, reflexMode) => {
+      try {
+        config.onLegalActions?.(observation.legalActions);
+      } catch {
+        // A reporting listener that threw. The Match is not its business.
+      }
+      // Every argument forwarded, including the two `createHumanAgent` chooses
+      // not to declare: this wrapper must stay a tee even if that file starts
+      // reading them.
+      return humanAgent.observe(observation, budgetRemaining, reflexMode);
+    },
+  };
+
   const agents: [Agent, Agent] =
-    humanIndex === 0 ? [humanAgent, botAgent] : [botAgent, humanAgent];
+    humanIndex === 0 ? [watchedHuman, botAgent] : [botAgent, watchedHuman];
 
   const identities: readonly [AgentIdentityV2, AgentIdentityV2] =
     humanIndex === 0
@@ -109,7 +152,22 @@ export function runArcadeMatch(config: ArcadeRunConfig): ArcadeMatchHandle {
   return { log, feedInput };
 }
 
-/** `mapInput` for a keyboard, exported so the panel and a test share one grammar. */
+/**
+ * `mapInput` for a keyboard, exported so the panel and a test share one grammar.
+ *
+ * Story 10.6 adds `L` for the Ultimate, alongside the `C` that Story 9.2 gave
+ * `special` and which keeps its meaning exactly. Two keys for one Action rather
+ * than a rebind, for two reasons: `C` is the letter this panel has told players
+ * to press since 9.2 and silently moving it would break the muscle memory of
+ * anyone who has played, and `L` is the key the reference project fires its own
+ * super on, so someone moving between the two has one thing less to relearn.
+ *
+ * `L` is a single dedicated key, not a chord. The reference reaches its super
+ * as Light + Heavy + Blast pressed together; this codebase has no chord concept
+ * anywhere in its input handling, and a partially-landed chord is precisely the
+ * "why didn't my Ultimate come out" complaint the reference's own comments
+ * record fighting.
+ */
 export function defaultKeyMap(raw: string): Action | null {
   switch (raw) {
     case 'ArrowRight':
@@ -124,6 +182,8 @@ export function defaultKeyMap(raw: string): Action | null {
       return 'block';
     case 'c':
     case 'C':
+    case 'l':
+    case 'L':
       return 'special';
     default:
       return null;

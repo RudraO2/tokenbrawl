@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { CommandLogV2 } from '@tokenbrawl/contracts';
+import type { Action, CommandLogV2 } from '@tokenbrawl/contracts';
 import { runArcadeMatch } from './run';
 import {
   arcadeMarkup,
@@ -7,6 +7,7 @@ import {
   type ArcadeHost,
   type ArcadeKeyEvent,
   type ArcadeNode,
+  type ArcadePanelDeps,
 } from './panel';
 
 /**
@@ -309,6 +310,230 @@ describe('the key-capture div receives focus when a Match starts (P3)', () => {
     });
 
     expect(() => host.fire('[data-arcade-play]', 'click')).not.toThrow();
+  });
+});
+
+/**
+ * Story 10.6.
+ *
+ * Two kinds of case here, and the split is deliberate.
+ *
+ * The messaging cases drive a **fake** `run` whose `onLegalActions` this file
+ * calls by hand. That is the only way to state "when the gauge arms, the panel
+ * says so" as a property of the panel rather than as a property of one
+ * particular Match: a real Match arms on whichever Decision Point it happens to
+ * arm on, and a test that waited for it would be asserting the balance table.
+ *
+ * The one case that must be about a real Match -- that a human can reach a full
+ * bar at all -- lives in `run.test.ts`, where the log can be inspected.
+ */
+
+interface FakeRun {
+  readonly fed: readonly string[];
+  readonly arm: (armed: boolean) => void;
+  readonly finish: (log: CommandLogV2) => void;
+}
+
+/** A `run` that never finishes on its own, so the panel can be poked at mid-Match. */
+function createFakeRun(): { readonly run: ArcadePanelDeps['run']; readonly handle: FakeRun } {
+  const fed: string[] = [];
+  const captured: {
+    onLegalActions?: (legalActions: readonly Action[]) => void;
+    resolve?: (log: CommandLogV2) => void;
+  } = {};
+
+  return {
+    run: (config) => {
+      captured.onLegalActions = config.onLegalActions;
+      return {
+        log: new Promise<CommandLogV2>((resolve) => {
+          captured.resolve = resolve;
+        }),
+        feedInput: (raw: string): void => {
+          fed.push(raw);
+        },
+      };
+    },
+    handle: {
+      get fed(): readonly string[] {
+        return fed;
+      },
+      arm: (armed: boolean): void => {
+        captured.onLegalActions?.(
+          armed ? ['advance', 'retreat', 'attack', 'block', 'special'] : ['advance', 'retreat', 'attack', 'block'],
+        );
+      },
+      finish: (log: CommandLogV2): void => {
+        captured.resolve?.(log);
+      },
+    },
+  };
+}
+
+describe('the panel tells the player the Ultimate is ready (Story 10.6, AC3)', () => {
+  it('shows nothing before a Match has started', () => {
+    const host = createHost();
+    mountArcadePanel(host, { onLog: (): void => undefined });
+    expect(host.node('[data-arcade-ultimate]').innerHTML).toBe('');
+  });
+
+  it('surfaces the affordance the moment the gauge reports itself full', () => {
+    const host = createHost();
+    const { run, handle } = createFakeRun();
+    mountArcadePanel(host, { onLog: (): void => undefined, run });
+
+    host.fire('[data-arcade-play]', 'click');
+    expect(host.node('[data-arcade-ultimate]').innerHTML).toBe('');
+
+    handle.arm(true);
+
+    // Named by the key, because the affordance exists for a player who never
+    // read the intro paragraph. "Ultimate ready" alone would tell them a fact
+    // and not what to do with it.
+    expect(host.node('[data-arcade-ultimate]').innerHTML).toContain('Ultimate ready');
+    expect(host.node('[data-arcade-ultimate]').innerHTML).toContain('L');
+  });
+
+  it('clears it again when the bar is spent', () => {
+    const host = createHost();
+    const { run, handle } = createFakeRun();
+    mountArcadePanel(host, { onLog: (): void => undefined, run });
+
+    host.fire('[data-arcade-play]', 'click');
+    handle.arm(true);
+    expect(host.node('[data-arcade-ultimate]').innerHTML).not.toBe('');
+
+    handle.arm(false);
+    expect(host.node('[data-arcade-ultimate]').innerHTML).toBe('');
+  });
+
+  it('clears it when the Match ends', async () => {
+    const host = createHost();
+    const { run, handle } = createFakeRun();
+    const logs: CommandLogV2[] = [];
+    mountArcadePanel(host, { onLog: (log) => logs.push(log), run });
+
+    host.fire('[data-arcade-play]', 'click');
+    handle.arm(true);
+    handle.finish({ schemaVersion: '2.0.0' } as unknown as CommandLogV2);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(logs).toHaveLength(1);
+    expect(host.node('[data-arcade-ultimate]').innerHTML).toBe('');
+  });
+
+  it('does not carry a previous Match’s armed state into a new one', async () => {
+    const host = createHost();
+    const { run, handle } = createFakeRun();
+    mountArcadePanel(host, { onLog: (): void => undefined, run });
+
+    host.fire('[data-arcade-play]', 'click');
+    handle.arm(true);
+    handle.finish({ schemaVersion: '2.0.0' } as unknown as CommandLogV2);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    host.fire('[data-arcade-play]', 'click');
+    expect(host.node('[data-arcade-ultimate]').innerHTML).toBe('');
+  });
+});
+
+describe('pressing L below a full gauge says why (Story 10.6, AC2)', () => {
+  it('explains the drop instead of doing nothing visible', () => {
+    const host = createHost();
+    const { run, handle } = createFakeRun();
+    mountArcadePanel(host, { onLog: (): void => undefined, run });
+
+    host.fire('[data-arcade-play]', 'click');
+    handle.arm(false);
+    host.fire('[data-arcade-keys]', 'keydown', { key: 'l' });
+
+    // A silent no-op is indistinguishable from a broken key -- the same failure
+    // Story 9.3's picker guard exists to prevent.
+    expect(host.node('[data-arcade-status]').innerHTML).toContain('Ultimate not ready');
+    expect(host.node('[data-arcade-status]').innerHTML).toContain('Super Gauge');
+  });
+
+  it('still forwards the press, so the Agent remains the only thing that drops it', () => {
+    // The load-bearing one. If the panel had started refusing to forward the
+    // key, the legality rule would now live in two places and could drift.
+    const host = createHost();
+    const { run, handle } = createFakeRun();
+    mountArcadePanel(host, { onLog: (): void => undefined, run });
+
+    host.fire('[data-arcade-play]', 'click');
+    handle.arm(false);
+    host.fire('[data-arcade-keys]', 'keydown', { key: 'l' });
+
+    expect(handle.fed).toStrictEqual(['l']);
+  });
+
+  it('says nothing of the sort when the gauge is full', () => {
+    const host = createHost();
+    const { run, handle } = createFakeRun();
+    mountArcadePanel(host, { onLog: (): void => undefined, run });
+
+    host.fire('[data-arcade-play]', 'click');
+    handle.arm(true);
+    host.fire('[data-arcade-keys]', 'keydown', { key: 'l' });
+
+    expect(host.node('[data-arcade-status]').innerHTML).not.toContain('Ultimate not ready');
+    expect(handle.fed).toStrictEqual(['l']);
+  });
+
+  it('gives the on-screen Special button the identical explanation', () => {
+    // Touch and keyboard go through one path. A player on a phone getting
+    // silence where a player on a laptop gets a sentence is the same defect
+    // AC2 names, wearing a different input device.
+    const host = createHost();
+    const { run, handle } = createFakeRun();
+    mountArcadePanel(host, { onLog: (): void => undefined, run });
+
+    host.fire('[data-arcade-play]', 'click');
+    handle.arm(false);
+    host.fire('[data-arcade-action="special"]', 'click');
+
+    expect(host.node('[data-arcade-status]').innerHTML).toContain('Ultimate not ready');
+    expect(handle.fed).toStrictEqual(['special']);
+  });
+
+  it('leaves every other key silent, however unmapped', () => {
+    const host = createHost();
+    const { run, handle } = createFakeRun();
+    mountArcadePanel(host, { onLog: (): void => undefined, run });
+
+    host.fire('[data-arcade-play]', 'click');
+    handle.arm(false);
+    for (const key of ['z', 'x', 'ArrowLeft', 'ArrowRight', 'Escape']) {
+      host.fire('[data-arcade-keys]', 'keydown', { key });
+    }
+
+    expect(host.node('[data-arcade-status]').innerHTML).not.toContain('Ultimate not ready');
+  });
+
+  it('treats C exactly as it treats L, since both ask for the same Action', () => {
+    const host = createHost();
+    const { run, handle } = createFakeRun();
+    mountArcadePanel(host, { onLog: (): void => undefined, run });
+
+    host.fire('[data-arcade-play]', 'click');
+    handle.arm(false);
+    host.fire('[data-arcade-keys]', 'keydown', { key: 'c' });
+
+    expect(host.node('[data-arcade-status]').innerHTML).toContain('Ultimate not ready');
+  });
+});
+
+describe('the controls are documented where a player will read them (Story 10.6, AC5)', () => {
+  it('names L in the panel’s own help text', () => {
+    // A binding nobody is told about is not a feature.
+    expect(arcadeMarkup()).toContain('L throws the Ultimate');
+    expect(arcadeMarkup()).toContain('data-arcade-ultimate');
+  });
+
+  it('keeps the on-screen Special button, which is the touch path (AC1)', () => {
+    expect(arcadeMarkup()).toContain('data-arcade-action="special"');
   });
 });
 

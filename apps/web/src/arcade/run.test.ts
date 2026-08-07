@@ -130,3 +130,177 @@ describe('a whole Match runs against a scripted human, headless', () => {
     }
   });
 });
+
+/**
+ * Story 10.6.
+ *
+ * `ULTIMATE_KEYS` is the cycle that actually arms the gauge, and finding it was
+ * the substantive part of this story -- see `panel.test.ts`'s note. `advance`
+ * is in it because the fighters start 320 units apart and an attack thrown from
+ * across the stage lands on nobody: a policy of pure attacking finishes a whole
+ * Match at 100/100 health and 0 meter on both sides.
+ */
+const ULTIMATE_KEYS = ['ArrowRight', 'z', 'l'] as const;
+
+function driveWith(
+  handle: ArcadeMatchHandle,
+  keys: readonly string[],
+  maxTicks = 5_000,
+): Promise<void> {
+  let settled = false;
+  void handle.log.then(() => {
+    settled = true;
+  });
+
+  return (async () => {
+    let index = 0;
+    let iterations = 0;
+    while (!settled && iterations < maxTicks) {
+      handle.feedInput(keys[index % keys.length]);
+      index += 1;
+      iterations += 1;
+      await Promise.resolve();
+    }
+  })();
+}
+
+describe('the L binding (Story 10.6, AC4)', () => {
+  it('maps both cases of L to special', () => {
+    expect(defaultKeyMap('l')).toBe('special');
+    expect(defaultKeyMap('L')).toBe('special');
+  });
+
+  it('leaves every binding Story 9.2 shipped exactly where it was', () => {
+    // AC4 in full. `C` in particular: adding `L` is an addition, not a rebind,
+    // and a player who has been pressing `C` since 9.2 must not discover that
+    // it silently stopped working.
+    expect(defaultKeyMap('ArrowRight')).toBe('advance');
+    expect(defaultKeyMap('ArrowLeft')).toBe('retreat');
+    expect(defaultKeyMap('z')).toBe('attack');
+    expect(defaultKeyMap('Z')).toBe('attack');
+    expect(defaultKeyMap('x')).toBe('block');
+    expect(defaultKeyMap('X')).toBe('block');
+    expect(defaultKeyMap('c')).toBe('special');
+    expect(defaultKeyMap('C')).toBe('special');
+  });
+
+  it('still maps nothing else, so L did not widen the grammar', () => {
+    for (const raw of ['k', 'm', 'Escape', 'Enter', ' ', 'ArrowUp', 'ArrowDown', '']) {
+      expect(defaultKeyMap(raw)).toBeNull();
+    }
+  });
+});
+
+describe('the panel is told when the gauge arms (Story 10.6, AC3)', () => {
+  it('reports the human side’s legalActions on every Decision Point it is polled on', async () => {
+    const reports: (readonly string[])[] = [];
+    const handle = runArcadeMatch({
+      seed: 9_201,
+      humanSide: 0,
+      mapInput: defaultKeyMap,
+      onLegalActions: (legalActions) => {
+        reports.push([...legalActions]);
+      },
+    });
+    await driveWith(handle, ULTIMATE_KEYS);
+    const log = await handle.log;
+
+    // One report per Decision Point the human was actually polled on.
+    expect(reports.length).toBeGreaterThan(0);
+    expect(reports.length).toBe(log.decisions.filter((entry) => entry.agentIndex === 0).length);
+    // It starts locked -- the bar is empty at Tick 0 -- and unlocks later. Both
+    // halves matter: a list that always contained `special` would make the
+    // affordance permanent, and one that never did would make it dead.
+    expect(reports[0]).not.toContain('special');
+    expect(reports.some((entry) => entry.includes('special'))).toBe(true);
+  });
+
+  it('is a report and not a gate: a listener that throws does not break the Match', async () => {
+    // It sits on the Agent's `observe`, which is inside the Harness's own loop.
+    // A UI callback must not be able to fail a Decision Point.
+    const handle = runArcadeMatch({
+      seed: 9_201,
+      humanSide: 0,
+      mapInput: defaultKeyMap,
+      onLegalActions: () => {
+        throw new Error('the panel blew up');
+      },
+    });
+    await driveWith(handle, ULTIMATE_KEYS);
+    const log = await handle.log;
+
+    expect(() => validateCommandLogV2(log)).not.toThrow();
+    expect(log.decisions.length).toBeGreaterThan(0);
+  });
+
+  it('runs identically with no listener supplied at all', async () => {
+    const withListener = runArcadeMatch({
+      seed: 9_201,
+      humanSide: 0,
+      mapInput: defaultKeyMap,
+      onLegalActions: () => undefined,
+    });
+    const without = runArcadeMatch({ seed: 9_201, humanSide: 0, mapInput: defaultKeyMap });
+    await Promise.all([driveWith(withListener, ULTIMATE_KEYS), driveWith(without, ULTIMATE_KEYS)]);
+
+    const [a, b] = await Promise.all([withListener.log, without.log]);
+    expect(a.finalStateHash).toBe(b.finalStateHash);
+    expect(a.decisions.map((entry) => entry.action)).toStrictEqual(
+      b.decisions.map((entry) => entry.action),
+    );
+  });
+});
+
+describe('a human really can fill the gauge and throw the Ultimate (Story 10.6, AC1)', () => {
+  it('banks a full bar and logs a special from the human side', async () => {
+    // The story's central claim, and the one Story 10.4's visual check doubted:
+    // it measured peak gauge fills of 62%, 55%, 1% and 1% by hand and warned
+    // that this story "must not assume the gauge will be armed". The warning was
+    // right about the risk and wrong about the cause -- the two 1% runs were
+    // whiffs, because attacks thrown from the starting distance reach nobody.
+    // A policy that closes the distance banks a full bar with room to spare.
+    const handle = runArcadeMatch({ seed: 9_201, humanSide: 0, mapInput: defaultKeyMap });
+    await driveWith(handle, ULTIMATE_KEYS);
+    const log = await handle.log;
+
+    const human = log.decisions.filter((entry) => entry.agentIndex === 0);
+    expect(human.some((entry) => entry.action === 'special')).toBe(true);
+  });
+
+  it('does the same on a second seed, so the case above is not one lucky Match', async () => {
+    const handle = runArcadeMatch({ seed: 4_601, humanSide: 0, mapInput: defaultKeyMap });
+    await driveWith(handle, ULTIMATE_KEYS);
+    const log = await handle.log;
+
+    expect(
+      log.decisions.some((entry) => entry.agentIndex === 0 && entry.action === 'special'),
+    ).toBe(true);
+  });
+
+  it('lands the Ultimate only after the gauge reported itself full', async () => {
+    // Ordering, which is the property that says the key is gated on the meter
+    // rather than merely coinciding with it: no `special` is ever logged for the
+    // human before the first Decision Point whose `legalActions` contained it.
+    const armedAt: number[] = [];
+    let polled = 0;
+    const handle = runArcadeMatch({
+      seed: 9_201,
+      humanSide: 0,
+      mapInput: defaultKeyMap,
+      onLegalActions: (legalActions) => {
+        if (legalActions.includes('special')) {
+          armedAt.push(polled);
+        }
+        polled += 1;
+      },
+    });
+    await driveWith(handle, ULTIMATE_KEYS);
+    const log = await handle.log;
+
+    const human = log.decisions.filter((entry) => entry.agentIndex === 0);
+    const firstUltimate = human.findIndex((entry) => entry.action === 'special');
+    expect(firstUltimate).toBeGreaterThanOrEqual(0);
+    expect(armedAt.length).toBeGreaterThan(0);
+    expect(firstUltimate).toBeGreaterThanOrEqual(armedAt[0]);
+  });
+});

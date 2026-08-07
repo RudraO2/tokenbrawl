@@ -840,6 +840,51 @@ body {
   font-weight: 800;
 }
 
+/*
+ * Story 10.6: the Arcade panel's "Ultimate ready" affordance.
+ *
+ * The only styled `.tb-arcade-*` rule in this file, and it earns the exception
+ * by being the one thing on the panel that has to be noticed *while a player is
+ * busy looking somewhere else*. An Arcade Match runs headlessly, so Story 10.3's
+ * on-canvas Super Gauge is not on screen during play -- this line is the sole
+ * signal that the bar is full, and as unstyled body text it would sit among the
+ * panel's other paragraphs and be missed.
+ *
+ * Ground ink on a warn fill, deliberately the exact pair Story 10.3 gave the
+ * armed gauge and Story 10.4 gave the ULTIMATE banner, so the panel affordance,
+ * the gauge and the cinematic all read as one idea rather than three. Never warn
+ * text on the ground: that pair measures 4.26:1 and misses the floor
+ * (docs/DESIGN.md), which is why the failed-hash chip and `--failed` above
+ * invert the same way.
+ *
+ * Empty when the bar is not full, and `:empty` collapses it so the panel does
+ * not carry a blank warn-coloured strip for the other 39 Decision Points.
+ *
+ * Static, like every other state in this file. A pulse or a flash would run for
+ * exactly as long as the player took to press the key, which is the page
+ * encoding a duration by another route (INV-3).
+ */
+.tb-arcade-ultimate {
+  margin: var(--tb-space-1) 0 0;
+  padding: var(--tb-space-1) var(--tb-space-2);
+  font-family: var(--tb-font-mono);
+  font-size: 14px;
+  text-transform: uppercase;
+  font-weight: 800;
+  max-width: 90ch;
+}
+
+.tb-arcade-ultimate:empty {
+  display: none;
+}
+
+.tb-arcade-ultimate--ready {
+  background: var(--tb-warn);
+  color: var(--tb-bg);
+  border: var(--tb-border-width) solid var(--tb-ink);
+  box-shadow: var(--tb-shadow-warn);
+}
+
 /* The BYOK badge on a Match run in this tab. Says why it will never be ranked. */
 .tb-chip--byok {
   border-color: var(--tb-accent);
