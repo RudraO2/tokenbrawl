@@ -12,6 +12,13 @@ Stories are executed in the order below. Each is self-contained: an agent with n
 
 A skipped visual check is **never** a pass. If no browser automation is available, say so and leave the story open. See `docs/stories/10.1-visual-verification-gate.md` and the runbook at `docs/VISUAL-CHECK.md`.
 
+**The dev reference project.** Any story that translates something out of the
+reference arcade fighter — every E11 story does — must read
+`docs/DEV-REFERENCE.md` first. It gives the project's location, a file-and-line
+map of where each subject lives, which assets to copy, the rule that its
+absolute path may appear only in `.md` files, and the four mechanisms that may
+never be copied. Do not go looking for the folder; the doc names it.
+
 **Frozen contracts.** Everything in `docs/contracts/` is frozen. A story that appears to require changing one must **stop and escalate**, never widen the interface — every parallel agent is building against it.
 
 **Review discipline.** Each story is reviewed by an agent with no context of having written the code. An agent reviewing its own work rubber-stamps it. Maximum three fix-and-re-review cycles, then escalate.
@@ -91,12 +98,30 @@ counts as **game**, and the Ultimate's *presentation* is **per-character**.
 with one cost, one damage number and one frame window. Per-character means art
 and colour, never moves — so no `packages/env-fighter` file is touched, no
 skill-separation gate is re-run, and no committed Command Log is invalidated.
-Four things from the reference must be **translated rather than copied**, and
-every E11 story repeats them: its 90-tick freeze lives inside its own `step()`
-and would move every Final-State Hash; its particle pool is stepped and cannot
-be scrubbed backwards; its scatter comes from an ungoverned RNG; and its audio
-runs on wall clocks (`setTimeout`, `performance.now()`, `ctx.currentTime`). Each
-already has a solved replacement here, from Stories 9.5, 9.6 and 10.4.
+
+**E11 is a deliberate close copy, and that reverses a rule.** The owner's stated
+goal is *"a copy of a next-gen arena game inside an LLM eval with its look and
+feel and cinematics and everything the same, but modified minimally so that
+there are 4 players only and it works with our benchmarking."* E8 and E9's
+"behavioural facts only, never transliterated code" rule was written when the
+reference was a *sketch* to learn timings from. For E11 it is the **target**.
+Art, colour, timing curves, layout and drawing technique may be copied closely.
+
+**What may never be copied is the plumbing, and it is exactly four things.**
+Every E11 story repeats them and `docs/DEV-REFERENCE.md` tabulates them with
+file and line: its `CINEMATIC_FREEZE = 90` lives inside its own `step()` and
+would move every Final-State Hash in this repository; its particle pool is
+stepped and cannot be scrubbed backwards; its scatter comes from an ungoverned
+RNG; and its audio runs on wall clocks (`setTimeout`, `performance.now()`,
+`AudioContext.currentTime`). Each already has a solved replacement here, from
+Stories 9.5, 9.6 and 10.4. The shorthand: **copy the picture, never the
+plumbing.**
+
+**`source-discipline.test.ts` is not negotiable in E11.** Its wall-clock sweep,
+its `deltaTime` ban and its module-level-mutable-binding ban are what make the
+benchmark's claims true, and they are what forbid those four mechanisms. Story
+11.1 relaxes *style* rules only. A story that wants to relax
+`source-discipline.test.ts` has misread the epic and must stop and escalate.
 
 **E6 (MicroRTS) has no stories.** It is optional and deferred; revisit once E7 publishes its first tournament and the site is live.
 
@@ -107,7 +132,7 @@ already has a solved replacement here, from Stories 9.5, 9.6 and 10.4.
 - Story 1.4 or 2.4 failing. Both are gates. Deepening the work is the fix; weakening the test is not.
 - Story 8.5 failing. Same gate, extended engine. Deepening the bot ladder (a 4th bot per `OQ-8`) or fixing 8.2-8.4's frame data is the fix; lowering the thresholds is not.
 - Any E8/E9 story other than 8.1 that seems to need a `docs/contracts/` change. 8.1 is the one pre-authorized exception (PRD FR-33, architecture AD-13) — everything else routes back to it.
-- Any E9 story that reads Extraction's source for anything beyond frame counts, timing curves, or trigger conditions. Behavioral facts are fair game; transliterated code is not — see 9.5's standing rule.
+- Any **E8 or E9** story that reads the reference's source for anything beyond frame counts, timing curves, or trigger conditions. Behavioral facts are fair game; transliterated code is not — see 9.5's standing rule. **This rule does not govern E11**, which the owner has explicitly scoped as a close visual copy; see the E11 note below and `docs/DEV-REFERENCE.md`.
 - Any story that seems to need a contract change.
 - Any story that would let a **tournament** reach a non-free-tier endpoint. Story 4.7 opens a visitor-supplied endpoint for BYOK only, on the recorded reading that INV-8 governs *this project's* cost; tournament configuration stays locked to the free-tier allowlist and `assertFreeTierEndpoint` is not to be loosened.
 - Any story that seems to need a server, database, worker, or WebSocket — that means the precompute design was misunderstood.
