@@ -39,9 +39,21 @@ function createCanvas(): {
   readonly surface: unknown;
   readonly paints: () => number;
   readonly texts: () => readonly string[];
+  readonly drawnImageWidths: () => readonly number[];
 } {
   const state = { paints: 0 };
   const texts: string[] = [];
+  /**
+   * The natural width of every image `drawImage` was handed, deduplicated.
+   *
+   * The one thing a call log can tell apart about a *decoration*: the fake
+   * sprite packs are 64x96 and the fake FX sheet is 1040x1040, so a 1040 in
+   * here means Story 11.2's sheet reached the compositor rather than merely
+   * having been fetched and validated. Not reset by `clearRect`, because the
+   * question is whether the sheet was ever drawn across a whole playback, not
+   * whether it was drawn on the last frame.
+   */
+  const drawnImageWidths = new Set<number>();
   // A Proxy rather than a hand-written stub: `Canvas2D` has fourteen members
   // and this file cares about none of them individually -- only that the
   // player painted at all. A stub would need updating every time the renderer
@@ -72,6 +84,12 @@ function createCanvas(): {
           if (property === 'fillText' && typeof args[0] === 'string') {
             texts.push(args[0]);
           }
+          if (property === 'drawImage') {
+            const source = args[0] as { readonly width?: unknown } | undefined;
+            if (typeof source?.width === 'number') {
+              drawnImageWidths.add(source.width);
+            }
+          }
         };
       },
       set(target, property: string, value: unknown): boolean {
@@ -87,6 +105,7 @@ function createCanvas(): {
     // Only the most recent frame's labels: the HUD is redrawn every frame, and
     // accumulating every frame's text would make "shows one meter" unfalsifiable.
     texts: () => texts,
+    drawnImageWidths: () => [...drawnImageWidths],
   };
 }
 
@@ -96,6 +115,8 @@ interface FakeRoot extends MountPoint {
   readonly painted: () => readonly string[];
   /** Every `drawFrame` this canvas has served, across every player mounted onto it. */
   readonly paintCount: () => number;
+  /** Story 11.2. The natural widths of every image drawn onto this canvas. */
+  readonly drawnImageWidths: () => readonly number[];
   readonly listeners: () => ReadonlyMap<string, ((event?: { readonly pointerType?: string }) => void)[]>;
   readonly fire: (selector: string, type: string, event?: { readonly pointerType?: string }) => void;
   readonly html: () => string;
@@ -140,6 +161,7 @@ function createRoot(): FakeRoot {
     attribute: (selector: string, name: string) => attributes.get(`${selector}:${name}`),
     painted: () => canvas.texts(),
     paintCount: () => canvas.paints(),
+    drawnImageWidths: () => canvas.drawnImageWidths(),
     querySelector: (selector: string): MountPointChild | null =>
       selector === 'canvas' ? (canvas.surface as MountPointChild) : child(selector),
     listeners: () => listeners,
@@ -172,6 +194,24 @@ function createHarness(
   options: {
     readonly sidecar?: unknown;
     readonly spritesResolve?: boolean;
+    /**
+     * Story 11.2's `/fx/layout.json`. Routed separately from the sprite and
+     * backdrop layouts because it is a *different document shape*: before this
+     * existed, `spritesResolve: true` answered the FX fetch with `{ clips: {} }`
+     * too, `validateVfxSheetLayout` rejected it, and every one of those tests
+     * quietly logged "Impact FX unavailable" while asserting something else.
+     * `undefined` keeps that old behaviour for the cases that do not care.
+     */
+    readonly fxLayout?: unknown;
+    /**
+     * An HTTP status for `/fx/layout.json`. Anything other than `200` makes
+     * the fake response `ok: false`, which is the branch `fetchJson` turns
+     * into a throw -- the "sheet 404s" case the story leads with everywhere
+     * and the only fail-soft path a document-shaped fake cannot reach.
+     */
+    readonly fxStatus?: number;
+    /** Whether the fake `Image` decodes. Pending forever by default. */
+    readonly imagesDecode?: boolean;
     readonly json?: (url: string) => Promise<unknown>;
     /** A page with no BYOK panel at all -- which must still play the replay. */
     readonly noByokHost?: boolean;
@@ -198,6 +238,9 @@ function createHarness(
     }
     if (url.endsWith(DEMO_SIDECAR_PATH)) {
       return options.sidecar ?? pending<unknown>();
+    }
+    if (url === '/fx/layout.json' && options.fxLayout !== undefined) {
+      return options.fxLayout;
     }
     // Sprite and backdrop layouts. `pending` is the default because "held open
     // forever" is the state this file exists to prove the player survives.
@@ -241,13 +284,19 @@ function createHarness(
       },
       cancelAnimationFrame: () => undefined,
     },
-    fetch: async (url: string) => ({ ok: true, status: 200, json: async () => respond(url) }),
+    fetch: async (url: string) => {
+      const status = url === '/fx/layout.json' ? (options.fxStatus ?? 200) : 200;
+      return { ok: status === 200, status, json: async () => respond(url) };
+    },
     Image: class {
-      readonly width = 64;
-      readonly height = 96;
+      // 1040x1040 when the test asked for decodable images, because that is
+      // the real FX sheet and `createVfxSheet` bounds-checks against it; the
+      // 64x96 default is the sprite pack every other case here uses.
+      readonly width = options.imagesDecode === true ? 1_040 : 64;
+      readonly height = options.imagesDecode === true ? 1_040 : 96;
       src = '';
       decode(): Promise<void> {
-        return pending<void>();
+        return options.imagesDecode === true ? Promise.resolve() : pending<void>();
       }
     },
   };
@@ -1527,5 +1576,194 @@ describe('the Spectate panel, mounted alongside the demo player (Story 9.3)', ()
     const result = await startup(globals);
 
     expect(result?.spectate).not.toBeNull();
+  });
+});
+
+/**
+ * Story 11.2. The impact FX sheet's loader and its wiring.
+ *
+ * Split out from the drawing tests deliberately. `juice-draw.test.ts` proves
+ * that a frame drawn *with* a sheet differs from one drawn without, and that
+ * the sheet-absent path is byte-identical to Story 9.5's -- but it proves that
+ * by calling `drawJuiceOverlay` directly with and without a sheet, which is
+ * the one place a sheet can never actually fail to arrive. The AC is "given the
+ * sheet failing to load, the page keeps playing", and the loading happens
+ * here.
+ */
+describe('the impact FX sheet loads off the critical path, or not at all (Story 11.2)', () => {
+  /** The layout this repo actually ships, so a retune of it retunes this too. */
+  function shippedFxLayout(): unknown {
+    const repo = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
+    return JSON.parse(readFileSync(join(repo, 'apps', 'web', 'public', 'fx', 'layout.json'), 'utf8'));
+  }
+
+  async function withWarnings<T>(body: () => Promise<T>): Promise<[T, unknown[][]]> {
+    const consoleWarn = console.warn;
+    const warnings: unknown[][] = [];
+    console.warn = (...args: unknown[]): void => {
+      warnings.push(args);
+    };
+    try {
+      return [await body(), warnings];
+    } finally {
+      console.warn = consoleWarn;
+    }
+  }
+
+  it('fetches the layout and hands the sheet to the running player', async () => {
+    const { log, sidecar } = await buildDemoBundle();
+    // `sidecar` and `spritesResolve` are both here only so that `dressed`
+    // settles at all -- every other upgrade this page starts is left pending
+    // by default, which is what the ordering cases above exist to prove.
+    const harness = createHarness(log, {
+      spritesResolve: true,
+      sidecar,
+      fxLayout: shippedFxLayout(),
+      imagesDecode: true,
+    });
+
+    const [result, warnings] = await withWarnings(async () => {
+      const started = await startup(harness.globals);
+      await started?.dressed;
+      return started;
+    });
+
+    expect(harness.requested()).toContain('/fx/layout.json');
+    // Nothing about the FX went wrong, and the fight is still the fight: the
+    // sheet is a decoration that arrives late, never a gate on playback.
+    expect(warnings.filter((args) => String(args[0]).includes('Impact FX'))).toStrictEqual([]);
+    expect(result?.mounted.clock.isRunning()).toBe(true);
+
+    // And the second half of this test's title, which it did not used to check
+    // at all. "Fetched, validated, and then dropped on the floor" satisfies
+    // every assertion above -- `loadVfx` returning a good sheet that `dressVfx`
+    // never records, or a `setVfx` that stores nothing, are both invisible to
+    // "no warning fired and the clock is running".
+    //
+    // Swept across the whole playback rather than tested on one frame: an
+    // impact exists only on the clock frames a hit is alive for, and which
+    // those are is a property of the demo Match rather than of this wiring.
+    const player = result?.mounted;
+    expect(player).toBeDefined();
+    for (let index = 0; index < (player?.frameCount ?? 0); index += 1) {
+      player?.clock.seek(index);
+    }
+    // 1040 is the fake FX sheet; the fake sprite packs are 64 wide. Nothing
+    // else on this page decodes to that size.
+    expect(harness.root.drawnImageWidths()).toContain(1_040);
+  });
+
+  it('draws no sheet at all when the layout never arrives', async () => {
+    // The other half of the assertion above, and the reason it is evidence
+    // rather than a coincidence: the same sweep over the same Match, with the
+    // fetch failing, must find no 1040 anywhere. Without this, a recorder that
+    // reported the sheet unconditionally would make the success case pass.
+    const { log, sidecar } = await buildDemoBundle();
+    const harness = createHarness(log, {
+      spritesResolve: true,
+      sidecar,
+      fxLayout: shippedFxLayout(),
+      imagesDecode: true,
+      fxStatus: 404,
+    });
+
+    const result = await withWarnings(async () => {
+      const started = await startup(harness.globals);
+      await started?.dressed;
+      return started;
+    });
+
+    const player = result[0]?.mounted;
+    for (let index = 0; index < (player?.frameCount ?? 0); index += 1) {
+      player?.clock.seek(index);
+    }
+    expect(harness.root.drawnImageWidths()).not.toContain(1_040);
+    // The squares are still drawn and the fight still plays: this is the
+    // fail-soft claim measured at the canvas rather than at the loader.
+    expect(harness.root.paintCount()).toBeGreaterThan(0);
+  });
+
+  it('warns once and keeps playing when the layout will not parse', async () => {
+    const { log, sidecar } = await buildDemoBundle();
+    // The shape `spritesResolve` hands back is a *sprite* layout, which is
+    // exactly the kind of near-miss a hand-edited file produces: it is valid
+    // JSON, it is same-origin, and it has no poses at all.
+    const harness = createHarness(log, { spritesResolve: true, sidecar, imagesDecode: true });
+
+    const [result, warnings] = await withWarnings(async () => {
+      const started = await startup(harness.globals);
+      await started?.dressed;
+      return started;
+    });
+
+    const fxWarnings = warnings.filter((args) => String(args[0]).includes('Impact FX'));
+    expect(fxWarnings).toHaveLength(1);
+    expect(String(fxWarnings[0][0])).toContain('hits will draw as plain sparks');
+    // The whole point of the fail-soft shape: the page is worse-looking and
+    // is not broken.
+    expect(result?.mounted.clock.isRunning()).toBe(true);
+    expect(result?.mounted.film.frames.length).toBeGreaterThan(0);
+  });
+
+  it('warns and keeps playing when the layout names a pose the image cannot hold', async () => {
+    const { log, sidecar } = await buildDemoBundle();
+    const layout = shippedFxLayout() as { poses: Record<string, { y: number }> };
+    // Past the bottom of a 1040px sheet. Caught by `createVfxSheet` after the
+    // image has decoded, which is a later failure point than a bad document
+    // and the one a mis-authored layout actually hits.
+    layout.poses.ko_burst.y = 9_999;
+    const harness = createHarness(log, {
+      spritesResolve: true,
+      sidecar,
+      fxLayout: layout,
+      imagesDecode: true,
+    });
+
+    const [result, warnings] = await withWarnings(async () => {
+      const started = await startup(harness.globals);
+      await started?.dressed;
+      return started;
+    });
+
+    expect(warnings.filter((args) => String(args[0]).includes('Impact FX'))).toHaveLength(1);
+    expect(result?.mounted.clock.isRunning()).toBe(true);
+  });
+
+  it('warns once and keeps playing when the layout 404s', async () => {
+    // The case the docs lead with in three places and nothing asserted: a
+    // missing *file*, not a malformed one. It fails a whole step earlier than
+    // the parse cases above, inside `fetchJson`'s `!response.ok` branch, and a
+    // refactor that inspected the response itself would have shipped green.
+    const { log, sidecar } = await buildDemoBundle();
+    const harness = createHarness(log, {
+      spritesResolve: true,
+      sidecar,
+      fxLayout: shippedFxLayout(),
+      imagesDecode: true,
+      fxStatus: 404,
+    });
+
+    const [result, warnings] = await withWarnings(async () => {
+      const started = await startup(harness.globals);
+      await started?.dressed;
+      return started;
+    });
+
+    const fxWarnings = warnings.filter((args) => String(args[0]).includes('Impact FX'));
+    expect(fxWarnings).toHaveLength(1);
+    expect(String(fxWarnings[0][0])).toContain('HTTP 404');
+    expect(result?.mounted.clock.isRunning()).toBe(true);
+    expect(result?.mounted.film.frames.length).toBeGreaterThan(0);
+  });
+
+  it('does not gate the first frame on the sheet', async () => {
+    const { log } = await buildDemoBundle();
+    // `fxLayout` unset and images pending: the FX fetch never settles.
+    const harness = createHarness(log);
+
+    const result = await startup(harness.globals);
+
+    expect(result?.mounted.clock.isRunning()).toBe(true);
+    expect(harness.frames()).toBe(1);
   });
 });

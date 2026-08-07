@@ -8,6 +8,7 @@ import { createSpriteArtist, type FighterArtist } from './render/artist';
 import { createBackdrop, validateBackdropLayout, type Backdrop } from './render/backdrop';
 import { createAudioBus, type AudioContextLike, type AudioFetchResponse } from './render/audio-bus';
 import { createSpriteSheet, validateSpriteSheetLayout } from './render/sprite-sheet';
+import { createVfxSheet, validateVfxSheetLayout, type VfxSheet } from './render/vfx-sheet';
 import { mountSpectatePanel, type SpectateHost, type SpectatePanel } from './spectate/panel';
 import { mountLandingPanel, type LandingHost, type LandingPanel } from './landing/panel';
 
@@ -67,6 +68,12 @@ export const DEMO_REPLAY_URL = '/replays/demo.command-log.json';
  */
 const SPRITE_LAYOUT_URLS = ['/sprites/clawde/layout.json', '/sprites/chatty/layout.json'] as const;
 const BACKDROP_LAYOUT_URL = '/sprites/mountain-dusk/layout.json';
+/**
+ * Story 11.2. The impact FX sheet's strip layout, authored in this repo beside
+ * the image it describes. Same-origin like every other asset here, for INV-8's
+ * reason: the site must render identically offline.
+ */
+const FX_LAYOUT_URL = '/fx/layout.json';
 
 interface LoadedImage {
   readonly width: number;
@@ -216,6 +223,29 @@ async function loadBackdrop(globals: BrowserGlobals): Promise<Backdrop | undefin
     return createBackdrop(await decodeAll(globals, layout.layers), layout);
   } catch (error) {
     warn('Backdrop unavailable, the arena will render flat', error);
+    return undefined;
+  }
+}
+
+/**
+ * Loads the impact FX sheet, or returns `undefined` (Story 11.2).
+ *
+ * Exactly `loadBackdrop`'s shape, and for a stronger version of the same
+ * reason. A hit already reads without it -- `juice-draw.ts` still paints the
+ * Story 9.5 scatter squares -- so a sheet that 404s, will not parse, or will
+ * not decode must cost the page nothing but its own flash. One warning, then
+ * `undefined`, and the fight carries on.
+ */
+async function loadVfx(globals: BrowserGlobals): Promise<VfxSheet | undefined> {
+  try {
+    if (globals.Image === undefined) {
+      return undefined;
+    }
+    const layout = validateVfxSheetLayout(await fetchJson(globals, FX_LAYOUT_URL));
+    const urls = [...new Set(Object.values(layout.poses).map((pose) => pose.image))];
+    return createVfxSheet(await decodeAll(globals, urls), layout);
+  } catch (error) {
+    warn('Impact FX unavailable, hits will draw as plain sparks', error);
     return undefined;
   }
 }
@@ -538,7 +568,9 @@ export async function startup(globals: BrowserGlobals): Promise<StartupResult | 
     const dressing: {
       artists: (FighterArtist | undefined)[];
       backdrop: Backdrop | undefined;
-    } = { artists: [undefined, undefined], backdrop: undefined };
+      /** Story 11.2. The impact FX sheet, held here so a re-mount keeps it. */
+      vfx: VfxSheet | undefined;
+    } = { artists: [undefined, undefined], backdrop: undefined, vfx: undefined };
     /**
      * The audio graph, built once and held outside any one mount (Story 9.6),
      * for exactly the reason the dressing above is: a BYOK or Arcade Match
@@ -583,6 +615,9 @@ export async function startup(globals: BrowserGlobals): Promise<StartupResult | 
       if (dressing.backdrop !== undefined) {
         mounted.setBackdrop(dressing.backdrop);
       }
+      if (dressing.vfx !== undefined) {
+        mounted.setVfx(dressing.vfx);
+      }
       player.mounted = mounted;
       return mounted;
     };
@@ -610,6 +645,15 @@ export async function startup(globals: BrowserGlobals): Promise<StartupResult | 
       player.mounted.setBackdrop(backdrop);
       panels.spectate?.setBackdrop(backdrop);
     };
+    /**
+     * Story 11.2. The replay player only -- Spectate has no juice layer at all
+     * yet, and wiring it is Story 11.6's job rather than something to smuggle
+     * in here.
+     */
+    const dressVfx = (vfx: VfxSheet): void => {
+      dressing.vfx = vfx;
+      player.mounted.setVfx(vfx);
+    };
 
     const upgrades: Promise<void>[] = SPRITE_LAYOUT_URLS.map(async (url, index) => {
       const artist = await loadArtist(globals, url);
@@ -622,6 +666,14 @@ export async function startup(globals: BrowserGlobals): Promise<StartupResult | 
         const backdrop = await loadBackdrop(globals);
         if (backdrop !== undefined) {
           dressBackdrop(backdrop);
+        }
+      })(),
+    );
+    upgrades.push(
+      (async (): Promise<void> => {
+        const vfx = await loadVfx(globals);
+        if (vfx !== undefined) {
+          dressVfx(vfx);
         }
       })(),
     );

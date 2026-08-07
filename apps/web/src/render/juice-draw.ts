@@ -1,6 +1,6 @@
 import { BASIS_POINTS_FULL, type RenderFrame } from '../replay/film';
 import type { Canvas2D } from './canvas2d';
-import type { JuiceCinematic, JuiceFrame } from './juice';
+import type { JuiceCinematic, JuiceFrame, JuiceKind } from './juice';
 import {
   FLOOR_INSET,
   HUD_BOTTOM,
@@ -9,6 +9,7 @@ import {
   type Viewport,
 } from './renderer';
 import { THEME, type Theme } from './theme';
+import type { VfxPose, VfxSheet } from './vfx-sheet';
 
 /**
  * Story 9.5: compositing the juice over a frame the renderer already knows how
@@ -29,12 +30,15 @@ import { THEME, type Theme } from './theme';
  * are honest to the house style: `docs/DESIGN.md` asks for chunky flat blocks,
  * and a rectangular spark is what that looks like in motion.
  *
- * Nothing here is translucent either. The reflex when an effect must "fade" is
- * to ramp `globalAlpha`, and when this was written `style-discipline.test.ts`
- * banned exactly that outside `backdrop.ts` -- so a spark dies by shrinking to
- * a pixel and then expiring on its tuned frame. **Story 11.1 released
- * `render/` from that ban**; the shrink stays because nothing has replaced it
- * yet, not because it is still the only option. Story 11.2 owns that change.
+ * Neither was true of anything here until Story 11.2. The reflex when an
+ * effect must "fade" is to ramp `globalAlpha`, and when this was written
+ * `style-discipline.test.ts` banned exactly that outside `backdrop.ts` -- so a
+ * spark died by shrinking to a pixel and then expiring on its tuned frame.
+ * **Story 11.1 released `render/` from that ban** and **Story 11.2 spends the
+ * release**: `paintImpacts` below draws a real sprite from
+ * `public/fx/fx_sheet.png`, additively, on an integer alpha ramp. The squares
+ * stay exactly as they were -- they are the debris *and* they are the fallback
+ * for a sheet that never loaded, so nothing about them is removed.
  *
  * ## Why the clear happens here, at identity
  *
@@ -73,6 +77,129 @@ function paintSparks(
     const y = clamp(Math.round(groundY - spark.heightPx - size / 2), 0, Math.max(0, groundY - size));
     ctx.fillStyle = theme.accent;
     ctx.fillRect(x, y, size, size);
+  }
+}
+
+/**
+ * Story 11.2. Which pose each grade of hit is drawn with.
+ *
+ * The one place a `JuiceKind` becomes a name in the sheet, and it lives here
+ * rather than in `juice.ts` because `juice.ts` has deliberately never known
+ * that a sheet exists -- it says *what kind* of impact this is, and this file,
+ * which owns both the sheet and the viewport, decides what that is drawn as.
+ *
+ * A KO taking `ko_burst` rather than a bigger `spark_h` is the Match's last
+ * hit not looking like its first, which is the acceptance criterion in one
+ * table row.
+ *
+ * Exported so nothing has to keep a second copy in step with this one.
+ * `juice.test.ts`'s drift guard -- `impactFrames[kind] === frames * holdFrames`
+ * for the mapped pose -- is only worth having if it reads the mapping the
+ * paint path actually uses; against a hand-written mirror it would stay green
+ * through exactly the remap it exists to catch.
+ */
+export const POSE_FOR_KIND: Readonly<Record<JuiceKind, VfxPose>> = Object.freeze({
+  hit: 'spark_l',
+  heavy: 'spark_h',
+  ko: 'ko_burst',
+});
+
+/**
+ * The impact sprites, drawn additively at the point of contact.
+ *
+ * Skipped entirely when no sheet has loaded, which is the fail-soft half of
+ * this story: `paintSparks` above is untouched and is what a visitor sees when
+ * the sheet 404s, fails to parse, or will not decode. A fight with no impact
+ * art is worse-looking, never broken.
+ *
+ * Three things happen here and nowhere else:
+ *
+ * - **The atlas frame.** `frameFor(pose, ageFrames)` divides the age by the
+ *   pose's `holdFrames` and clamps to its last cell. No clock is read; the age
+ *   is an integer count of clock frames handed over by the track.
+ * - **The one viewport multiplication**, for the same reason and in the same
+ *   place `paintSparks` explains: the track carries basis points because it has
+ *   no viewport, and this is the only file that does.
+ * - **The single float.** `alphaBasisPoints / BASIS_POINTS_FULL` is the one
+ *   division in the whole impact path, at the canvas boundary, exactly as
+ *   `audio-bus.ts` divides basis points only at its `GainNode`.
+ *
+ * All three canvas modes are put back to what they were on the way in, rather
+ * than to the defaults they are *expected* to have been. `drawJuicedFrame`
+ * wraps this in `save`/`restore` so the difference is invisible there, but
+ * `drawJuiceOverlay` is exported and a caller that had set its own alpha would
+ * silently get 1 back. `'lighter'` left set would additively blend the *next*
+ * frame's backdrop and fighters, which reads as the whole stage catching fire
+ * on the frame after a hit.
+ *
+ * **`imageSmoothingEnabled` is forced off, and it has to be forced here.**
+ * `artist.ts` and `backdrop.ts` each set it inside their *own* `save`/`restore`
+ * pair, so by the time this runs the flag is back at the canvas default, which
+ * is `true`. These cells are 208px pixel art drawn down to 128 for a `hit` and
+ * up to 260 for a `ko` -- both directions resample -- so inheriting the default
+ * would make the impact sheet the one thing in the arena drawn bilinear, which
+ * `canvas2d.ts` calls the setting that decides whether this looks like a sprite
+ * or like a blurred shape. No recording fake in the suite reads the flag, so
+ * this is asserted explicitly rather than left to a call-sequence check.
+ *
+ * Deliberately **not** clamped to the stage the way a spark is, on either axis.
+ * A spark is debris and pinning one to the edge merely relocates it; an impact
+ * is struck at a fighter's own position, and sliding a 208px sprite inward so
+ * it fits would draw the flash somewhere the hit did not happen. The canvas
+ * clips it instead, which is the truthful picture for a fighter pinned to a
+ * wall.
+ *
+ * Be explicit about what that costs vertically, because it is not zero and it
+ * is not visible from the numbers here. On the shipped 960x400 stage
+ * `groundY` is 360 and `HUD_BOTTOM` is 118; a `ko` at `impactHeightPx` 116 and
+ * `impactSizePx` 260 spans y 114..374, so it already reaches four pixels into
+ * the Token Bank row and fourteen below the floor line -- additively, over a
+ * HUD that has already been painted. That is accepted at the shipped tuning
+ * (the top rows of `ko_burst` are near-transparent) and it is the number to
+ * check first if `impactSizePx.ko` or `impactHeightPx.ko` is ever raised: the
+ * health bars have nothing protecting their legibility but these two values.
+ */
+function paintImpacts(
+  ctx: Canvas2D,
+  juiceFrame: JuiceFrame,
+  viewport: Viewport,
+  vfx: VfxSheet,
+): void {
+  if (juiceFrame.impacts.length === 0) {
+    return;
+  }
+
+  const groundY = viewport.height - FLOOR_INSET;
+  const priorAlpha = ctx.globalAlpha;
+  const priorComposite = ctx.globalCompositeOperation;
+  const priorSmoothing = ctx.imageSmoothingEnabled;
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.imageSmoothingEnabled = false;
+
+  // `finally` rather than a trailing set of assignments: a throw anywhere in
+  // the loop would otherwise leave the surface additive, and the next frame's
+  // backdrop and fighters would blend into whatever survived on it.
+  try {
+    for (const impact of juiceFrame.impacts) {
+      const pose = POSE_FOR_KIND[impact.kind];
+      const cell = vfx.frameFor(pose, impact.ageFrames);
+      const image = vfx.imageFor(cell.image);
+      if (image === undefined) {
+        continue;
+      }
+
+      const size = Math.max(1, Math.round(impact.sizePx));
+      const centreX = (impact.positionBasisPoints * viewport.width) / BASIS_POINTS_FULL;
+      const x = Math.round(centreX - size / 2);
+      const y = Math.round(groundY - impact.heightPx - size / 2);
+
+      ctx.globalAlpha = impact.alphaBasisPoints / BASIS_POINTS_FULL;
+      ctx.drawImage(image, cell.sx, cell.sy, cell.sw, cell.sh, x, y, size, size);
+    }
+  } finally {
+    ctx.globalAlpha = priorAlpha;
+    ctx.globalCompositeOperation = priorComposite;
+    ctx.imageSmoothingEnabled = priorSmoothing;
   }
 }
 
@@ -243,18 +370,50 @@ export function drawCinematicPlate(
   );
 }
 
-/** Draws the sparks and floating numbers for one clock frame. */
+/**
+ * Draws the sparks, the impact art and the floating numbers for one clock
+ * frame.
+ *
+ * The order is the point. Debris first, the impact flash over it, and the
+ * damage number last so the one thing on screen that has to be *read* is never
+ * under an additive sprite. `vfx` is optional and absent means the Story 9.5
+ * path, unchanged and call-for-call identical -- which is what makes the
+ * fail-soft claim checkable rather than asserted.
+ */
 export function drawJuiceOverlay(
   ctx: Canvas2D,
   juiceFrame: JuiceFrame,
   viewport: Viewport,
   theme: Theme = THEME,
+  vfx?: VfxSheet,
 ): void {
-  if (juiceFrame.sparks.length === 0 && juiceFrame.damageNumbers.length === 0) {
+  if (
+    juiceFrame.sparks.length === 0 &&
+    juiceFrame.damageNumbers.length === 0 &&
+    juiceFrame.impacts.length === 0
+  ) {
     return;
   }
   paintSparks(ctx, juiceFrame, viewport, theme);
+  if (vfx !== undefined) {
+    paintImpacts(ctx, juiceFrame, viewport, vfx);
+  }
   paintNumbers(ctx, juiceFrame, viewport, theme);
+}
+
+/**
+ * Story 11.2. `DrawFrameOptions` plus the impact sheet.
+ *
+ * Declared **here** rather than added to `DrawFrameOptions` deliberately.
+ * `renderer.test.ts` asserts `drawFrame`'s exact call sequence and this file's
+ * whole reason for existing is that that assertion is worth more than the
+ * convenience of reaching into it -- so the sheet reaches the compositor
+ * without `renderer.ts` being touched at all. `drawFrame` receives the same
+ * object and ignores the extra field, which is what a structural type is for.
+ */
+export interface DrawJuicedFrameOptions extends DrawFrameOptions {
+  /** Absent until the sheet decodes, and absent forever if it never does. */
+  readonly vfx?: VfxSheet;
 }
 
 /**
@@ -271,7 +430,7 @@ export function drawJuicedFrame(
   ctx: Canvas2D,
   frame: RenderFrame,
   juiceFrame: JuiceFrame,
-  options: DrawFrameOptions,
+  options: DrawJuicedFrameOptions,
 ): void {
   const theme = options.theme ?? THEME;
   const { viewport } = options;
@@ -286,7 +445,7 @@ export function drawJuicedFrame(
   if (juiceFrame.cinematic !== null) {
     drawCinematicStage(ctx, juiceFrame.cinematic, viewport, theme);
   }
-  drawJuiceOverlay(ctx, juiceFrame, viewport, theme);
+  drawJuiceOverlay(ctx, juiceFrame, viewport, theme, options.vfx);
   ctx.restore();
 
   // At identity, and after the restore. The plate must cover the whole

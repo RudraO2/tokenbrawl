@@ -87,6 +87,52 @@ The FightingICE / Rumble Fish 2 sprites remain **rejected**: Dimps grants use
 "for research purposes" and no redistribution licence exists, which does not
 survive a public repository.
 
+### Impact FX
+
+| Asset | Source | Licence | Checked |
+|---|---|---|---|
+| `apps/web/public/fx/fx_sheet.png` | authored in this repo's reference lineage — the author's own prior project's impact FX sheet (own IP), copied byte-for-byte from its `fx/fx_sheet.png` | **Author-owned, used with permission** | 2026-08-07 |
+
+Story 11.2. A 1040×1040 sheet of 208×208 cells on a 5×5 grid, from the same
+source project and the same owner as the four fighter packs and the six audio
+cues above, and shipping on the same basis. Only the image bytes were copied;
+nothing that names the source project travelled with them, per Story 9.1 /
+AD-16 and the rule that nothing under `apps/web/public/` may name it at all.
+
+**`apps/web/public/fx/layout.json` beside it is authored in this repo, not
+copied.** The source describes the sheet with a grid atlas
+(`{ cell, grid, poses: { cells: [...] } }`); this project's existing strip
+format is `{ image, x, y, frames }` against a fixed `frameWidth`, and every
+pose's cells are contiguous inside one row of the grid, so cell *i* at
+`(i % 5 × 208, floor(i / 5) × 208)` collapses to a single `x`/`y` offset. That
+arithmetic was done once, at authoring time, and no atlas loader exists here.
+
+The layout carries one timing number per pose, `holdFrames` — the source
+atlas's `fps` converted to an integer count of *clock* frames when the file was
+written (20fps → 3, 16fps → 4). It describes how long a drawn cell holds; it is
+never read as a clock (INV-1, INV-3). How long the whole effect is on screen is
+`DEFAULT_JUICE_TUNING.impactFrames` in `apps/web/src/render/juice.ts`, and
+`juice.test.ts` reads this file from disk to assert the two agree
+(`impactFrames[kind] === frames × holdFrames`), so a retune cannot silently
+desynchronise from the art.
+
+| Pose | Cells | Offset | Frames | `holdFrames` | Fires on |
+|---|---|---|---|---|---|
+| `spark_l` | 0–3 | `(0, 0)` | 4 | 3 | a light hit |
+| `spark_h` | 5–8 | `(0, 208)` | 4 | 3 | a heavy hit |
+| `ko_burst` | 20–24 | `(0, 832)` | 5 | 4 | the KO |
+
+The sheet's other poses (`block`, `dust_puff`, `dust`, `slash`, `star`,
+`streak`) ship in the image and are deliberately not in the layout: nothing
+draws them yet, and a pose named but never asked for is a claim the code does
+not make. A later story adds rows here the same way.
+
+Fail-soft, like every other decoration on this page: `loadVfx` in
+`apps/web/src/startup.ts` warns once and returns `undefined` on a 404, a
+malformed layout, a remote image URL, a pose that overruns the image, or an
+undecodable PNG — and `juice-draw.ts` then paints the Story 9.5 square sparks
+it always did. A fight with no impact art is worse-looking, never broken.
+
 ### Arena backdrop
 
 | Asset | Source | Licence | Checked |

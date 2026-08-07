@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import {
   COMMITTED_NONE,
@@ -15,8 +18,14 @@ import {
   buildJuiceTrack,
   deriveJuiceEvents,
   shakeTierFor,
+  type JuiceKind,
   type JuiceTuning,
 } from './juice';
+import { validateVfxSheetLayout } from './vfx-sheet';
+// The real mapping, not a copy of it: this guard is about the tuning agreeing
+// with the art, and a hand-written mirror here would survive the remap it is
+// supposed to catch.
+import { POSE_FOR_KIND } from './juice-draw';
 
 /**
  * Story 9.5, the derivation half.
@@ -321,7 +330,17 @@ describe('sparks and floating numbers (AC3)', () => {
 
     expect(sparks.heavy.count).toBeGreaterThan(sparks.hit.count);
     expect(sparks.ko.count).toBeGreaterThan(sparks.heavy.count);
-    expect(sparks.heavy.lifeFrames).toBeGreaterThan(sparks.hit.lifeFrames);
+    // Lifetime grades between a KO and an ordinary hit, and **not** between a
+    // light hit and a heavy one. Story 11.2 pinned every burst to its impact
+    // sprite's `frames x holdFrames` so the debris and the flash end together,
+    // and the sheet draws `spark_l` and `spark_h` at the same 4 cells x 3
+    // frames -- so both ordinary grades are 12 and only `ko_burst` (5 x 4) is
+    // longer. The count is what still separates a light hit from a heavy one,
+    // which is the cue that reads at a glance; an assertion that a heavy hit
+    // must also last *longer* was never the grading this table was for, and
+    // keeping it would mean the squares outliving the art they belong to.
+    expect(sparks.heavy.lifeFrames).toBe(sparks.hit.lifeFrames);
+    expect(sparks.ko.lifeFrames).toBeGreaterThan(sparks.heavy.lifeFrames);
 
     // And the tuning is actually consulted, rather than one burst shape being
     // shared by every kind.
@@ -583,3 +602,302 @@ describe('degenerate inputs are clamped, never thrown on', () => {
     );
   });
 });
+
+/**
+ * Story 11.2. The impact record: what a hit is drawn *as*, not when one exists.
+ *
+ * `impactFor` never sees a sheet, a pose or a file. It answers with a kind, a
+ * contact point, an age in clock frames and an integer alpha, and
+ * `juice-draw.ts` -- which owns the sheet and the viewport -- turns that into
+ * pixels. So the cases here are about the numbers only: that they are a pure
+ * function of the frame index, that they end when their burst does, and that
+ * they agree with the art actually on disk.
+ */
+const REPO = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..');
+const SHIPPED_FX_LAYOUT = join(REPO, 'apps', 'web', 'public', 'fx', 'layout.json');
+
+describe('impacts, one per hit, at the point of contact (Story 11.2)', () => {
+  it('emits exactly one impact per event, not one per spark', () => {
+    // The shape of the whole change. The squares are scattered debris at
+    // deliberately non-contact positions; a 208px cell drawn at a 5px square's
+    // size is unreadable, so the burst keeps its debris and gains a *single*
+    // sprite where the hit landed.
+    const track = buildJuiceTrack(hitFilm(9));
+    const frame = track.at(0);
+
+    expect(frame.impacts).toHaveLength(1);
+    expect(frame.sparks.length).toBeGreaterThan(1);
+    expect(frame.impacts[0].kind).toBe('hit');
+    expect(frame.impacts[0].positionBasisPoints).toBe(track.events[0].positionBasisPoints);
+    // No scatter: this *is* the contact point, unlike a spark's `offsetPx`.
+    expect(frame.impacts[0].positionBasisPoints).toBe(frame.sparks[0].positionBasisPoints);
+  });
+
+  it('grades the impact the same way the event was graded', () => {
+    const kinds = ([9, 24] as const).map((damage) => buildJuiceTrack(hitFilm(damage)).at(0).impacts[0].kind);
+    expect(kinds).toStrictEqual(['hit', 'heavy']);
+
+    // And a killing blow is a KO however small it was: the Match's last hit
+    // must not be drawn like its first.
+    const ko = buildJuiceTrack(
+      filmOf([
+        [stateWith({ health: [100, 2] }), stateWith({ health: [100, 0], tick: 30 })],
+        [stateWith({ health: [100, 0], tick: 30 }), stateWith({ health: [100, 0], tick: 60 })],
+      ]),
+    );
+    expect(ko.at(0).impacts[0].kind).toBe('ko');
+  });
+
+  it('ages one clock frame at a time, holding position and size', () => {
+    const track = buildJuiceTrack(hitFilm(9));
+    const ages: number[] = [];
+    for (let index = 0; index < track.frameCount; index += 1) {
+      for (const impact of track.at(index).impacts) {
+        ages.push(impact.ageFrames);
+      }
+    }
+    // 0,1,2,... with no gap and no repeat: the age is a subtraction from the
+    // frame the hit landed on, never a counter that was stepped.
+    expect(ages).toStrictEqual(ages.map((_unused, index) => index));
+    expect(ages[0]).toBe(0);
+  });
+
+  it('expires with its burst, on the same clock frame', () => {
+    // The two are separate numbers in a hand-editable table and they are tuned
+    // to agree. Debris that outlived the flash that threw it would read as two
+    // unrelated effects.
+    for (const damage of [9, 24] as const) {
+      const track = buildJuiceTrack(hitFilm(damage));
+      const lastImpact = lastIndexWhere(track, (frame) => frame.impacts.length > 0);
+      const lastSpark = lastIndexWhere(track, (frame) => frame.sparks.length > 0);
+      expect(lastImpact).toBe(lastSpark);
+      expect(lastImpact).toBeGreaterThan(0);
+    }
+  });
+
+  it('lives for exactly impactFrames clock frames and then stops', () => {
+    const track = buildJuiceTrack(hitFilm(9));
+    const alive = countWhere(track, (frame) => frame.impacts.length > 0);
+    expect(alive).toBe(DEFAULT_JUICE_TUNING.impactFrames.hit);
+    expect(track.at(DEFAULT_JUICE_TUNING.impactFrames.hit).impacts).toStrictEqual([]);
+  });
+
+  it('carries an integer alpha in basis points that falls to nothing at the end', () => {
+    // `juice.ts` stays integer end to end -- the same discipline `audio.ts`
+    // follows, where the single division into a float happens at the
+    // `GainNode`. Here it happens at the `globalAlpha` assignment in
+    // `juice-draw.ts` and nowhere earlier.
+    const track = buildJuiceTrack(hitFilm(9));
+    const alphas: number[] = [];
+    for (let index = 0; index < track.frameCount; index += 1) {
+      for (const impact of track.at(index).impacts) {
+        expect(Number.isInteger(impact.alphaBasisPoints)).toBe(true);
+        expect(impact.alphaBasisPoints).toBeGreaterThanOrEqual(0);
+        expect(impact.alphaBasisPoints).toBeLessThanOrEqual(BASIS_POINTS_FULL);
+        alphas.push(impact.alphaBasisPoints);
+      }
+    }
+
+    // The whole sequence, spelled out, rather than a shape it satisfies.
+    // Monotonic-and-ends-at-zero was the weaker assertion and it was blind to
+    // both defects this ramp has actually shipped: ending at 20% and blinking
+    // off, and opening the fade with a 40% drop in one frame. A `hit` lives
+    // 12 frames and fades over the last 5, so full alpha holds for 7 and then
+    // steps evenly to zero.
+    const { hit } = DEFAULT_JUICE_TUNING.impactFrames;
+    const fade = DEFAULT_JUICE_TUNING.impactFadeFrames.hit;
+    const expected = [
+      ...Array.from({ length: hit - fade }, () => BASIS_POINTS_FULL),
+      8000, 6000, 4000, 2000, 0,
+    ];
+    expect(alphas).toStrictEqual(expected);
+  });
+
+  it('is a pure function of the frame index: two builds agree exactly', () => {
+    // The scrub property at the derivation layer. No pool, no `Math.random()`,
+    // no module-level state -- so the same film built twice produces impacts
+    // that are deep-equal, and asking for a frame out of order changes nothing.
+    const frames = hitFilm(24);
+    const first = buildJuiceTrack(frames);
+    const second = buildJuiceTrack(frames);
+
+    for (let index = 0; index < first.frameCount; index += 1) {
+      expect(first.at(index).impacts).toStrictEqual(second.at(index).impacts);
+    }
+    // Backwards, and out of order.
+    for (const index of [first.frameCount - 1, 0, 5, 2, 11, 1]) {
+      const target = Math.min(index, first.frameCount - 1);
+      expect(second.at(target).impacts).toStrictEqual(first.at(target).impacts);
+    }
+  });
+
+  it('gives a trade one impact per struck fighter, always in the same order', () => {
+    const before = stateWith({ health: [100, 100] });
+    const after = stateWith({ health: [91, 88], tick: 30 });
+    const track = buildJuiceTrack(filmOf([[before, after], [after, after]]));
+
+    const impacts = track.at(0).impacts;
+    expect(impacts).toHaveLength(2);
+    // Ordered by the event stream, which is ordered by agent index -- so the
+    // drawn output is a function of the frame and not of bucketing order.
+    expect(impacts[0].positionBasisPoints).toBe(track.events[0].positionBasisPoints);
+    expect(impacts[1].positionBasisPoints).toBe(track.events[1].positionBasisPoints);
+  });
+
+  it('drops the impact under reduced motion and on the resting final frame', () => {
+    // An additive full-brightness flash is a luminance change, which is exactly
+    // what the preference is for; and one left frozen on the last frame forever
+    // reads as a broken layout rather than as a finished Match.
+    const still = buildJuiceTrack(hitFilm(24), DEFAULT_JUICE_TUNING, undefined, true);
+    for (let index = 0; index < still.frameCount; index += 1) {
+      expect(still.at(index).impacts).toStrictEqual([]);
+    }
+
+    const moving = buildJuiceTrack(hitFilm(24));
+    expect(moving.at(moving.frameCount - 1).impacts).toStrictEqual([]);
+    expect(countWhere(moving, (frame) => frame.impacts.length > 0)).toBeGreaterThan(0);
+  });
+
+  it('answers with an empty list rather than throwing on a degenerate film', () => {
+    expect(buildJuiceTrack([]).at(0).impacts).toStrictEqual([]);
+    expect(buildJuiceTrack([]).at(-1).impacts).toStrictEqual([]);
+    expect(buildJuiceTrack(hitFilm(9)).at(9_999).impacts).toStrictEqual([]);
+  });
+});
+
+describe('the tuning table and the art on disk cannot drift apart', () => {
+  it('gives every kind an impactFrames equal to its pose frames x holdFrames', () => {
+    // The cheapest possible guard against a retune silently desynchronising
+    // from the sheet. The layout describes the *art* (how long a drawn cell
+    // holds); the tuning describes the *effect* (how long the whole impact is
+    // on screen). If they disagree the sprite either freezes on its last cell
+    // or is cut off mid-pose -- and both look deliberate.
+    //
+    // Read from disk, not rebuilt here: a copy of the layout written into this
+    // file would agree with itself forever while `public/fx/layout.json`
+    // drifted.
+    const layout = validateVfxSheetLayout(JSON.parse(readFileSync(SHIPPED_FX_LAYOUT, 'utf8')));
+
+    for (const kind of ['hit', 'heavy', 'ko'] as const) {
+      const pose = layout.poses[POSE_FOR_KIND[kind]];
+      expect(DEFAULT_JUICE_TUNING.impactFrames[kind]).toBe(pose.frames * pose.holdFrames);
+    }
+  });
+
+  it('pins the burst lifetimes to the same numbers, so a burst and its flash end together', () => {
+    for (const kind of ['hit', 'heavy', 'ko'] as const) {
+      expect(DEFAULT_JUICE_TUNING.sparks[kind].lifeFrames).toBe(
+        DEFAULT_JUICE_TUNING.impactFrames[kind],
+      );
+    }
+  });
+
+  it('keeps every impact tuning integer, per-kind and frozen', () => {
+    // Frames, never milliseconds (INV-1, INV-3), and a table a later story
+    // retunes by editing a number rather than a call site.
+    for (const table of [
+      DEFAULT_JUICE_TUNING.impactFrames,
+      DEFAULT_JUICE_TUNING.impactHeightPx,
+      DEFAULT_JUICE_TUNING.impactSizePx,
+      DEFAULT_JUICE_TUNING.impactFadeFrames,
+    ]) {
+      expect(Object.isFrozen(table)).toBe(true);
+      expect(Object.keys(table).sort()).toStrictEqual(['heavy', 'hit', 'ko']);
+      for (const value of Object.values(table)) {
+        expect(Number.isSafeInteger(value)).toBe(true);
+        expect(value).toBeGreaterThan(0);
+      }
+    }
+    // The fade must fit inside the life it is ramping down over.
+    for (const kind of ['hit', 'heavy', 'ko'] as const) {
+      expect(DEFAULT_JUICE_TUNING.impactFadeFrames[kind]).toBeLessThan(
+        DEFAULT_JUICE_TUNING.impactFrames[kind],
+      );
+    }
+  });
+
+  it('lets a retune lengthen only the impact without truncating it', () => {
+    // The bucketing in `buildJuiceTrack` takes the longest of the shake, the
+    // burst, the impact and the number. A version that bucketed on the burst
+    // alone would silently cut an impact short the moment the two numbers
+    // stopped being equal -- which is the exact edit this table invites.
+    const longer: JuiceTuning = Object.freeze({
+      ...DEFAULT_JUICE_TUNING,
+      impactFrames: Object.freeze({ hit: 40, heavy: 40, ko: 40 }),
+      impactFadeFrames: Object.freeze({ hit: 4, heavy: 4, ko: 4 }),
+    });
+    const track = buildJuiceTrack(
+      filmOf([
+        [stateWith({ health: [100, 100] }), stateWith({ health: [100, 91], tick: 30 })],
+        [stateWith({ health: [100, 91], tick: 30 }), stateWith({ health: [100, 91], tick: 60 })],
+        [stateWith({ health: [100, 91], tick: 60 }), stateWith({ health: [100, 91], tick: 90 })],
+        [stateWith({ health: [100, 91], tick: 90 }), stateWith({ health: [100, 91], tick: 120 })],
+      ]),
+      longer,
+    );
+    expect(countWhere(track, (frame) => frame.impacts.length > 0)).toBe(40);
+  });
+
+  it('still opens a degenerate retune at full brightness', () => {
+    // The assertion above -- `impactFadeFrames < impactFrames` -- reads
+    // `DEFAULT_JUICE_TUNING` only, while `buildJuiceTrack` takes any exported
+    // `JuiceTuning`. A fade as long as the whole life leaves no frame on which
+    // `remaining > fadeFrames` holds, so without the clamp the sprite opens at
+    // 11/12 alpha and never once draws at full: a pop at the *start*, in the
+    // function whose two shipped defects were both pops.
+    const degenerate: JuiceTuning = Object.freeze({
+      ...DEFAULT_JUICE_TUNING,
+      impactFadeFrames: Object.freeze({ hit: 12, heavy: 40, ko: 40 }),
+    });
+    const track = buildJuiceTrack(
+      filmOf([
+        [stateWith({ health: [100, 100] }), stateWith({ health: [100, 91], tick: 30 })],
+        [stateWith({ health: [100, 91], tick: 30 }), stateWith({ health: [100, 91], tick: 60 })],
+      ]),
+      degenerate,
+    );
+
+    const alphas: number[] = [];
+    for (let index = 0; index < track.frameCount; index += 1) {
+      for (const impact of track.at(index).impacts) {
+        alphas.push(impact.alphaBasisPoints);
+      }
+    }
+    expect(alphas.length).toBeGreaterThan(0);
+    // Full on the first frame, zero on the last, and monotonic in between --
+    // the same shape the shipped tuning produces, one step steeper.
+    expect(alphas[0]).toBe(BASIS_POINTS_FULL);
+    expect(alphas[alphas.length - 1]).toBe(0);
+    for (let index = 1; index < alphas.length; index += 1) {
+      expect(alphas[index]).toBeLessThanOrEqual(alphas[index - 1]);
+    }
+  });
+});
+
+/** How many clock frames satisfy a predicate. */
+function countWhere(
+  track: ReturnType<typeof buildJuiceTrack>,
+  predicate: (frame: ReturnType<typeof track.at>) => boolean,
+): number {
+  let count = 0;
+  for (let index = 0; index < track.frameCount; index += 1) {
+    if (predicate(track.at(index))) {
+      count += 1;
+    }
+  }
+  return count;
+}
+
+/** The last clock index satisfying a predicate, or `-1`. */
+function lastIndexWhere(
+  track: ReturnType<typeof buildJuiceTrack>,
+  predicate: (frame: ReturnType<typeof track.at>) => boolean,
+): number {
+  let found = -1;
+  for (let index = 0; index < track.frameCount; index += 1) {
+    if (predicate(track.at(index))) {
+      found = index;
+    }
+  }
+  return found;
+}

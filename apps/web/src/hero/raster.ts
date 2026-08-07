@@ -127,6 +127,13 @@ export function createRasterSurface(
     textAlign: 'left',
     imageSmoothingEnabled: false,
     globalAlpha: 1,
+    // Declared to satisfy the port and never honoured, which is honest rather
+    // than lazy: this surface stores one palette *index* per pixel, so there is
+    // no channel arithmetic for `'lighter'` to do. The hero raster is page
+    // chrome and draws no impact art (that is `render/`'s, Story 11.2); a
+    // future story that wanted a blended hero would have to give this surface
+    // real colour first.
+    globalCompositeOperation: 'source-over',
 
     snapshot(): Uint8Array {
       return Uint8Array.from(pixels);

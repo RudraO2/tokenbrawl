@@ -140,7 +140,13 @@ export interface ShakeTier {
 export interface SparkBurst {
   /** Squares in one burst. */
   readonly count: number;
-  /** Frames a burst is on screen. It vanishes on the frame after the last. */
+  /**
+   * Frames a burst is on screen. It vanishes on the frame after the last.
+   *
+   * Story 11.2 pins these to `impactFrames`, so a burst and the impact sprite
+   * drawn at its contact point expire on the same clock frame. Debris that
+   * outlived the flash that threw it read as two unrelated effects.
+   */
   readonly lifeFrames: number;
 }
 
@@ -252,6 +258,39 @@ export interface JuiceTuning {
    * hit, ~10 over 14 for a heavy one, and more again for a KO.
    */
   readonly sparks: Readonly<Record<JuiceKind, SparkBurst>>;
+  /**
+   * Story 11.2. Clock frames the impact sprite is on screen, per kind.
+   *
+   * Must equal the mapped pose's `frames * holdFrames` in
+   * `public/fx/layout.json`, or the sprite either freezes on its last cell
+   * (tuning too long) or is cut off mid-pose (too short). The layout describes
+   * the *art*; this describes the *effect*; `juice.test.ts` reads the shipped
+   * layout from disk and asserts the two agree, which is the cheapest possible
+   * guard against a retune silently desynchronising from the sheet.
+   */
+  readonly impactFrames: Readonly<Record<JuiceKind, number>>;
+  /** Height above the arena floor the impact sprite is centred at, in pixels. */
+  readonly impactHeightPx: Readonly<Record<JuiceKind, number>>;
+  /**
+   * The drawn size of the impact sprite, in pixels, per kind.
+   *
+   * Graded for the same reason the burst counts are: a KO and a chip hit that
+   * threw the same flash would throw away the one cue that reads at a glance
+   * while the health bars are still moving.
+   */
+  readonly impactSizePx: Readonly<Record<JuiceKind, number>>;
+  /**
+   * Clock frames at the *end* of an impact's life over which its alpha ramps
+   * to nothing.
+   *
+   * Story 11.1 released `render/` from the flat-surface rule, so an impact can
+   * now die by fading rather than only by expiring. The ramp is carried as
+   * integer basis points (`JuiceImpact.alphaBasisPoints`) and the single
+   * division into a float happens at the `globalAlpha` assignment in
+   * `juice-draw.ts` -- the same discipline `audio.ts` follows at its
+   * `GainNode`.
+   */
+  readonly impactFadeFrames: Readonly<Record<JuiceKind, number>>;
   /** Frames the floating damage number is on screen. */
   readonly damageNumberFrames: number;
   /** How far the number drifts upward across its whole life, in pixels. */
@@ -273,11 +312,22 @@ export const DEFAULT_JUICE_TUNING: JuiceTuning = Object.freeze({
     Object.freeze({ minDamage: 12, magnitude: 10, frames: 16 }),
     Object.freeze({ minDamage: 24, magnitude: 14, frames: 24 }),
   ]),
+  // Story 11.2 moved the three `lifeFrames` onto `impactFrames` below, so a
+  // burst and the impact sprite struck at its contact point end together. The
+  // counts themselves are unchanged.
   sparks: Object.freeze({
-    hit: Object.freeze({ count: 6, lifeFrames: 10 }),
-    heavy: Object.freeze({ count: 10, lifeFrames: 14 }),
-    ko: Object.freeze({ count: 14, lifeFrames: 18 }),
+    hit: Object.freeze({ count: 6, lifeFrames: 12 }),
+    heavy: Object.freeze({ count: 10, lifeFrames: 12 }),
+    ko: Object.freeze({ count: 14, lifeFrames: 20 }),
   }),
+  // These three numbers mirror `apps/web/public/fx/layout.json`: they are the
+  // mapped pose's `frames * holdFrames`, which is how long that pose's art
+  // actually takes to play. `spark_l` and `spark_h` are both 4 frames held 3
+  // clock frames each; `ko_burst` is 5 held 4.
+  impactFrames: Object.freeze({ hit: 12, heavy: 12, ko: 20 }),
+  impactHeightPx: Object.freeze({ hit: 96, heavy: 104, ko: 116 }),
+  impactSizePx: Object.freeze({ hit: 128, heavy: 176, ko: 260 }),
+  impactFadeFrames: Object.freeze({ hit: 5, heavy: 5, ko: 8 }),
   damageNumberFrames: 24,
   damageNumberRisePx: 28,
   // 90 is the reference's own `CINEMATIC_FREEZE`, held by the renderer instead
@@ -359,6 +409,48 @@ export interface JuiceSpark {
    * purpose -- 11.2 owns impact FX. Nothing in this file is shrinking because
    * a rule still says so.
    */
+  readonly sizePx: number;
+}
+
+/**
+ * Story 11.2. One impact sprite, struck at the point of contact.
+ *
+ * **One per event, not one per spark**, and that is the whole shape of the
+ * change. The squares above are scattered debris at deliberately *non*-contact
+ * positions, and a 208px cell drawn at a 5px square's size is unreadable. So a
+ * burst keeps its debris and gains a single sprite where the hit actually
+ * landed -- which is also what the reference looks like frame by frame. That
+ * is why `JuiceFrame` gains a list rather than `JuiceSpark` gaining fields.
+ *
+ * Nothing here names a file, a pose or an atlas frame. This module has no
+ * sheet and no viewport; it says *what kind* of impact this is and how far
+ * through its life it is, and `juice-draw.ts` -- which owns both -- turns that
+ * into a source rect and a destination rect.
+ */
+export interface JuiceImpact {
+  /** The grade of hit this came off. `juice-draw.ts` maps it to a pose. */
+  readonly kind: JuiceKind;
+  /** The contact point, in basis points across the arena. No scatter: this *is* the hit. */
+  readonly positionBasisPoints: number;
+  /** Height above the arena floor the sprite is centred at, in pixels. */
+  readonly heightPx: number;
+  /**
+   * Clock frames since the hit landed.
+   *
+   * Handed on raw rather than pre-resolved to an atlas frame, because the
+   * atlas's `holdFrames` lives in the layout beside the art and this module
+   * has deliberately never read that file.
+   */
+  readonly ageFrames: number;
+  /**
+   * The fade, in integer basis points of full opacity.
+   *
+   * Basis points rather than a float for the reason the whole module gives:
+   * `juice.ts` stays integer end to end and the single division happens at the
+   * canvas boundary -- here, at `globalAlpha`, and nowhere earlier.
+   */
+  readonly alphaBasisPoints: number;
+  /** The drawn size, in pixels, square. */
   readonly sizePx: number;
 }
 
@@ -451,6 +543,15 @@ export interface JuiceFrame {
   readonly shakeX: number;
   readonly shakeY: number;
   readonly sparks: readonly JuiceSpark[];
+  /**
+   * Story 11.2. The impact sprites alive on this clock frame, in event order.
+   *
+   * Empty when no hit is in flight, and empty on every frame when the sheet
+   * never loaded -- `juice-draw.ts` skips the whole list without a sheet, so
+   * the track carries the same records either way and only the drawing
+   * differs.
+   */
+  readonly impacts: readonly JuiceImpact[];
   readonly damageNumbers: readonly JuiceNumber[];
   /** Story 10.4. The Ultimate cinematic on this clock frame, or `null`. */
   readonly cinematic: JuiceCinematic | null;
@@ -476,6 +577,7 @@ const NEUTRAL_FRAME: JuiceFrame = Object.freeze({
   shakeX: 0,
   shakeY: 0,
   sparks: Object.freeze([]),
+  impacts: Object.freeze([]),
   damageNumbers: Object.freeze([]),
   cinematic: null,
 });
@@ -808,6 +910,71 @@ function sparksFor(
   return Object.freeze(sparks);
 }
 
+/**
+ * The impact sprite for one event at one age, or `null` once it has expired
+ * (Story 11.2).
+ *
+ * A pure function of `(kind, age)` and the tuning. There is no pool, no
+ * `Math.random()` and no per-effect state anywhere on this path: the reference
+ * spawns these out of a stepped particle pool with its own RNG, and neither
+ * survives here -- a pool cannot be scrubbed backwards and an ungoverned RNG
+ * contradicts the claim that a replay reproduces.
+ *
+ * The alpha ramp is integer arithmetic and spans exactly `fadeFrames` frames.
+ * It holds at full while more than `fadeFrames` remain, then falls in even
+ * steps to **zero on the last live frame**: a `hit` (12 live, 5 fading) draws
+ * `1 x7, 0.8, 0.6, 0.4, 0.2, 0`. Two off-by-ones are load-bearing here and
+ * both were shipped wrong once:
+ *
+ * - `remaining - 1` in the numerator, so the ramp reaches zero rather than
+ *   stopping at `FULL / fadeFrames` (20% for a `hit`) and blinking off from
+ *   there. That blink is the pop this ramp exists to remove.
+ * - `remaining > fadeFrames` rather than `>=` in the guard, so the first
+ *   faded frame is one step down (0.8) instead of two (0.6). With `>=` the
+ *   ramp opened on a 40% drop in a single frame -- a smaller pop, in the
+ *   place a fade is supposed to be smoothest.
+ *
+ * The fade is a fixed tail measured back from the end of life and is
+ * deliberately *not* aligned to the pose's cells: `fadeFrames` grades the
+ * effect, the layout's `holdFrames` grades the art, and pinning either to the
+ * other would make a retune of one silently retime the other.
+ *
+ * `fadeFrames` is clamped to `lifeFrames - 1`, not to `lifeFrames`. A tail as
+ * long as the whole life leaves no frame on which `remaining > fadeFrames`
+ * holds, so the sprite would open already dimmed -- 91.7% for a 12-frame `hit`
+ * -- and never once draw at full brightness. That is a pop at the *start*, in
+ * the same function whose two shipped defects were both pops, and it is
+ * reachable by a retune rather than by an edit here: `buildJuiceTrack` takes
+ * any `JuiceTuning`, and `juice.test.ts`'s `impactFadeFrames < impactFrames`
+ * assertion only ever reads `DEFAULT_JUICE_TUNING`. The clamp makes the
+ * degenerate table behave as the longest sane one instead.
+ */
+function impactFor(event: JuiceEvent, age: number, tuning: JuiceTuning): JuiceImpact | null {
+  const lifeFrames = tuning.impactFrames[event.kind] ?? 0;
+  if (age < 0 || age >= lifeFrames) {
+    return null;
+  }
+
+  const fadeFrames = Math.max(
+    0,
+    Math.min(lifeFrames - 1, tuning.impactFadeFrames[event.kind] ?? 0),
+  );
+  const remaining = lifeFrames - age;
+  const alphaBasisPoints =
+    fadeFrames === 0 || remaining > fadeFrames
+      ? BASIS_POINTS_FULL
+      : Math.floor((BASIS_POINTS_FULL * (remaining - 1)) / fadeFrames);
+
+  return Object.freeze({
+    kind: event.kind,
+    positionBasisPoints: event.positionBasisPoints,
+    heightPx: Math.max(0, tuning.impactHeightPx[event.kind] ?? 0),
+    ageFrames: age,
+    alphaBasisPoints: Math.max(0, Math.min(BASIS_POINTS_FULL, alphaBasisPoints)),
+    sizePx: Math.max(1, tuning.impactSizePx[event.kind] ?? 1),
+  });
+}
+
 /** The floating number for one event at one age, or `null` once it has expired. */
 function numberFor(event: JuiceEvent, age: number, tuning: JuiceTuning): JuiceNumber | null {
   if (age < 0 || age >= tuning.damageNumberFrames) {
@@ -1079,6 +1246,11 @@ export function buildJuiceTrack(
     const span = Math.max(
       tier.frames,
       sparkBurstFor(tuning, event.kind).lifeFrames,
+      // Story 11.2. The impact is tuned to expire with its burst, but the two
+      // are separate numbers in a hand-editable table: bucketing on the longer
+      // of them is what keeps a retune that lengthens only the impact from
+      // silently truncating it here.
+      tuning.impactFrames[event.kind] ?? 0,
       tuning.damageNumberFrames,
     );
     const end = Math.min(filmIndexes.length, start + Math.max(0, span));
@@ -1129,6 +1301,12 @@ export function buildJuiceTrack(
         shakeX: 0,
         shakeY: 0,
         sparks: Object.freeze([]),
+        // Reduced motion and the resting final frame drop the impact art for
+        // the same reasons they drop the sparks: an additive full-brightness
+        // flash is a luminance change, which is exactly what the preference is
+        // for, and one left frozen on the last frame forever reads as a broken
+        // layout rather than as a finished Match.
+        impacts: Object.freeze([]),
         damageNumbers: Object.freeze([]),
         // The final clock frame drops the cinematic entirely, for the same
         // reason it drops the shake: playback rests there indefinitely, and a
@@ -1142,6 +1320,11 @@ export function buildJuiceTrack(
     }
 
     const sparks: JuiceSpark[] = [];
+    // Story 11.2. One per live event, in the order `deriveJuiceEvents` emitted
+    // them -- so a trade draws both fighters' impacts, and always in the same
+    // order, which is what makes the call sequence a function of the frame
+    // index rather than of how the events were bucketed.
+    const impacts: JuiceImpact[] = [];
     // At most one number per struck fighter: the most recent.
     //
     // `damageNumberFrames` outlives a Decision Point, so consecutive hits on
@@ -1174,6 +1357,10 @@ export function buildJuiceTrack(
       }
 
       sparks.push(...sparksFor(event, age, tuning));
+      const impact = impactFor(event, age, tuning);
+      if (impact !== null) {
+        impacts.push(impact);
+      }
       const number = numberFor(event, age, tuning);
       if (number !== null) {
         const held = latestNumber.get(event.agentIndex);
@@ -1214,6 +1401,7 @@ export function buildJuiceTrack(
         Math.max(-maxMagnitude, Math.min(maxMagnitude, shake.y)) +
         jitter(clockIndex, cinematicSalt + 613, cinematicMagnitude),
       sparks: Object.freeze(sparks),
+      impacts: Object.freeze(impacts),
       damageNumbers: Object.freeze(damageNumbers),
       cinematic,
     });

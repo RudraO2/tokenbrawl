@@ -20,6 +20,7 @@ import type { Backdrop } from './render/backdrop';
 import { createIdentityArtist, deriveVisualIdentity } from './render/identity';
 import { DEFAULT_JUICE_TUNING, arenaFor, buildJuiceTrack } from './render/juice';
 import { drawJuicedFrame } from './render/juice-draw';
+import type { VfxSheet } from './render/vfx-sheet';
 import {
   DEFAULT_AUDIO_TUNING,
   buildAudioTrack,
@@ -140,6 +141,12 @@ export interface MountedPlayer {
    */
   readonly setArtist: (agentIndex: 0 | 1, artist: FighterArtist) => void;
   readonly setBackdrop: (backdrop: Backdrop) => void;
+  /**
+   * Story 11.2. Swaps in the impact FX sheet and repaints, for the reason
+   * `setArtist` does: the sheet decodes off the critical path, and a paused or
+   * finished playback would otherwise never draw a frame that used it.
+   */
+  readonly setVfx: (vfx: VfxSheet) => void;
   readonly repaint: () => void;
   /** The Decision Point currently on screen. `0` before the first frame is drawn. */
   readonly decisionPoint: () => number;
@@ -225,8 +232,10 @@ export function mountPlayer(
   const dressing: {
     artists: (FighterArtist | undefined)[];
     backdrop: Backdrop | undefined;
+    /** Story 11.2. Absent until the sheet decodes, and absent forever if it never does. */
+    vfx: VfxSheet | undefined;
     frameIndex: number;
-  } = { artists: [], backdrop: undefined, frameIndex: 0 };
+  } = { artists: [], backdrop: undefined, vfx: undefined, frameIndex: 0 };
   const blockArtist = createBlockArtist();
 
   /**
@@ -345,6 +354,10 @@ export function mountPlayer(
         dressing.artists[1] ?? dressedBlockArtists[1],
       ],
       backdrop: dressing.backdrop,
+      // Story 11.2. Absent means the Story 9.5 square-spark path, unchanged --
+      // which is the whole fail-soft claim, exercised on every page load
+      // before the sheet lands rather than only in a test.
+      vfx: dressing.vfx,
     });
     // Last, and after the draw: the audio describes the frame that is now on
     // screen, and nothing in it may throw into the paint path -- every failure
@@ -388,6 +401,10 @@ export function mountPlayer(
     },
     setBackdrop: (backdrop: Backdrop): void => {
       dressing.backdrop = backdrop;
+      repaint();
+    },
+    setVfx: (vfx: VfxSheet): void => {
+      dressing.vfx = vfx;
       repaint();
     },
     repaint,

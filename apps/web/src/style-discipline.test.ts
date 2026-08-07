@@ -417,6 +417,80 @@ function alphaOffences(files: readonly StyledFile[]): readonly string[] {
   return offences;
 }
 
+/**
+ * The only blend mode page chrome may composite with.
+ *
+ * `'source-over'` is the canvas default, so writing it is a no-op and a file
+ * that wants to be explicit about not blending is not violating anything.
+ * Everything else -- `'lighter'`, `'multiply'`, `'screen'`, `'overlay'` -- is a
+ * translucent surface by another name, which is exactly what the page side is
+ * not allowed to have.
+ */
+const OPAQUE_COMPOSITE = 'source-over';
+
+/**
+ * No blend mode outside the arena, page side only. Story 11.2.
+ *
+ * The sibling of `alphaOffences`, and it exists for a reason that is one
+ * sentence long: that rule's own docblock says the canvas is a hole in the CSS
+ * rules "exactly the size of `globalAlpha`", and Story 11.2 widened the hole by
+ * adding `globalCompositeOperation` to `canvas2d.ts`. A second knob that
+ * composites arbitrary pixels onto page chrome, with no sweep pointed at it, is
+ * the Story 4.1 defect class reopened -- a blended pane over the landing hero
+ * that no declaration-level rule can see, because it is a canvas call rather
+ * than a declaration.
+ *
+ * Inside the arena it is released for the same reason translucency is: impact
+ * *is* light, `juice-draw.ts` sets `'lighter'` around its sprite loop, and
+ * Story 11.4's Ultimate will want the same. `render/theme.ts` stays kept, as it
+ * does under every other released rule.
+ *
+ * The value is extracted and compared rather than pattern-matched around, and
+ * the extraction is `alphaOffences`' one character for character: the property
+ * arrives here in exactly the same three spellings (`ctx.x =`, `x:` in an
+ * object literal, `ctx['x'] =`), through the same formatter wrapping, beside
+ * the same explanatory comments. A cheaper regex here would have the holes that
+ * rule already paid to close.
+ */
+function compositeOffences(files: readonly StyledFile[]): readonly string[] {
+  const offences: string[] = [];
+  for (const { path, source } of files) {
+    if (isReleased(path)) {
+      continue;
+    }
+    const original = source.split('\n');
+    const lines = stripComments(source).split('\n');
+    for (const [index, line] of lines.entries()) {
+      for (const match of line.matchAll(
+        /globalCompositeOperation(?:\s*['"`]\s*\])?\s*[=:]\s*([^;,\n]*)/g,
+      )) {
+        const continued = lines.slice(index + 1).find((next) => next.trim() !== '') ?? '';
+        const raw = match[1].trim() === '' ? continued : match[1];
+        const value = raw
+          .replace(/;\s*$/, '')
+          .replace(/[)}\]]+\s*$/, '')
+          .replace(/\s+/g, ' ')
+          .trim();
+        // `=== 'lighter'` reads the property; it does not set it. The `[=:]`
+        // above consumes the first `=` of `===`.
+        if (value.startsWith('=')) {
+          continue;
+        }
+        // A declared shape on an interface (`globalCompositeOperation: string`)
+        // is the port, not a draw.
+        if (/^(readonly\s+)?string(\s*\|\s*(string|undefined|null))*$/.test(value)) {
+          continue;
+        }
+        if (value !== '' && value.replace(/^['"`]|['"`]$/g, '') === OPAQUE_COMPOSITE) {
+          continue;
+        }
+        offences.push(`${path}:${String(index + 1)}: ${original[index].trim()}`);
+      }
+    }
+  }
+  return offences;
+}
+
 describe('the design tokens are the single source of colour', () => {
   it('keeps every hex literal in tokens.css, theme.ts or the arena palette', () => {
     expect(hexOffences(styledFiles())).toStrictEqual([]);
@@ -779,6 +853,57 @@ describe('the page canvas obeys the same rules as the stylesheet', () => {
     }
   });
 
+  it('sets no blend mode outside the arena', () => {
+    expect(compositeOffences(styledFiles())).toStrictEqual([]);
+  });
+
+  it('still catches a planted blend mode on the page side', () => {
+    // Story 11.2 widened the port with `globalCompositeOperation`, and a blend
+    // mode on page chrome is a translucent surface written as a canvas call --
+    // the Story 4.1 shape, through the knob that arrived after that rule.
+    expect(
+      compositeOffences([{ path: 'hero/raster.ts', source: "ctx.globalCompositeOperation = 'lighter';" }]),
+    ).toStrictEqual(["hero/raster.ts:1: ctx.globalCompositeOperation = 'lighter';"]);
+  });
+
+  it('catches a page-side blend mode written as a property rather than an assignment', () => {
+    // `hero/raster.ts` composites through an object literal, which is exactly
+    // where its own `globalCompositeOperation` entry lives.
+    expect(
+      compositeOffences([{ path: 'hero/raster.ts', source: "globalCompositeOperation: 'multiply'," }]),
+    ).toHaveLength(1);
+    expect(
+      compositeOffences([{ path: 'hero/raster.ts', source: "ctx['globalCompositeOperation'] = 'screen';" }]),
+    ).toHaveLength(1);
+  });
+
+  it('leaves source-over and the port declaration alone on the page side', () => {
+    // The default written explicitly is not a blend, and a rule that failed on
+    // it would fail on the one page-side file that says out loud that it does
+    // not blend. The interface shape in `canvas2d.ts` is not a draw either.
+    for (const source of [
+      "globalCompositeOperation: 'source-over',",
+      "ctx.globalCompositeOperation = 'source-over';",
+      '  globalCompositeOperation: string;',
+      "if (ctx.globalCompositeOperation === 'lighter') { return; }",
+      "draw(); // was ctx.globalCompositeOperation = 'lighter'",
+    ]) {
+      expect(compositeOffences([{ path: 'hero/raster.ts', source }])).toStrictEqual([]);
+    }
+  });
+
+  it('permits the same line inside the arena', () => {
+    // `juice-draw.ts` really does set `'lighter'` around its impact loop.
+    // Impact is light, and Story 11.1 released the arena to say so.
+    expect(
+      compositeOffences([{ path: 'render/juice-draw.ts', source: "ctx.globalCompositeOperation = 'lighter';" }]),
+    ).toStrictEqual([]);
+    // And the brand mirror is not released, here as under every other rule.
+    expect(
+      compositeOffences([{ path: BRAND_MIRROR, source: "ctx.globalCompositeOperation = 'lighter';" }]),
+    ).toHaveLength(1);
+  });
+
   it('does not release the brand mirror, which sits inside the boundary', () => {
     // `render/theme.ts` is under `render/` but it is the page's five flat
     // colours. Releasing the file that defines flatness from the flatness
@@ -837,6 +962,10 @@ describe('the arena boundary is named, documented, and still swept for clocks', 
       'render/renderer.ts',
       'render/sprite-sheet.ts',
       'render/theme.ts',
+      // Story 11.2. The impact FX sheet: arena by definition -- it exists only
+      // to describe art the fight is drawn with -- and joining the list is the
+      // deliberate, reviewable act this ratchet exists to require.
+      'render/vfx-sheet.ts',
     ]);
   });
 

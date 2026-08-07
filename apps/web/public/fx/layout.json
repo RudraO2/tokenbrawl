@@ -1,0 +1,9 @@
+{
+  "frameWidth": 208,
+  "frameHeight": 208,
+  "poses": {
+    "spark_l": { "image": "/fx/fx_sheet.png", "x": 0, "y": 0, "frames": 4, "holdFrames": 3 },
+    "spark_h": { "image": "/fx/fx_sheet.png", "x": 0, "y": 208, "frames": 4, "holdFrames": 3 },
+    "ko_burst": { "image": "/fx/fx_sheet.png", "x": 0, "y": 832, "frames": 5, "holdFrames": 4 }
+  }
+}

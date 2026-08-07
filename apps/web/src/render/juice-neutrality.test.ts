@@ -7,6 +7,7 @@ import type { Canvas2D } from './canvas2d';
 import { DEFAULT_JUICE_TUNING, buildJuiceTrack, type JuiceTuning } from './juice';
 import { drawJuicedFrame } from './juice-draw';
 import { drawFrame } from './renderer';
+import { createVfxSheet, validateVfxSheetLayout, type VfxSheet } from './vfx-sheet';
 
 /**
  * Story 9.5, INV-2 and AD-15: the juice must not touch the hash.
@@ -42,6 +43,7 @@ function createRecordingCanvas(): Canvas2D & { readonly calls: () => readonly st
     textAlign: '',
     imageSmoothingEnabled: false,
     globalAlpha: 1,
+    globalCompositeOperation: 'source-over',
     calls: () => calls,
   } as unknown as Canvas2D & { readonly calls: () => readonly string[] };
 
@@ -53,7 +55,11 @@ function createRecordingCanvas(): Canvas2D & { readonly calls: () => readonly st
   surface.strokeRect = (x, y, w, h) => record('strokeRect', [x, y, w, h]);
   surface.fillText = (text, x, y) => record('fillText', [text, x, y]);
   surface.clearRect = (x, y, w, h) => record('clearRect', [x, y, w, h]);
-  surface.drawImage = () => record('drawImage', []);
+  // Story 11.2 records the rects: with an impact sheet loaded, `drawImage` is
+  // the *only* op that differs from the sheetless run, so an argument-less
+  // recorder would make "the two runs drew different things" unprovable.
+  surface.drawImage = (_image, sx, sy, sw, sh, dx, dy, dw, dh) =>
+    record('drawImage', [sx, sy, sw, sh, dx, dy, dw, dh]);
   surface.save = () => record('save', []);
   surface.restore = () => record('restore', []);
   surface.translate = (x, y) => record('translate', [x, y]);
@@ -104,6 +110,35 @@ async function replayDrawing(tuning: JuiceTuning | null): Promise<Run> {
   };
 }
 
+/**
+ * Story 11.2. A sheet in the shape of the shipped one, bound to a fake image.
+ *
+ * Built through the real `validateVfxSheetLayout`/`createVfxSheet` rather than
+ * stubbed, so this exercises the same code the page runs. The numbers are a
+ * hand copy of `public/fx/layout.json` and are not meant to track it: this
+ * case is about the hash being indifferent to *any* sheet, so the particular
+ * sheet is scenery. `juice.test.ts` owns the drift guard. The image is a bare
+ * `{ width, height }` because that is all `createVfxSheet` needs of one, and
+ * `drawImage`'s first argument is `unknown` by design in the port -- there is
+ * no decoder and no DOM anywhere in this suite.
+ */
+const FX_IMAGE = '/fx/fx_sheet.png';
+
+function fakeVfxSheet(): VfxSheet {
+  return createVfxSheet(
+    new Map([[FX_IMAGE, { width: 1_040, height: 1_040 }]]),
+    validateVfxSheetLayout({
+      frameWidth: 208,
+      frameHeight: 208,
+      poses: {
+        spark_l: { image: FX_IMAGE, x: 0, y: 0, frames: 4, holdFrames: 3 },
+        spark_h: { image: FX_IMAGE, x: 0, y: 208, frames: 4, holdFrames: 3 },
+        ko_burst: { image: FX_IMAGE, x: 0, y: 832, frames: 5, holdFrames: 4 },
+      },
+    }),
+  );
+}
+
 /** A tuning nothing about the shipped one survives: different holds, different shake. */
 const RETUNED: JuiceTuning = Object.freeze({
   ...DEFAULT_JUICE_TUNING,
@@ -149,6 +184,55 @@ describe('the juice layer is hash-neutral on the demo Match (AC4, INV-2, AD-15)'
       expect(film.finalStateHash).toBe(before);
       expect(film.matchesRecordedHash).toBe(true);
     }
+  });
+
+  it('re-derives the same hash with the impact sheet loaded and with it absent (Story 11.2)', async () => {
+    // The 11.2 half of the same claim, and it has to be its own case: the
+    // tunings above never load a sheet, so every `drawImage` the impact path
+    // issues went entirely unexercised by them. Two full juiced playbacks of
+    // the demo Match -- one with the FX sheet, one without -- and the hash is
+    // re-derived from the same `CommandLog` with a fresh environment after
+    // each. Reading a sheet is a pure read; painting from one must not reach
+    // back into a `FighterState`, and this is the check rather than the
+    // assumption.
+    const log = await buildDemoLog();
+    const film = buildReplayFilm(log, createFighterEnvironment());
+    const before = film.finalStateHash;
+    const track = buildJuiceTrack(film.frames, DEFAULT_JUICE_TUNING);
+
+    const drawn = new Map<string, readonly string[]>();
+    for (const [label, vfx] of [
+      ['with the sheet', fakeVfxSheet()],
+      ['without it', undefined],
+    ] as const) {
+      const ctx = createRecordingCanvas();
+      const options = { config: DEFAULT_FIGHTER_CONFIG, viewport: VIEWPORT, vfx };
+      for (let index = 0; index < track.frameCount; index += 1) {
+        drawJuicedFrame(ctx, film.frames[track.filmIndexAt(index)], track.at(index), options);
+      }
+      expect(ctx.calls().length).toBeGreaterThan(1_000);
+      drawn.set(label, ctx.calls());
+
+      const rederived = buildReplayFilm(log, createFighterEnvironment());
+      expect(rederived.finalStateHash).toBe(before);
+      expect(rederived.finalStateHash).toBe(log.finalStateHash);
+      expect(rederived.recordedStateHash).toBe(film.recordedStateHash);
+      expect(rederived.matchesRecordedHash).toBe(true);
+    }
+
+    // And the film the drawing read from is itself unchanged, both times.
+    expect(film.finalStateHash).toBe(before);
+    expect(film.matchesRecordedHash).toBe(true);
+
+    // Not vacuous: the sheet really did change the picture, and only by adding
+    // sprites. Every other call is byte-identical, which is the fail-soft
+    // promise stated as an equality rather than as an intention.
+    const withSheet = drawn.get('with the sheet') ?? [];
+    const without = drawn.get('without it') ?? [];
+    expect(withSheet).not.toStrictEqual(without);
+    expect(withSheet.filter((call) => call.startsWith('drawImage(')).length).toBeGreaterThan(0);
+    expect(without.filter((call) => call.startsWith('drawImage('))).toStrictEqual([]);
+    expect(withSheet.filter((call) => !call.startsWith('drawImage('))).toStrictEqual([...without]);
   });
 
   it('produces one hash whether it is stripped, shipped or retuned', async () => {
