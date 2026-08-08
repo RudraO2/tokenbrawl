@@ -153,6 +153,13 @@ export interface SpectatePanel {
    * 9.8's carousel) can make the same choice without duplicating it.
    */
   readonly setAudioEnabled: (enabled: boolean) => void;
+  /**
+   * Story 11.6. Whether the stream is running. Starts `false` for a visitor who
+   * asked for reduced motion -- the preference declines to *start* the stream,
+   * and this is the control that starts it.
+   */
+  readonly isPlaying: () => boolean;
+  readonly setPlaying: (playing: boolean) => void;
 }
 
 const CANVAS_WIDTH = 960;
@@ -166,6 +173,16 @@ const CANVAS_HEIGHT = 400;
  * button is rendered once, statically, and updated later from a different line.
  */
 const SOUND_LABEL = Object.freeze({ off: 'Sound: off', on: 'Sound: on' });
+
+/**
+ * The transport button's two labels. Story 11.6.
+ *
+ * The label names what pressing it *does*, not what the stream is doing --
+ * "Play" on a held stream, "Pause" on a running one -- which is the convention
+ * every media control on the web uses and the one the replay player's own
+ * transport already follows.
+ */
+const PLAY_LABEL = Object.freeze({ play: 'Play', pause: 'Pause' });
 
 /** Escapes `\` and `"` so `id` is safe to interpolate inside a double-quoted `[attr="..."]` CSS attribute selector. */
 function escapeAttributeSelector(value: string): string {
@@ -196,6 +213,7 @@ export function spectateMarkup(entries: readonly SpectateManifestEntry[] = []): 
       <canvas class="tb-spectate-canvas"></canvas>
     </div>
     <p class="tb-spectate-status" data-spectate-status role="status" aria-live="polite"></p>
+    <button class="tb-button tb-spectate-play" type="button" data-spectate-play>${PLAY_LABEL.pause}</button>
     <button class="tb-button tb-spectate-sound" type="button" data-spectate-sound aria-pressed="false">${SOUND_LABEL.off}</button>
     <div class="tb-spectate-picker" data-spectate-picker>${pickerMarkup(entries)}</div>
   `;
@@ -220,8 +238,15 @@ export function mountSpectatePanel(host: SpectateHost, deps: SpectatePanelDeps):
   const statusNode = host.querySelector('[data-spectate-status]');
   const pickerNode = host.querySelector('[data-spectate-picker]');
   const soundNode = host.querySelector('[data-spectate-sound]');
+  const playNode = host.querySelector('[data-spectate-play]');
 
-  if (canvasNode === null || statusNode === null || pickerNode === null || soundNode === null) {
+  if (
+    canvasNode === null ||
+    statusNode === null ||
+    pickerNode === null ||
+    soundNode === null ||
+    playNode === null
+  ) {
     throw new Error('mountSpectatePanel: the panel did not mount.');
   }
 
@@ -229,6 +254,7 @@ export function mountSpectatePanel(host: SpectateHost, deps: SpectatePanelDeps):
   const status = statusNode;
   const picker = pickerNode;
   const soundButton = soundNode;
+  const playButton = playNode;
 
   canvas.width = CANVAS_WIDTH;
   canvas.height = CANVAS_HEIGHT;
@@ -403,6 +429,13 @@ export function mountSpectatePanel(host: SpectateHost, deps: SpectatePanelDeps):
       console.warn(`Spectate: could not play "${entryId}" -- the stream has not finished loading yet.`);
       return;
     }
+    // Picking a Match *is* asking to watch it, so it starts the transport even
+    // when the stream was held. This is not the preference being overridden
+    // behind a visitor's back: choosing a fight from the picker is as direct a
+    // request for motion as pressing Play, and the alternative -- a click that
+    // swaps one frozen frame for another -- is what this surface shipped with
+    // and what came back as "it's just one frame that shows no actual fight".
+    setPlaying(true);
     state.walk.playSpecific(entryId).catch((error: unknown) => {
       console.warn(`Spectate: could not play "${entryId}". ${error instanceof Error ? error.message : String(error)}`);
     });
@@ -424,14 +457,7 @@ export function mountSpectatePanel(host: SpectateHost, deps: SpectatePanelDeps):
         // guard: the second call simply supersedes the first, and the first's
         // eventual (stale) load is dropped rather than mounted.
         play(entry.id);
-        // Under reduced motion the walk deliberately does not advance -- the
-        // stream is a still frame -- so promising a return to the loop would be
-        // a statement this panel has just been built not to honour.
-        say(
-          reducedMotion
-            ? `Showing ${entry.id}. Reduced motion: the stream is a still frame.`
-            : `Playing ${entry.id}. Returns to the loop when it finishes.`,
-        );
+        say(`Playing ${entry.id}. Returns to the loop when it finishes.`);
       });
     }
   }
@@ -452,6 +478,35 @@ export function mountSpectatePanel(host: SpectateHost, deps: SpectatePanelDeps):
    * when the enable happens on frame 0 itself, where `index === last` is not
    * `last + 1`.
    */
+  /**
+   * The transport, and the one thing that decides whether this surface moves.
+   *
+   * Starts held exactly when the visitor asked for less motion. That is the
+   * whole of what the preference does to the transport now: it declines to
+   * start *on its own*, and leaves the visitor a control. The picture stays
+   * reduced either way -- `buildJuiceTrack` gets the preference regardless, so
+   * pressing Play gives a stream with no camera shake and no particles rather
+   * than the full one.
+   */
+  const transport = { playing: !reducedMotion };
+
+  const renderPlay = (): void => {
+    playButton.innerHTML = escapeHtml(transport.playing ? PLAY_LABEL.pause : PLAY_LABEL.play);
+  };
+
+  const setPlaying = (playing: boolean): void => {
+    if (transport.playing === playing) {
+      return;
+    }
+    transport.playing = playing;
+    renderPlay();
+    if (playing) {
+      state.walk?.play();
+    } else {
+      state.walk?.pause();
+    }
+  };
+
   const renderSound = (): void => {
     soundButton.innerHTML = escapeHtml(audio.enabled ? SOUND_LABEL.on : SOUND_LABEL.off);
     soundButton.setAttribute?.('aria-pressed', audio.enabled ? 'true' : 'false');
@@ -484,6 +539,14 @@ export function mountSpectatePanel(host: SpectateHost, deps: SpectatePanelDeps):
     setAudioEnabled(!audio.enabled);
   });
 
+  renderPlay();
+  playButton.addEventListener('click', () => {
+    // A gesture like any other on this panel: a visitor who presses Play may
+    // also be unlocking the page's audio context for the first time.
+    deps.onGesture?.();
+    setPlaying(!transport.playing);
+  });
+
   say('Loading the Spectate stream…');
 
   const loadManifest = deps.loadManifest ?? fetchSpectateManifest;
@@ -512,6 +575,9 @@ export function mountSpectatePanel(host: SpectateHost, deps: SpectatePanelDeps):
         requestFrame: (callback) => deps.view.requestAnimationFrame(() => callback()),
         cancelFrame: (handle) => deps.view.cancelAnimationFrame(handle),
         reducedMotion,
+        // The preference stops the stream starting itself; it no longer stops
+        // the stream being startable. See `transport` above.
+        autoplay: transport.playing,
         onFrame: paint,
         onEntryChange: (entry, _film, track) => {
           // Story 11.6. The audio for this entry, built from the same juice
@@ -583,5 +649,7 @@ export function mountSpectatePanel(host: SpectateHost, deps: SpectatePanelDeps):
     },
     audioEnabled: (): boolean => audio.enabled,
     setAudioEnabled,
+    isPlaying: (): boolean => transport.playing,
+    setPlaying,
   });
 }

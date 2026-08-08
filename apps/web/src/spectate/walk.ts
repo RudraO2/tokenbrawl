@@ -64,7 +64,32 @@ export interface SpectateWalkDeps {
   readonly env: EnvironmentAdapter<FighterState>;
   readonly requestFrame: RequestFrame;
   readonly cancelFrame?: CancelFrame;
+  /**
+   * Reduces the *art*: no camera shake, no particles (Story 9.5's own
+   * accessibility switch, threaded into `buildJuiceTrack`).
+   *
+   * It deliberately no longer reaches the clock. See `autoplay`.
+   */
   readonly reducedMotion?: boolean;
+  /**
+   * Whether the stream starts itself. Default true.
+   *
+   * Split from `reducedMotion` in Story 11.6 after the first cut conflated
+   * them, which is worth writing down because the conflation looked correct.
+   * `player/clock.ts` treats the preference as "emit the last frame and never
+   * schedule", and that is right *there*: the replay player has a transport, so
+   * a visitor who asked for less motion still has Play, Pause and a scrub to
+   * watch the fight with. Spectate has no transport, so the same policy turned
+   * the ambient surface into a single dead frame with a picker whose buttons
+   * changed the still and nothing else -- reported from the page as "it's just
+   * one frame that shows no actual fight".
+   *
+   * So the two halves are separated. The preference always reduces the motion
+   * in the picture; it stops the stream *starting on its own*, and the panel's
+   * Play control is what a visitor uses to ask for it. Motion that a visitor
+   * explicitly asked for is not motion imposed on them.
+   */
+  readonly autoplay?: boolean;
   /**
    * Fired whenever the active entry changes -- a fresh loop step, a manual pick, or a resume.
    *
@@ -100,6 +125,11 @@ export interface SpectateWalkHandle {
    */
   readonly currentTrack: () => JuiceTrack | null;
   readonly currentClock: () => PlaybackClock | null;
+  /** Story 11.6. Starts (or resumes) the stream, and keeps every later entry playing. */
+  readonly play: () => void;
+  /** Story 11.6. Holds the stream on the frame it is showing. The loop does not advance while held. */
+  readonly pause: () => void;
+  readonly isPlaying: () => boolean;
   readonly stop: () => void;
 }
 
@@ -142,6 +172,8 @@ export function createSpectateWalk(deps: SpectateWalkDeps): SpectateWalkHandle {
     /** Bumped on every load, so a stale async response from a superseded call is dropped rather than clobbering a newer one (re-entrancy guard). */
     generation: number;
     stopped: boolean;
+    /** Story 11.6. Whether the stream is meant to be running -- carried across entries. */
+    playing: boolean;
   } = {
     mode: 'loop',
     resumeIndex: 0,
@@ -152,6 +184,7 @@ export function createSpectateWalk(deps: SpectateWalkDeps): SpectateWalkHandle {
     clock: null,
     generation: 0,
     stopped: false,
+    playing: deps.autoplay !== false,
   };
 
   function stopClock(): void {
@@ -244,24 +277,16 @@ export function createSpectateWalk(deps: SpectateWalkDeps): SpectateWalkHandle {
           frameCount: track.frameCount,
           requestFrame: deps.requestFrame,
           ...(deps.cancelFrame === undefined ? {} : { cancelFrame: deps.cancelFrame }),
-          ...(deps.reducedMotion === undefined ? {} : { reducedMotion: deps.reducedMotion }),
+          // Deliberately **not** given `reducedMotion`. A reduced-motion clock
+          // emits the last frame once and refuses to schedule ever again, which
+          // on a surface with no transport is not an accessible stream but a
+          // dead one -- and, because that emission looks exactly like an entry
+          // finishing, it also spun the whole manifest through a microtask
+          // chain. The preference is honoured on the two axes it belongs on:
+          // the art (`buildJuiceTrack`, above) and autoplay (`state.playing`,
+          // below). Whether this clock *may* run is the visitor's to say.
           onFrame: (clockIndex) => {
             deps.onFrame?.(clockIndex);
-            if (deps.reducedMotion === true) {
-              // Story 11.6. A reduced-motion clock never schedules: `start()`
-              // emits the last frame once, directly, and returns. That arrives
-              // here looking exactly like an entry that finished playing, and
-              // advancing on it would mount the next entry, which would emit
-              // *its* last frame, which would advance again -- the whole
-              // manifest fetched in a tight microtask chain, forever, on the
-              // browsers of precisely the visitors who asked for less.
-              //
-              // So the ambient loop does not advance under the preference. The
-              // stream is one still frame, which is what "honours it exactly as
-              // the player does" means for a surface whose player shows a
-              // still: no motion, and no traffic either.
-              return;
-            }
             if (clockIndex >= track.frameCount - 1) {
               // The clock has already stopped itself (Story 4.1's own
               // contract); this call is what decides what plays next.
@@ -273,7 +298,15 @@ export function createSpectateWalk(deps: SpectateWalkDeps): SpectateWalkHandle {
         });
         state.clock = clock;
         deps.onEntryChange?.(entry, film, track);
-        clock.start();
+        if (state.playing) {
+          clock.start();
+        } else {
+          // Held: the entry is mounted and its first frame is on screen, so a
+          // paused stream shows the Match it is holding rather than an empty
+          // stage. `seek` emits without scheduling, which is the difference
+          // between a still and a stopped surface.
+          clock.seek(0);
+        }
         return;
       } catch (error) {
         state.entryId = null;
@@ -378,6 +411,35 @@ export function createSpectateWalk(deps: SpectateWalkDeps): SpectateWalkHandle {
     playLoopFrom(state.resumeIndex);
   }
 
+  /**
+   * Starts the stream, or resumes it where it was held. Story 11.6.
+   *
+   * `resume` continues from the current index and `start` rewinds, so a clock
+   * sitting on its own last frame -- which `resume` declines, by design -- is
+   * restarted instead. Without that, pressing Play on a finished entry would do
+   * nothing at all, which is the same class of silence this whole fix exists to
+   * remove.
+   */
+  function play(): void {
+    state.playing = true;
+    const clock = state.clock;
+    if (clock === null) {
+      return;
+    }
+    if (clock.frameIndex() >= (state.track?.frameCount ?? 0) - 1) {
+      clock.start();
+      return;
+    }
+    clock.resume();
+  }
+
+  function pause(): void {
+    state.playing = false;
+    // `stop()` on the clock, not `stopClock()`: the clock stays mounted and
+    // holding its frame, so `play()` can resume from it.
+    state.clock?.stop();
+  }
+
   function stop(): void {
     state.stopped = true;
     state.generation += 1;
@@ -399,6 +461,9 @@ export function createSpectateWalk(deps: SpectateWalkDeps): SpectateWalkHandle {
     currentFilm: (): ReplayFilm | null => state.film,
     currentTrack: (): JuiceTrack | null => state.track,
     currentClock: (): PlaybackClock | null => state.clock,
+    play,
+    pause,
+    isPlaying: (): boolean => state.playing,
     stop,
   });
 }

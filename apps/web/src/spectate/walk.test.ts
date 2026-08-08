@@ -552,7 +552,7 @@ describe('the manifest walk (Story 9.3)', () => {
       expect(walk.currentFilm()).toBeNull();
     });
 
-    it('honours reduced motion: same frame count, no shake, no autoplay', async () => {
+    it('honours reduced motion in the art: same frame count, no shake', async () => {
       const ids = ['a'];
       const manifest = manifestOf(ids);
       const driver = createDriver();
@@ -577,15 +577,17 @@ describe('the manifest walk (Story 9.3)', () => {
         (frame) => frame !== undefined && (frame.shakeX !== 0 || frame.shakeY !== 0),
       );
       expect(shaken).toStrictEqual([]);
-      // And the clock declines to autoplay, exactly as the player's does.
-      expect(walk.currentClock()?.isRunning()).toBe(false);
+      // And it still *runs*: reducing the motion in the picture is not the same
+      // decision as refusing to show the fight. That split is `autoplay`'s.
+      expect(walk.currentClock()?.isRunning()).toBe(true);
     });
 
-    it('reduced motion does not spin the manifest: a still stream fetches one entry, not every entry forever', async () => {
+    it('autoplay:false mounts a held stream -- one entry fetched, one frame shown, nothing advancing', async () => {
       const ids = ['a', 'b', 'c'];
       const manifest = manifestOf(ids);
       const driver = createDriver();
       const fetched: string[] = [];
+      const painted: number[] = [];
 
       const load = fetchFor(ids);
       const walk = createSpectateWalk({
@@ -597,22 +599,116 @@ describe('the manifest walk (Story 9.3)', () => {
         env,
         requestFrame: driver.requestFrame,
         cancelFrame: driver.cancelFrame,
-        reducedMotion: true,
+        autoplay: false,
+        onFrame: (index) => painted.push(index),
       });
 
       await walk.startLoop({ entryIndex: 0, frameOffset: 0 });
-      // A reduced-motion clock emits the final frame the instant it starts,
-      // which reads exactly like an entry that finished. Left as an "advance",
-      // that mounts the next entry, which emits *its* last frame, and so on:
-      // the whole manifest fetched in a tight microtask chain that never yields.
-      // Draining generously is what makes the absence of that chain checkable.
       for (const _ of Array.from({ length: 50 }, (__, index) => index)) {
         await Promise.resolve();
       }
       driver.pump(20);
 
+      // One entry, not the whole manifest walked in a microtask chain -- the
+      // first cut of this behaviour paused by handing the clock the preference,
+      // and a reduced-motion clock emits its *last* frame, which reads exactly
+      // like an entry that finished.
       expect(fetched).toStrictEqual(['/replays/a.command-log.json']);
-      expect(walk.currentEntryId()).toBe('a');
+      expect(walk.isPlaying()).toBe(false);
+      expect(walk.currentClock()?.isRunning()).toBe(false);
+      // Held on a frame, not on nothing: a paused stream still shows the Match.
+      expect(painted.length).toBeGreaterThan(0);
+      expect(walk.currentClock()?.frameIndex()).toBe(0);
+    });
+
+    it('play() starts a held stream, and it keeps running into the next entry', async () => {
+      const ids = ['a', 'b', 'c'];
+      const manifest = manifestOf(ids);
+      const driver = createDriver();
+
+      const walk = createSpectateWalk({
+        manifest,
+        fetchJson: fetchFor(ids),
+        env,
+        requestFrame: driver.requestFrame,
+        cancelFrame: driver.cancelFrame,
+        autoplay: false,
+      });
+
+      await walk.startLoop({ entryIndex: 0, frameOffset: 0 });
+      expect(walk.currentClock()?.isRunning()).toBe(false);
+
+      walk.play();
+      driver.pump(5);
+
+      expect(walk.isPlaying()).toBe(true);
+      expect(walk.currentClock()?.frameIndex()).toBeGreaterThan(0);
+
+      // And the decision carries: the entry after this one starts by itself,
+      // rather than the visitor having to press Play once per Match.
+      driver.pump(frameCounts[0]);
+      await Promise.resolve();
+      await Promise.resolve();
+      driver.pump(3);
+
+      expect(walk.currentEntryId()).toBe('b');
+      expect(walk.currentClock()?.isRunning()).toBe(true);
+    });
+
+    it('pause() holds the frame it is on, and play() carries on from there rather than restarting', async () => {
+      const ids = ['a'];
+      const manifest = manifestOf(ids);
+      const driver = createDriver();
+
+      const walk = createSpectateWalk({
+        manifest,
+        fetchJson: fetchFor(ids),
+        env,
+        requestFrame: driver.requestFrame,
+        cancelFrame: driver.cancelFrame,
+      });
+
+      await walk.startLoop({ entryIndex: 0, frameOffset: 0 });
+      driver.pump(20);
+      const held = walk.currentClock()?.frameIndex() ?? -1;
+      expect(held).toBeGreaterThan(0);
+
+      walk.pause();
+      driver.pump(20);
+
+      expect(walk.isPlaying()).toBe(false);
+      expect(walk.currentClock()?.frameIndex()).toBe(held);
+
+      walk.play();
+      driver.pump(3);
+
+      expect(walk.currentClock()?.frameIndex()).toBeGreaterThan(held);
+    });
+
+    it('play() on a finished entry restarts it rather than doing nothing', async () => {
+      // `resume` declines a clock sitting on its own last frame, by design. A
+      // Play button that did nothing on the last frame of a Match would be the
+      // same silence this control exists to remove.
+      const ids = ['a'];
+      const manifest = manifestOf(ids);
+      const driver = createDriver();
+
+      const walk = createSpectateWalk({
+        manifest,
+        fetchJson: fetchFor(ids),
+        env,
+        requestFrame: driver.requestFrame,
+        cancelFrame: driver.cancelFrame,
+        autoplay: false,
+      });
+
+      await walk.startLoop({ entryIndex: 0, frameOffset: 0 });
+      walk.currentClock()?.seek(frameCounts[0] - 1);
+      walk.play();
+      driver.pump(2);
+
+      expect(walk.currentClock()?.isRunning()).toBe(true);
+      expect(walk.currentClock()?.frameIndex()).toBeLessThan(frameCounts[0] - 1);
     });
   });
 });

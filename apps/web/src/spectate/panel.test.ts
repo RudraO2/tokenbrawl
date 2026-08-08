@@ -674,7 +674,7 @@ describe('the Spectate panel (Story 9.3)', () => {
       expect(recording.gains.length).toBeGreaterThan(10);
     });
 
-    it('honours reduced motion: no shake, and no loop churn', async () => {
+    it('honours reduced motion: held rather than dead, and no shake once it runs', async () => {
       const host = createHost();
       const driver = createDriver();
       const panel = mountSpectatePanel(host, {
@@ -687,40 +687,82 @@ describe('the Spectate panel (Story 9.3)', () => {
       });
       await flush();
 
-      const film = buildReplayFilm(logs[0], env);
-      const reduced = buildJuiceTrack(
-        film.frames,
-        DEFAULT_JUICE_TUNING,
-        arenaFor(DEFAULT_FIGHTER_CONFIG),
-        true,
-        DEFAULT_FIGHTER_CONFIG,
-      );
-      // A reduced-motion clock emits the last frame once and never schedules;
-      // `startLoop` then seeks to the join offset, which is frame 0 for this
-      // manifest. Two paints, no third, and nothing scheduled after them --
-      // the still stream, joined where AD-17 says a visitor joins.
-      const recorder = createRecordingContext();
-      const blockArtist = createBlockArtist();
-      for (const index of [reduced.frameCount - 1, 0]) {
-        drawJuicedFrame(recorder.ctx, film.frames[reduced.filmIndexAt(index)], reduced.at(index), {
-          config: DEFAULT_FIGHTER_CONFIG,
-          viewport: { width: 960, height: 400 },
-          artists: [blockArtist, blockArtist],
-          roster: DEFAULT_ROSTER,
-          reducedMotion: true,
-        });
-      }
-
-      expect(panel.currentEntryId()).toBe('first');
-      expect(host.calls()).toStrictEqual(recorder.calls);
-      // And pumping changes nothing, because nothing was ever scheduled.
+      // Held: the stream does not start itself, and pumping cannot start it.
+      expect(panel.isPlaying()).toBe(false);
+      expect(host.node('[data-spectate-play]').innerHTML).toContain('Play');
       const settled = [...host.calls()];
       driver.pump(20);
       expect(host.calls()).toStrictEqual(settled);
-      // No `translate` with a non-zero offset anywhere: the camera shake is the
-      // canonical vestibular trigger and the single most important thing this
-      // preference has to switch off.
-      expect(host.calls().filter((call) => call.startsWith('translate(') && call !== 'translate(0,0)')).toStrictEqual([]);
+      // But it is showing the Match it is holding, not an empty stage.
+      expect(settled.length).toBeGreaterThan(0);
+      expect(panel.currentEntryId()).toBe('first');
+
+      // And it is *startable*, which is the whole difference between honouring
+      // the preference and shipping a dead surface.
+      host.clearCalls();
+      host.fire('[data-spectate-play]', 'click');
+      driver.pump(30);
+
+      expect(panel.isPlaying()).toBe(true);
+      expect(host.node('[data-spectate-play]').innerHTML).toContain('Pause');
+      expect(host.calls().length).toBeGreaterThan(0);
+      // The picture is still reduced: no camera shake anywhere in what it drew,
+      // which is the canonical vestibular trigger and the thing the preference
+      // most has to switch off.
+      expect(
+        host.calls().filter((call) => call.startsWith('translate(') && call !== 'translate(0,0)'),
+      ).toStrictEqual([]);
+    });
+
+    it('under reduced motion, picking a Match plays it instead of swapping one frozen frame for another', async () => {
+      // Reported from the live page: "whatever button I click, it's just one
+      // frame that shows no actual fight."
+      const host = createHost();
+      const driver = createDriver();
+      const panel = mountSpectatePanel(host, {
+        ...baseDeps(driver),
+        view: {
+          requestAnimationFrame: driver.requestAnimationFrame,
+          cancelAnimationFrame: driver.cancelAnimationFrame,
+          matchMedia: (query: string) => ({ matches: query.includes('reduced-motion') }),
+        },
+      });
+      await flush();
+      expect(panel.isPlaying()).toBe(false);
+
+      host.fire('[data-spectate-pick="second"]', 'click');
+      await flush();
+      host.clearCalls();
+      driver.pump(30);
+
+      expect(panel.currentEntryId()).toBe('second');
+      expect(panel.isPlaying()).toBe(true);
+      // Many frames after the click, not one.
+      expect(host.calls().length).toBeGreaterThan(0);
+      expect(host.node('[data-spectate-play]').innerHTML).toContain('Pause');
+    });
+
+    it('pausing a running stream holds it, and playing carries on', async () => {
+      const host = createHost();
+      const driver = createDriver();
+      const panel = mountSpectatePanel(host, baseDeps(driver));
+      await flush();
+      driver.pump(10);
+
+      expect(panel.isPlaying()).toBe(true);
+      host.fire('[data-spectate-play]', 'click');
+      host.clearCalls();
+      driver.pump(20);
+
+      expect(panel.isPlaying()).toBe(false);
+      expect(host.calls()).toStrictEqual([]);
+      expect(host.node('[data-spectate-play]').innerHTML).toContain('Play');
+
+      host.fire('[data-spectate-play]', 'click');
+      driver.pump(5);
+
+      expect(panel.isPlaying()).toBe(true);
+      expect(host.calls().length).toBeGreaterThan(0);
     });
   });
 
