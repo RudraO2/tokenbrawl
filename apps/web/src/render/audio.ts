@@ -69,6 +69,22 @@ import type { JuiceKind, JuiceTrack } from './juice';
  * that sounds like a heavy hit teaches a listener nothing, which is the whole
  * reason the cue exists: the Ultimate has to read for a visitor who is not
  * looking directly at the stage.
+ *
+ * ## The music gets out of the way, in Story 11.5
+ *
+ * `tuning.ultimateVoice` is the seventh cue and the second one the Ultimate
+ * fires. Most of the perceived size of an Ultimate is the bed *dropping*, not
+ * the announcement itself, and until 11.5 the announcement -- and therefore the
+ * duck -- was the half of the reference's event that had not shipped.
+ *
+ * It changes one thing structurally. The voice bus now has two sources,
+ * `juiceTrack.events` and `juiceTrack.cinematics`, and there is exactly one rate
+ * limiter and one duck between them. Emitting each stream's lines in its own
+ * loop would have let an Ultimate and the KO it caused -- one clock frame, two
+ * different `agentIndex` meanings, since a `CinematicEvent`'s names the *caster*
+ * and a `JuiceEvent`'s names the *struck* fighter -- each see an empty limiter
+ * and both speak. So the two streams are collected as `VoiceRequest`s, ordered
+ * by clock frame, and ruled on once.
  */
 
 /** The three independent mix buses. One `GainNode` each, all three straight to `destination`. */
@@ -113,9 +129,40 @@ export interface AudioTuning {
    * thing this story exists to prevent is the Ultimate being inaudible.
    */
   readonly ultimate: string;
+  /**
+   * Story 11.5. The Ultimate's voice line, on the voice bus.
+   *
+   * Its own key rather than an entry in `voice`, for the same reason `ultimate`
+   * is not an entry in `sfx`: that map is keyed by `JuiceKind` and the Ultimate
+   * is not a kind.
+   *
+   * Required rather than optional, unlike `voice`, and for the same reason
+   * `ultimate` is: `voice` is deliberately partial because most kinds should say
+   * nothing, whereas the Ultimate saying nothing is the exact defect this story
+   * exists to close. A tuning that forgot it should fail to compile.
+   *
+   * It is the *stage's* line, not a fighter's -- which is why the rate limiter
+   * below treats it as claiming both fighters' slots rather than the caster's.
+   */
+  readonly ultimateVoice: string;
   readonly sfxGainBasisPoints: number;
   readonly voiceGainBasisPoints: number;
-  /** How many clock frames a voice line holds the music down for. */
+  /**
+   * How many clock frames a voice line holds the music down for.
+   *
+   * Story 11.5 had to choose what "ducks for the cinematic's length" means, and
+   * chose this number rather than deriving one. Story 11.4's cinematic runs 130
+   * clock frames -- a 90-frame freeze plus a release act over *resumed*
+   * playback -- and the shipped `90` here covers the freeze only. Holding the
+   * bed at a quarter through 40 frames of ordinary fighting, while hits land and
+   * their SFX fire, is a mix that forgot to come back rather than a payoff. The
+   * two numbers were tuned independently in Stories 9.6 and 10.4 and happen to
+   * agree, which is why the Ultimate's duck is a table edit and not a mechanism.
+   *
+   * Deliberately *not* read off `cinematic.freezeFrames`: this is the audio
+   * layer's own length, in the audio layer's own table, for the same reason
+   * `tuning.ultimate` is the audio layer's own switch.
+   */
   readonly duckFrames: number;
   /** The music bus's level while ducked. Absolute, not a proportion of the base: one number, one meaning. */
   readonly duckBasisPoints: number;
@@ -144,6 +191,7 @@ export const DEFAULT_AUDIO_TUNING: AudioTuning = Object.freeze({
   sfx: Object.freeze({ hit: 'sfx_hit_l', heavy: 'sfx_hit_h', ko: 'sfx_ko' }),
   voice: Object.freeze({ ko: 'vo_ko' }),
   ultimate: 'sfx_special',
+  ultimateVoice: 'vo_ultimate',
   sfxGainBasisPoints: BASIS_POINTS_FULL,
   voiceGainBasisPoints: BASIS_POINTS_FULL,
   duckFrames: 90,
@@ -198,6 +246,43 @@ export interface AudioSink {
   readonly unlock: () => void;
 }
 
+/**
+ * One line that wants the voice bus, from either stream, before the rate limiter
+ * has ruled on it.
+ *
+ * Story 11.5. The limiter and the duck used to live inside the events loop,
+ * which was correct while `juiceTrack.events` was the only thing that could
+ * speak. It stops being correct the moment `juiceTrack.cinematics` can too: the
+ * cinematics are walked after the events, so a line derived from one would be
+ * ruled on after every line derived from the other however the two are ordered
+ * in time.
+ */
+interface VoiceRequest {
+  readonly clockIndex: number;
+  readonly name: string;
+  /**
+   * Whose rate-limit slot this line claims.
+   *
+   * One fighter for a `JuiceEvent`'s line -- the struck fighter, whose line it
+   * is. **Both** for the Ultimate's announcement, which is nobody's: it is the
+   * stage speaking, so there is no single slot it could take, and taking neither
+   * would let the KO an Ultimate caused start on the same frame as the
+   * announcement of it. Keyed on the *caster* it would do exactly that, because
+   * the caster and the fighter who went down are by definition not the same
+   * fighter.
+   */
+  readonly agents: readonly (0 | 1)[];
+  /** Which line speaks when two land on one clock frame. Lower goes first. */
+  readonly rank: number;
+}
+
+/** The announcement outranks a fighter's line: an Ultimate's KO grunt is the smaller moment. */
+const VOICE_RANK_ANNOUNCE = 0;
+const VOICE_RANK_LINE = 1;
+
+/** Both fighters, for the announcement's claim. Frozen and shared -- it is a constant, not state. */
+const BOTH_AGENTS: readonly (0 | 1)[] = Object.freeze([0, 1]);
+
 /** The frame a film with no frames at all resolves to: base gains, nothing playing. */
 function neutralFrame(tuning: AudioTuning): AudioFrame {
   return Object.freeze({
@@ -249,10 +334,9 @@ export function buildAudioTrack(
   // the director can decline to re-fire on a repaint.
   cuesByClock[0].push(Object.freeze({ bus: 'music', name: tuning.music.name, loop: true }));
 
-  // The last clock frame each fighter spoke on. Closure state in a builder, not
-  // a module binding -- `source-discipline.test.ts` bans the latter, and this is
-  // per-track state besides.
-  const lastVoiceClock = new Map<number, number>();
+  // Every line that wants the voice bus, from both streams, collected before any
+  // of them is ruled on. See `VoiceRequest`.
+  const voiceRequests: VoiceRequest[] = [];
 
   for (const event of juiceTrack.events) {
     const clockIndex = firstClockOf.get(event.filmIndex);
@@ -273,31 +357,20 @@ export function buildAudioTrack(
     if (voiceName === undefined) {
       continue;
     }
-    // The rate limit, per fighter. A flurry's second line is dropped rather than
-    // queued: a queued line arrives after the moment it was about to describe,
-    // which reads worse than not saying it.
-    const spoke = lastVoiceClock.get(event.agentIndex);
-    if (spoke !== undefined && clockIndex - spoke < tuning.voiceRateLimitFrames) {
-      continue;
-    }
-    lastVoiceClock.set(event.agentIndex, clockIndex);
-    cuesByClock[clockIndex].push(Object.freeze({ bus: 'voice', name: voiceName, loop: false }));
-
-    // The duck, written into the table rather than scheduled. A second line
-    // simply overwrites the tail of the first's window, which is what "restarts
-    // the window" means when the window is a range of array entries.
-    const end = Math.min(frameCount, clockIndex + Math.max(0, tuning.duckFrames));
-    for (let ducked = clockIndex; ducked < end; ducked += 1) {
-      musicGains[ducked] = tuning.duckBasisPoints;
-    }
+    voiceRequests.push({
+      clockIndex,
+      name: voiceName,
+      agents: [event.agentIndex],
+      rank: VOICE_RANK_LINE,
+    });
   }
 
-  // Story 10.5. The Ultimate's cue, from the same track's `cinematics` stream
+  // Story 10.5. The Ultimate's cues, from the same track's `cinematics` stream
   // and through the same `firstClockOf` map every other cue goes through.
   //
   // `CinematicEvent.filmIndex` is the film frame the Ultimate's active phase
   // opens on, which is precisely the frame Story 10.4's freeze starts on. So
-  // the cue lands on the clock frame the picture stops on, and on none of the
+  // the cues land on the clock frame the picture stops on, and on none of the
   // 90 holds that follow it -- the same "first clock frame, never a hold" rule
   // the hit SFX already obey, asked of the one index both layers key off. AC2
   // ("audio and picture cannot drift apart on a seek") is that shared index,
@@ -307,12 +380,14 @@ export function buildAudioTrack(
   // *visual* layer's, and a build that shortened or removed the freeze should
   // still announce the Ultimate: `tuning.ultimate` is the audio layer's own
   // switch, in the audio layer's own table.
+  const announcedClocks: number[] = [];
   const announced = new Set<number>();
   for (const cinematic of juiceTrack.cinematics) {
-    // One cue per film frame. Two fighters whose Ultimates go active on the
-    // same frame is the case `buildJuiceTrack` already resolves to one freeze
-    // carrying one caster; two copies of one sample started on one frame is a
-    // flam, not a bigger sound, so the audio layer collapses it the same way.
+    // One announcement per film frame. Two fighters whose Ultimates go active on
+    // the same frame is the case `buildJuiceTrack` already resolves to one
+    // freeze carrying one caster; two copies of one sample started on one frame
+    // is a flam, not a bigger sound, so the audio layer collapses it the same
+    // way -- and the voice half collapses with it, since it is derived here.
     if (announced.has(cinematic.filmIndex)) {
       continue;
     }
@@ -323,6 +398,69 @@ export function buildAudioTrack(
       // different film cannot have its cue placed truthfully, so it gets none.
       continue;
     }
+    announcedClocks.push(clockIndex);
+    voiceRequests.push({
+      clockIndex,
+      name: tuning.ultimateVoice,
+      agents: BOTH_AGENTS,
+      rank: VOICE_RANK_ANNOUNCE,
+    });
+  }
+
+  // Story 11.5. One pass, in clock order, over both streams' lines.
+  //
+  // The sort is by frame first and rank second, so the announcement speaks and
+  // the KO it caused is the line that gets dropped rather than the other way
+  // round. Ties beyond that keep insertion order -- `Array.prototype.sort` is
+  // specified stable -- which is film order, then agent 0 before agent 1: two
+  // fighters trading in one Decision Point still both speak, because they claim
+  // different slots.
+  voiceRequests.sort(
+    (left, right) => left.clockIndex - right.clockIndex || left.rank - right.rank,
+  );
+
+  // The last clock frame each fighter's slot was claimed on. Closure state in a
+  // builder, not a module binding -- `source-discipline.test.ts` bans the
+  // latter, and this is per-track state besides.
+  const lastVoiceClock = new Map<number, number>();
+
+  for (const request of voiceRequests) {
+    // The rate limit. A flurry's second line is dropped rather than queued: a
+    // queued line arrives after the moment it was about to describe, which reads
+    // worse than not saying it. A request is dropped if *any* slot it claims was
+    // claimed too recently, so the announcement and a fighter's line cannot
+    // overlap in either order -- one voice bus, one discipline on it.
+    const tooSoon = request.agents.some((agentIndex) => {
+      const spoke = lastVoiceClock.get(agentIndex);
+      return spoke !== undefined && request.clockIndex - spoke < tuning.voiceRateLimitFrames;
+    });
+    if (tooSoon) {
+      continue;
+    }
+    for (const agentIndex of request.agents) {
+      lastVoiceClock.set(agentIndex, request.clockIndex);
+    }
+    cuesByClock[request.clockIndex].push(
+      Object.freeze({ bus: 'voice', name: request.name, loop: false }),
+    );
+
+    // The duck, written into the table rather than scheduled. A second line
+    // simply overwrites the tail of the first's window, which is what "restarts
+    // the window" means when the window is a range of array entries.
+    const end = Math.min(frameCount, request.clockIndex + Math.max(0, tuning.duckFrames));
+    for (let ducked = request.clockIndex; ducked < end; ducked += 1) {
+      musicGains[ducked] = tuning.duckBasisPoints;
+    }
+  }
+
+  // The Ultimate's SFX, last on its frame and unconditional.
+  //
+  // Last because the reference fires the announcement first and the impact
+  // second, and because the announcement is what the duck under it is for.
+  // Unconditional because the rate limiter governs the *voice* bus only: an
+  // Ultimate whose announcement was suppressed by a line a few frames earlier
+  // still has to land.
+  for (const clockIndex of announcedClocks) {
     cuesByClock[clockIndex].push(
       Object.freeze({ bus: 'sfx', name: tuning.ultimate, loop: false }),
     );

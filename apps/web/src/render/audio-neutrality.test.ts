@@ -135,6 +135,7 @@ const RETUNED: AudioTuning = Object.freeze({
   sfx: Object.freeze({ hit: 'sfx_alt_l', heavy: 'sfx_alt_h', ko: 'sfx_alt_ko' }),
   voice: Object.freeze({ hit: 'vo_alt_hit', heavy: 'vo_alt_heavy', ko: 'vo_alt_ko' }),
   ultimate: 'sfx_alt_ult',
+  ultimateVoice: 'vo_alt_ult',
   sfxGainBasisPoints: 6_000,
   voiceGainBasisPoints: 9_000,
   duckFrames: 5,
@@ -257,8 +258,20 @@ describe("the Ultimate's cue is hash-neutral too (Story 10.5, AC6, AD-15)", () =
         drawJuicedFrame(ctx, film.frames[juice.filmIndexAt(index)], juice.at(index), options);
         director.atFrame(index);
       }
-      // Non-vacuous: the Ultimate's cue really was among what played.
+      // Non-vacuous: both of the Ultimate's cues really were among what played,
+      // and the bed really did drop under them (Story 11.5). A hash claim about
+      // a layer that never ran is not a claim.
       expect(sink.cues().filter((cue) => cue.name === tuning.ultimate)).toHaveLength(1);
+      expect(sink.cues().filter((cue) => cue.name === tuning.ultimateVoice)).toStrictEqual([
+        { bus: 'voice', name: tuning.ultimateVoice, loop: false },
+      ]);
+      // At least the announcement's own window. `RETUNED`'s voice table names
+      // every kind, so under it the bed is also down under a good many hits --
+      // the exact geometry is `audio.test.ts`'s claim, not this file's.
+      const ducked = `${String(tuning.duckBasisPoints)}/${String(tuning.sfxGainBasisPoints)}/${String(tuning.voiceGainBasisPoints)}`;
+      expect(sink.gains().filter((entry) => entry === ducked).length).toBeGreaterThanOrEqual(
+        tuning.duckFrames,
+      );
 
       const rederived = buildReplayFilm(log, createFighterEnvironment());
       expect(rederived.finalStateHash).toBe(before);

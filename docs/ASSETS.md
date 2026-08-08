@@ -237,7 +237,8 @@ floats above the floor or sinks through it.
 
 Story 9.7 lands the five cues `apps/web/src/render/audio.ts`'s
 `DEFAULT_AUDIO_TUNING` named at the time — the bus wiring itself shipped silent
-in Story 9.6. Story 10.5 adds the sixth, `sfx_special`, for the Ultimate.
+in Story 9.6. Story 10.5 adds the sixth, `sfx_special`, for the Ultimate, and
+Story 11.5 the seventh, `vo_ultimate` — the announcement the music ducks under.
 
 | Asset | Source | Licence | Checked |
 |---|---|---|---|
@@ -247,6 +248,7 @@ in Story 9.6. Story 10.5 adds the sixth, `sfx_special`, for the Ultimate.
 | `apps/web/public/audio/sfx_ko.mp3` | authored in this repo — the author's own prior project's SFX (own IP) | **Author-owned, used with permission** | 2026-08-06 |
 | `apps/web/public/audio/vo_ko.mp3` | authored in this repo — the author's own prior project's voice line (own IP) | **Author-owned, used with permission** | 2026-08-06 |
 | `apps/web/public/audio/sfx_special.mp3` | authored in this repo — the author's own prior project's Ultimate SFX (own IP), copied byte-for-byte from its `audio/sfx_special.mp3` | **Author-owned, used with permission** | 2026-08-07 |
+| `apps/web/public/audio/vo_ultimate.mp3` | authored in this repo — the author's own prior project's Ultimate announcement (own IP), copied byte-for-byte from its `audio/vo_ultimate.mp3` | **Author-owned, used with permission** | 2026-08-08 |
 
 `sfx_special.mp3` is a genuinely different sample from `sfx_hit_h.mp3`, not a
 re-encode or a louder copy — the two files' MD5s differ
@@ -255,13 +257,21 @@ Ultimate which sounds like a heavy hit teaches a listener nothing. It comes
 from the same source project and the same owner as the five cues above, and
 ships on the same basis.
 
+`vo_ultimate.mp3` (15 718 B, MD5 `2b97d463…`) is the *stage's* line rather than
+a fighter's — an announcement over the cutscene, not a grunt — which is why
+Story 11.5 gives it its own tuning key next to `sfx_special` instead of a
+`JuiceKind`, and why the voice rate limiter treats it as claiming both fighters'
+slots: it belongs to neither, and letting it belong to neither would let a KO
+start on top of it.
+
 `DEFAULT_AUDIO_TUNING` is global, not per-fighter: one hit SFX pair, one KO SFX,
-one KO voice line, one Ultimate SFX regardless of which two packs are loaded.
-The source project ships per-character variants (`sfx_clawde_hit_l.mp3`,
-`vo_chatty_ko.mp3`, `sfx_<id>_ult.mp3`, …);
-only its generic, character-neutral files are used here, matching the cue
-names this codebase already calls by. A later story that makes audio
-per-fighter would draw from the same source and add rows here the same way.
+one KO voice line, one Ultimate SFX and one Ultimate announcement regardless of
+which two packs are loaded. The source project ships per-character variants
+(`sfx_clawde_hit_l.mp3`, `vo_chatty_ko.mp3`, `sfx_<id>_ult.mp3`, …) and fires
+its per-fighter Ultimate SFX with `sfx_special` only as a *fallback*; only its
+generic, character-neutral files are used here, matching the cue names this
+codebase already calls by. A later story that makes audio per-fighter would draw
+from the same source and add rows here the same way.
 
 Between Story 9.6 and Story 9.7 the shipped player ran the whole audio graph
 and played nothing, and that was not an oversight being deferred — it was the
@@ -280,9 +290,19 @@ Three independent WebAudio `GainNode`s, each connected straight to
 
 | Bus | What goes on it | Base level | Ducked to |
 |---|---|---|---|
-| `music` | one looping bed, started at clock frame 0 | 0.80 | 0.25 under a voice line |
+| `music` | one looping bed, started at clock frame 0 | 0.80 | 0.25 under a voice line, for 90 clock frames |
 | `sfx` | one-shot per hit, heavy hit, KO and Ultimate | 1.00 | — |
-| `voice` | one-shot per KO | 1.00 | — |
+| `voice` | one-shot per KO, and the Ultimate's announcement | 1.00 | — |
+
+The duck window is **90 clock frames**, which is also the length of Story 10.4's
+Ultimate freeze — the two were tuned independently, in Stories 9.6 and 10.4, and
+happen to agree. That is why the announcement placed on the cutscene's opening
+frame holds the bed down across exactly the frozen part of it. It covers the
+freeze and *not* Story 11.4's release act, which runs 40 further clock frames
+over resumed gameplay: a bed still at a quarter while ordinary hits are landing
+is a mix that forgot to come back. The audio layer never reads
+`freezeFrames` — `duckFrames` is its own number in its own table, so a build
+that shortened the freeze would still announce the Ultimate.
 
 Levels are tuned as integer basis points in
 `apps/web/src/render/audio.ts`'s `DEFAULT_AUDIO_TUNING`; the single division
@@ -309,11 +329,14 @@ The names the shipped tuning asks for:
 | `sfx_ko` | sfx | `public/audio/sfx_ko.mp3` |
 | `vo_ko` | voice | `public/audio/vo_ko.mp3` |
 | `sfx_special` | sfx | `public/audio/sfx_special.mp3` |
+| `vo_ultimate` | voice | `public/audio/vo_ultimate.mp3` |
 
-`sfx_special` is the only cue that is not keyed on a `JuiceKind`. It fires on
-`CinematicEvent.filmIndex` — the film frame Story 10.4's Ultimate freeze opens
-on — so the sound and the picture are driven off one index and cannot drift
-apart when a visitor scrubs the timeline across it.
+`sfx_special` and `vo_ultimate` are the two cues that are not keyed on a
+`JuiceKind`. Both fire on `CinematicEvent.filmIndex` — the film frame Story
+10.4's Ultimate freeze opens on — so the sound and the picture are driven off
+one index and cannot drift apart when a visitor scrubs the timeline across it.
+`vo_ultimate` is emitted first and `sfx_special` second, the order the source
+project fires them in, and the duck rides the announcement.
 
 Adding a sound is dropping a file at its path and recording it in the table
 above with its source, licence and the date the licence was read. Nothing in
