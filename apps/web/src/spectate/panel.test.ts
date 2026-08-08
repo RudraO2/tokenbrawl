@@ -804,6 +804,46 @@ describe('the Spectate panel (Story 9.3)', () => {
       expect(recording.played.filter((cue) => cue.loop).length).toBe(2);
     });
 
+    it('off and on again gets its bed back, rather than staying silent for the rest of the entry', async () => {
+      // The director is replaced on every enable precisely so this works. A
+      // director kept across the mute would see the resumed frame as a jump --
+      // gains, no cues -- and the stream would play hits over silence until the
+      // next entry, which is up to a whole Match away.
+      const host = createHost();
+      const driver = createDriver();
+      const recording = createRecordingSink();
+      const panel = mountSpectatePanel(host, { ...baseDeps(driver), sink: recording.sink });
+      await flush();
+
+      panel.setAudioEnabled(true);
+      driver.pump(10);
+      panel.setAudioEnabled(false);
+      driver.pump(10);
+      panel.setAudioEnabled(true);
+      driver.pump(10);
+
+      expect(recording.played.filter((cue) => cue.loop).length).toBe(2);
+    });
+
+    it('enabling before the stream has loaded still starts the bed when it does', async () => {
+      // The ordering a visitor who clicks fast actually produces: there is no
+      // track to build a director from yet, so the enable can only record the
+      // decision and the first entry to mount has to honour it.
+      const host = createHost();
+      const driver = createDriver();
+      const recording = createRecordingSink();
+      const panel = mountSpectatePanel(host, { ...baseDeps(driver), sink: recording.sink });
+
+      panel.setAudioEnabled(true);
+      expect(recording.played).toStrictEqual([]);
+
+      await flush();
+      driver.pump(10);
+
+      expect(recording.played.filter((cue) => cue.loop && cue.bus === 'music').length).toBe(1);
+      expect(recording.gains.length).toBeGreaterThan(5);
+    });
+
     it('an entry change with the sound off leaves the shared graph alone entirely', async () => {
       const host = createHost();
       const driver = createDriver();
