@@ -7,6 +7,17 @@ import { animationFor, isFree } from './animation';
 import type { Backdrop } from './backdrop';
 import type { Canvas2D } from './canvas2d';
 import { createBlockArtist, type DrawnFighter, type FighterArtist } from './artist';
+import {
+  ARMED_PULSE_BANDS,
+  BANK_BANDS,
+  SUPER_METER_BANDS,
+  arcadeText,
+  drawArcadeBar,
+  drawArcadeSegments,
+  gradientBands,
+  healthBands,
+  pulseLevel,
+} from './hud';
 import { THEME, type Theme } from './theme';
 
 /**
@@ -48,6 +59,20 @@ export interface DrawFrameOptions {
    * this function draws: omit it and the output is unchanged.
    */
   readonly banks?: readonly (BankReading | null)[];
+  /**
+   * Story 11.3. Whether the viewer asked for less motion.
+   *
+   * A HUD *input*, threaded from the same `prefersReducedMotion(view)` read the
+   * clock and the juice track already make, rather than a second read taken
+   * here: a renderer that consulted `matchMedia` itself would be a renderer
+   * that could not be drawn in a test, and would give the hero raster -- which
+   * has no `window` at all -- a different answer from the page.
+   *
+   * Absent means "not reduced", which is what keeps every Story 4.1 assertion
+   * describing what this function draws: omit it and the output is the
+   * unreduced frame.
+   */
+  readonly reducedMotion?: boolean;
 }
 
 /**
@@ -79,21 +104,22 @@ const METER_GAP = 8;
 const METER_HEIGHT = 18;
 const METER_TOP = HUD_TOP + HUD_BAR_HEIGHT + METER_GAP;
 /**
- * Frames the armed gauge holds each half of its blink.
+ * The Super Gauge's four skewed segments, and the gap between them.
  *
- * Counted, never timed (INV-1, INV-3). Twelve is `FRAMES_PER_DECISION`, so one
- * half-period is exactly one Decision Point and the blink stays locked to the
- * fight's own cadence rather than to a refresh rate. The value is not imported
- * from `replay/film.ts`: this is a presentation cadence that happens to agree
- * with the film's, and coupling them would mean a later change to the film's
- * sampling silently retuned the HUD.
+ * Four is the reference's `SUP_SEGS` (`<REF>/game_source/js/screens.js:2460`).
+ * The gap is eight rather than the reference's own value because the arithmetic
+ * has to come out whole: `(320 - 3 * 8) / 4` is exactly 74, and a segment width
+ * with a fraction in it puts every segment after the first on a half-pixel,
+ * which a canvas antialiases into a blur.
  *
- * Because the phase is `frame.index`'s alone, a scrub to frame 90 draws the
- * same half of the blink as a play-through that reaches frame 90 -- which is
- * the property Story 4.5's seek-equals-play tests already assert over the whole
- * film, and the reason this is a counter rather than a `Date`.
+ * Story 10.3's `ARMED_PULSE_FRAMES` used to sit here, and its docblock named
+ * this story as the place the pulse would be reconsidered. It was: the blink is
+ * now `hud.ts`'s `pulseLevel` over `ARMED_PULSE_HOLD_FRAMES`, a three-colour
+ * triangle rather than a border swap, and it moved to the module that owns the
+ * colours it cycles through.
  */
-const ARMED_PULSE_FRAMES = 12;
+const METER_SEGMENTS = 4;
+const METER_SEGMENT_GAP = 8;
 /** Baseline of the `HP … MTR …` readout under the two simulation bars. */
 const HUD_LABEL_BASELINE = METER_TOP + METER_HEIGHT + 20;
 /**
@@ -222,27 +248,20 @@ export function liveWindow(
   return remaining > 0 ? { committedAction, remaining } : { committedAction: COMMITTED_NONE, remaining: 0 };
 }
 
-/** Draws one bar: hard shadow, flat fill, ink border. No radius, no gradient. */
-function drawBar(
-  ctx: Canvas2D,
-  theme: Theme,
-  x: number,
-  y: number,
-  width: number,
-  height: number,
-  filledFraction: number,
-  fill: string,
-): void {
-  ctx.fillStyle = theme.bg;
-  ctx.fillRect(x, y, width, height);
-
-  const clamped = Math.max(0, Math.min(1, filledFraction));
-  ctx.fillStyle = fill;
-  ctx.fillRect(x, y, width * clamped, height);
-
-  ctx.strokeStyle = theme.ink;
-  ctx.lineWidth = theme.borderWidth;
-  ctx.strokeRect(x, y, width, height);
+/**
+ * A level as basis points of a total, clamped, and never `NaN`.
+ *
+ * The degenerate cases are the point. `initialHealth <= 0` or `maxMeter <= 0`
+ * is a hand-built config -- `assertIntegerConfig` rejects one upstream -- and
+ * the honest failure for a bar is to clamp to empty. Dividing anyway would put
+ * an `Infinity` or a `NaN` into a `fillRect` width, which paints nothing and
+ * reads as a HUD block that silently stopped being drawn.
+ */
+function levelBasisPoints(value: number, total: number): number {
+  if (!Number.isFinite(value) || !Number.isFinite(total) || total <= 0) {
+    return 0;
+  }
+  return Math.max(0, Math.min(BASIS_POINTS_FULL, Math.round((value * BASIS_POINTS_FULL) / total)));
 }
 
 /**
@@ -260,59 +279,70 @@ function drawBar(
  * Nothing here is a duration. The bar is redrawn from a level the log recorded,
  * so two Matches with identical `bankRemaining` sequences produce identical
  * HUDs however long either Deployment took to think (INV-3).
+ *
+ * **Story 11.3 keeps the inversion and gives it the arcade geometry.** The
+ * exhausted state is still a solid `--tb-warn` block carrying the word REFLEX
+ * in ground ink -- that pairing is measured (`--tb-warn` on `--tb-bg` is
+ * 4.26:1 and misses the text floor; the other way round it does not) and the
+ * page has already taught a viewer what an inverted filled bar means. What
+ * changes is that it is now the same skewed, bevelled, framed bar as the two
+ * above it, filled edge to edge, rather than a square block sitting under two
+ * parallelograms. The warn "ramp" is both stops of one colour, which is a flat
+ * fill expressed in the same vocabulary rather than a special case in the bar.
  */
 function drawTokenBank(
   ctx: Canvas2D,
   theme: Theme,
   x: number,
+  mirror: boolean,
   reading: BankReading,
 ): void {
-  if (reading.exhausted) {
-    ctx.fillStyle = theme.warn;
-    ctx.fillRect(x, BANK_TOP, HUD_BAR_WIDTH, BANK_HEIGHT);
-    ctx.strokeStyle = theme.ink;
-    ctx.lineWidth = theme.borderWidth;
-    ctx.strokeRect(x, BANK_TOP, HUD_BAR_WIDTH, BANK_HEIGHT);
+  const exhausted = reading.exhausted;
+  drawArcadeBar(ctx, {
+    x,
+    y: BANK_TOP,
+    width: HUD_BAR_WIDTH,
+    height: BANK_HEIGHT,
+    mirror,
+    fillBasisPoints: exhausted ? BASIS_POINTS_FULL : reading.filledBasisPoints,
+    ghostBasisPoints: 0,
+    // Built here rather than exported from `hud.ts`, because the colour is the
+    // *theme's* and `hud.ts` holds no theme: the arena palette is where arena
+    // colour lives, and warn is a brand token doing a brand token's job.
+    bands: exhausted ? gradientBands({ from: theme.warn, to: theme.warn }) : BANK_BANDS,
+  });
 
-    ctx.fillStyle = theme.bg;
-    ctx.font = theme.monoFont;
-    ctx.textAlign = 'left';
-    ctx.fillText('REFLEX  BANK 0', x + METER_GAP, BANK_TOP + BANK_HEIGHT - theme.borderWidth);
+  const baseline = BANK_TOP + BANK_HEIGHT - theme.borderWidth;
+  if (exhausted) {
+    // A callout, so it takes the arcade treatment. The number beside it is not,
+    // and stays on the mono face in the same string it always shared.
+    arcadeText(ctx, theme, 'REFLEX  BANK 0', x + METER_GAP, baseline, 'left', theme.bg);
     return;
   }
-
-  drawBar(
-    ctx,
-    theme,
-    x,
-    BANK_TOP,
-    HUD_BAR_WIDTH,
-    BANK_HEIGHT,
-    reading.filledBasisPoints / BASIS_POINTS_FULL,
-    theme.muted,
-  );
 
   ctx.fillStyle = theme.ink;
   ctx.font = theme.monoFont;
   ctx.textAlign = 'left';
-  ctx.fillText(`BANK ${String(reading.remaining)}`, x + METER_GAP, BANK_TOP + BANK_HEIGHT - theme.borderWidth);
+  ctx.fillText(`BANK ${String(reading.remaining)}`, x + METER_GAP, baseline);
 }
 
 /**
- * Draws the Super Gauge for one fighter (Story 10.3).
+ * Draws the Super Gauge for one fighter (Story 10.3, redrawn by 11.3).
  *
- * Two states, and the whole story is that they are *two*. Charging is an
- * ordinary proportional bar. At the point the Ultimate becomes affordable the
- * bar inverts to a solid `--tb-warn` block carrying the words ULTIMATE READY in
- * ground ink -- the same warn-as-fill pattern `drawTokenBank` uses for REFLEX,
- * borrowed on purpose rather than reinvented: the page has already taught a
- * viewer that an inverted, filled bar with a word in it means a threshold has
- * been crossed, and a second visual language for the same idea would have to
- * teach it again.
+ * Two states, and the whole story is still that they are *two*. Charging is
+ * four skewed segments on the reference's cyan ramp, each filling in turn, so
+ * the gauge reads as *how many chunks are lit* at five Decision Points a second
+ * rather than as an edge somewhere along a rail. Armed, every segment is gold
+ * and the whole bar breathes through three enumerated ramps while ULTIMATE
+ * READY sits on it in the arcade treatment.
  *
- * Red for a *good* thing is not a slip. `docs/DESIGN.md` reserves warn for the
- * loud end of the palette, and this HUD is drawn for both fighters: an armed
- * gauge on the far side is 22 damage the viewer cannot block. It is the alarm.
+ * Story 10.3 armed the gauge by inverting it to a `--tb-warn` block with an
+ * ink/accent border swap, and said so at length: warn-as-fill was the loudest
+ * thing the flat palette allowed, and a border swap was the only pulse the
+ * house style left available. Both of those were consequences of rules Story
+ * 11.1 has since scoped to the page. Gold is what the reference arms with, it
+ * is now legal here, and it says *afford* rather than *alarm* -- which is the
+ * true statement about a meter that has finished charging.
  *
  * The threshold read is `specialMeterCost`, not `maxMeter`, because
  * ULTIMATE READY is a claim about the Action being legal and `specialMeterCost`
@@ -322,7 +352,7 @@ function drawTokenBank(
  * full and at no other value; a later story that lowers the cost gets a gauge
  * that still tells the truth rather than one that goes quietly out of date.
  *
- * Nothing here is a duration. The blink counts `frame.index` and the level is
+ * Nothing here is a duration. The pulse counts `frame.index` and the level is
  * read off state the simulation already produced, so the gauge is a pure
  * function of the frame (INV-1, INV-3, AD-15). No `packages/` value is written,
  * and no Final-State Hash can move because of anything in this function.
@@ -331,43 +361,40 @@ function drawSuperGauge(
   ctx: Canvas2D,
   theme: Theme,
   x: number,
+  mirror: boolean,
   meter: number,
   config: FighterConfig,
   frameIndex: number,
+  reducedMotion: boolean,
 ): void {
-  if (meter >= config.specialMeterCost) {
-    ctx.fillStyle = theme.warn;
-    ctx.fillRect(x, METER_TOP, HUD_BAR_WIDTH, METER_HEIGHT);
+  const armed = meter >= config.specialMeterCost;
 
-    // The one thing on the HUD that moves, and it moves by switching rather
-    // than by easing: the border alternates between ink and the live accent on
-    // a fixed frame count. A flat border swap was the only kind of pulse the
-    // house style left available when this was written -- a glow or a fade
-    // needed translucency, which `style-discipline.test.ts` banned here too.
-    // **Story 11.1 released `render/` from that**, so a glow is legal now;
-    // Story 11.3 owns the arcade HUD and is where this pulse gets reconsidered.
-    const lit = Math.floor(frameIndex / ARMED_PULSE_FRAMES) % 2 === 0;
-    ctx.strokeStyle = lit ? theme.accent : theme.ink;
-    ctx.lineWidth = theme.borderWidth;
-    ctx.strokeRect(x, METER_TOP, HUD_BAR_WIDTH, METER_HEIGHT);
-
-    ctx.fillStyle = theme.bg;
-    ctx.font = theme.monoFont;
-    ctx.textAlign = 'left';
-    ctx.fillText('ULTIMATE READY', x + METER_GAP, METER_TOP + METER_HEIGHT - theme.borderWidth);
-    return;
-  }
-
-  drawBar(
-    ctx,
-    theme,
+  drawArcadeSegments(ctx, {
     x,
-    METER_TOP,
-    HUD_BAR_WIDTH,
-    METER_HEIGHT,
-    meter / config.maxMeter,
-    theme.ink,
-  );
+    y: METER_TOP,
+    width: HUD_BAR_WIDTH,
+    height: METER_HEIGHT,
+    mirror,
+    count: METER_SEGMENTS,
+    gap: METER_SEGMENT_GAP,
+    fillBasisPoints: levelBasisPoints(meter, config.maxMeter),
+    bands: armed ? ARMED_PULSE_BANDS[pulseLevel(frameIndex, reducedMotion)] : SUPER_METER_BANDS,
+  });
+
+  if (armed) {
+    // Ground ink on the gold fill, not gold text on the ground: the same
+    // direction `docs/DESIGN.md` requires of every warn pairing, applied to the
+    // arena's brightest value for the same reason.
+    arcadeText(
+      ctx,
+      theme,
+      'ULTIMATE READY',
+      x + METER_GAP,
+      METER_TOP + METER_HEIGHT - theme.borderWidth,
+      'left',
+      theme.bg,
+    );
+  }
 }
 
 /**
@@ -377,9 +404,31 @@ function drawSuperGauge(
  * Fighters are drawn before the HUD so a fighter can never occlude a health
  * bar, and the two fighters are drawn in agent-index order so overlapping
  * bodies stack predictably rather than by whoever happens to be in front.
+ *
+ * ## Why the live bars read `frame.to` (Story 11.3)
+ *
+ * The film samples the simulation at Decision Point boundaries, so `from` is
+ * the state *before* this step's damage. Drawing it means the health bar falls
+ * one whole Decision Point after the punch that caused it -- while
+ * `animationFor` a few lines above already plays the hurt animation *during*
+ * the step, because it derives "took damage" from `to.health !== from.health`.
+ * The two were a Decision Point apart, and the one a viewer notices is the bar.
+ *
+ * Reading `to` puts the drop and the flinch on the same film frames, and it is
+ * what gives the ghost something to recede *from*: the chip layer is the old
+ * value easing to the new one across the same step. Health, meter and the
+ * `HP … MTR …` readout all move together for that reason -- a readout a step
+ * ahead of its own bar would be worse than either.
+ *
+ * This is presentation arithmetic over state the simulation already produced.
+ * It reads no clock, feeds nothing back and changes no hash -- the same
+ * standing as position interpolation (AD-15). `TICK` still reads `from.tick`,
+ * because a tick counter is a statement about where playback *is*, not about
+ * what this step resolves into.
  */
 export function drawFrame(ctx: Canvas2D, frame: RenderFrame, options: DrawFrameOptions): void {
   const theme = options.theme ?? THEME;
+  const reducedMotion = options.reducedMotion === true;
   const fallbackArtist = createBlockArtist();
   const artistFor = (agentIndex: 0 | 1): FighterArtist =>
     options.artists?.[agentIndex] ?? options.artists?.[0] ?? fallbackArtist;
@@ -446,25 +495,44 @@ export function drawFrame(ctx: Canvas2D, frame: RenderFrame, options: DrawFrameO
   for (const agentIndex of [0, 1] as const) {
     const x =
       agentIndex === 0 ? HUD_SIDE_INSET : viewport.width - HUD_SIDE_INSET - HUD_BAR_WIDTH;
+    // p2's HUD is p1's reflected, which is what the reference's `mirror` flag
+    // buys: the bars lean away from the centre and drain from the outer edge,
+    // so the pair reads as two fighters facing each other rather than as one
+    // panel drawn twice.
+    const mirror = agentIndex === 1;
 
-    drawBar(
+    const health = levelBasisPoints(frame.to.health[agentIndex], config.initialHealth);
+    drawArcadeBar(ctx, {
+      x,
+      y: HUD_TOP,
+      width: HUD_BAR_WIDTH,
+      height: HUD_BAR_HEIGHT,
+      mirror,
+      fillBasisPoints: health,
+      ghostBasisPoints: ghostBasisPoints(frame, agentIndex, config),
+      bands: healthBands(health),
+    });
+
+    drawSuperGauge(
       ctx,
       theme,
       x,
-      HUD_TOP,
-      HUD_BAR_WIDTH,
-      HUD_BAR_HEIGHT,
-      frame.from.health[agentIndex] / config.initialHealth,
-      agentIndex === 0 ? theme.accent : theme.warn,
+      mirror,
+      frame.to.meter[agentIndex],
+      config,
+      frame.index,
+      reducedMotion,
     );
 
-    drawSuperGauge(ctx, theme, x, frame.from.meter[agentIndex], config, frame.index);
-
+    // The numeric readout stays on the mono face. It is a *readout* -- the same
+    // kind of thing as a tick count or a bank level -- and `docs/DESIGN.md`
+    // reserves Departure Mono for every number a visitor reads as data. Only
+    // the callouts (TICK, ULTIMATE READY, REFLEX) take the arcade treatment.
     ctx.fillStyle = theme.ink;
     ctx.font = theme.monoFont;
     ctx.textAlign = 'left';
     ctx.fillText(
-      `HP ${String(frame.from.health[agentIndex])}  MTR ${String(frame.from.meter[agentIndex])}`,
+      `HP ${String(frame.to.health[agentIndex])}  MTR ${String(frame.to.meter[agentIndex])}`,
       x,
       HUD_LABEL_BASELINE,
     );
@@ -474,12 +542,45 @@ export function drawFrame(ctx: Canvas2D, frame: RenderFrame, options: DrawFrameO
     // full-looking Token Bank would misrepresent what is being measured (AC3).
     const bank = options.banks?.[agentIndex];
     if (bank != null) {
-      drawTokenBank(ctx, theme, x, bank);
+      drawTokenBank(ctx, theme, x, mirror, bank);
     }
   }
 
-  ctx.fillStyle = theme.muted;
-  ctx.font = theme.monoFont;
-  ctx.textAlign = 'center';
-  ctx.fillText(`TICK ${String(frame.from.tick)}`, viewport.width / 2, HUD_TOP + HUD_BAR_HEIGHT);
+  arcadeText(
+    ctx,
+    theme,
+    `TICK ${String(frame.from.tick)}`,
+    viewport.width / 2,
+    HUD_TOP + HUD_BAR_HEIGHT,
+    'center',
+    theme.muted,
+  );
+}
+
+/**
+ * The damage-lag ghost's level, in basis points of starting health.
+ *
+ * `from.health` eased linearly to `to.health` across `progressBasisPoints`. At
+ * the start of a Decision Point the ghost stands at the health the fighter had
+ * before the step's damage; by the end it has caught the live bar up. A big hit
+ * is therefore visible as a receding second bar rather than only as a number
+ * changing, which is AC1.
+ *
+ * This is the pure replacement for the reference's `state.hudGhost`
+ * (`<REF>/game_source/js/screens.js:2450`), which decays by a fixed 0.015 a
+ * rendered frame out of a mutable module-level accumulator. That is one of the
+ * four mechanisms `docs/DEV-REFERENCE.md` says may never come across: a stepped
+ * accumulator cannot be scrubbed backwards, so Story 4.5's timeline would show
+ * a ghost that depended on how the viewer arrived at the frame. An ease across
+ * `progressBasisPoints` depends on the frame and nothing else.
+ */
+function ghostBasisPoints(
+  frame: RenderFrame,
+  agentIndex: 0 | 1,
+  config: FighterConfig,
+): number {
+  const before = frame.from.health[agentIndex];
+  const after = frame.to.health[agentIndex];
+  const eased = before + ((after - before) * frame.progressBasisPoints) / BASIS_POINTS_FULL;
+  return levelBasisPoints(eased, config.initialHealth);
 }

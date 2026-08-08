@@ -358,6 +358,9 @@ export function mountPlayer(
       // which is the whole fail-soft claim, exercised on every page load
       // before the sheet lands rather than only in a test.
       vfx: dressing.vfx,
+      // Story 11.3. The same read the clock and the juice track already make,
+      // threaded in rather than taken again inside the renderer.
+      reducedMotion: prefersReducedMotion(view),
     });
     // Last, and after the draw: the audio describes the frame that is now on
     // screen, and nothing in it may throw into the paint path -- every failure

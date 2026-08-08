@@ -698,6 +698,33 @@ describe('neubrutalism, as rules rather than adjectives', () => {
       .flatMap(({ source }) => source.match(/@font-face/g) ?? []);
     expect(declared).toHaveLength(2);
 
+    // And the canvas, which is the one place the two checks above cannot see.
+    //
+    // A canvas takes a font *shorthand string*, not a `font-family` declaration
+    // and not a token, so `THEME.arcadeFont = "800 16px 'Retro Arcade'"` would
+    // satisfy every assertion above while putting a third family on screen.
+    // Story 11.3 is the story that added an arcade treatment and it took the
+    // display face at a smaller size precisely so this stayed true; the check
+    // is here so the next story cannot quietly take the other route.
+    //
+    // Quoted families must be in `tokens.css`. Unquoted ones are generic or
+    // system keywords -- `sans-serif`, `ui-monospace`, `monospace` -- which are
+    // fallbacks rather than faces and are what the two token stacks already
+    // end in.
+    for (const shorthand of [THEME.displayFont, THEME.monoFont, THEME.arcadeFont]) {
+      for (const quoted of shorthand.match(/'([^']+)'/g) ?? []) {
+        expect(tokens).toContain(quoted.slice(1, -1));
+      }
+      const unquoted = shorthand
+        .slice(shorthand.indexOf('px ') + 3)
+        .split(',')
+        .map((part) => part.trim())
+        .filter((part) => !part.startsWith("'"));
+      for (const generic of unquoted) {
+        expect(['sans-serif', 'serif', 'monospace', 'ui-monospace', 'system-ui']).toContain(generic);
+      }
+    }
+
     // The other half of the same hole: consumers are allowed through when they
     // read a `--tb-font-*` token, so a *third token* is a third family with the
     // filter above satisfied. These are the two that exist.
@@ -956,6 +983,10 @@ describe('the arena boundary is named, documented, and still swept for clocks', 
       'render/audio.ts',
       'render/backdrop.ts',
       'render/canvas2d.ts',
+      // Story 11.3. The arcade HUD's drawing: bevels, banded ramps and a
+      // damage-lag ghost, none of which are brand colours and all of which the
+      // owner's 2026-08-07 ruling puts on the game side of the fence.
+      'render/hud.ts',
       'render/identity.ts',
       'render/juice-draw.ts',
       'render/juice.ts',
@@ -1154,6 +1185,24 @@ describe('the arena palette declares colour once', () => {
     const colours = paletteColours();
     expect(colours.length).toBeGreaterThan(0);
     expect(new Set(colours).size).toBe(colours.length);
+  });
+
+  it('keeps the HUD structure colours out of the brand, which is the whole point of two palettes', () => {
+    // Story 11.3's four additions. A plate, a frame, a bevel and a ghost are
+    // descriptions of *how a bar is built*, not brand decisions -- the reason
+    // they are here and not in `theme.ts`. Re-declaring one of the five brand
+    // values under an arena name would put the same colour in two files and
+    // start exactly the drift `docs/DESIGN.md`'s two-regimes split exists to
+    // prevent.
+    const brand = new Set([THEME.bg, THEME.ink, THEME.accent, THEME.warn, THEME.muted]);
+    for (const colour of [
+      ARENA_PALETTE.hudPlate,
+      ARENA_PALETTE.hudFrame,
+      ARENA_PALETTE.hudBevel,
+      ARENA_PALETTE.hudGhost,
+    ]) {
+      expect(brand.has(colour)).toBe(false);
+    }
   });
 
   it('gives every fighter in the roster an aura', () => {

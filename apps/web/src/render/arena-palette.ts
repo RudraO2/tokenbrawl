@@ -60,6 +60,38 @@
  * alpha noted below. Ratios here are the standard WCAG 2.x relative-luminance
  * formula against `--tb-bg` `#0a0a0a`, so they reproduce.
  *
+ * ### The bar-against-plate ratios, recorded (Story 11.3)
+ *
+ * Line 60 above deferred these to the story that actually draws the plate.
+ * `render/hud.ts` now does, so they are written down here rather than in the
+ * drawing code, because a ratio is a fact about two palette entries and the
+ * palette is where a reader looks for one. Each is the bar's saturated stop
+ * measured against `hudPlate`, by the same relative-luminance formula:
+ *
+ * | Pair | Ratio |
+ * |---|---|
+ * | `hpHigh.to` on `hudPlate` | 7.60:1 |
+ * | `hpMid.to` on `hudPlate` | 7.65:1 |
+ * | `hpLow.to` on `hudPlate` | 3.35:1 |
+ * | `superMeter.to` on `hudPlate` | 6.29:1 |
+ * | `superMeterFull.to` on `hudPlate` | 8.61:1 |
+ * | `hudFrame` on `hudPlate` | 3.36:1 |
+ *
+ * All six clear WCAG 1.4.11's 3:1 floor for a graphical object, which is the
+ * floor that governs a health bar and a super meter -- see "These are effect
+ * colours" above for why the 4.5:1 *text* floor is deliberately not the one
+ * applied. `hpLow` is the tightest of them at 3.35:1 and that is the correct
+ * ordering: the last tier is meant to read as blood rather than as a signal.
+ *
+ * **The plate is drawn opaque here, not at the reference's 85%.** The alpha is
+ * recorded below as provenance, and it is deliberately not honoured. The hero
+ * renderer (`hero/raster.ts`) is a second real `Canvas2D` over a buffer of
+ * palette *indices*: there is no channel arithmetic for a composite to do, so
+ * an 85% plate would either quantise to something nobody chose or force the
+ * HUD to fork in two. Drawing it opaque makes the ratios above exact rather
+ * than approximate, and it is the reason they are quoted against `hudPlate`
+ * itself rather than against a blend of `hudPlate` and the stage.
+ *
  * ## Nothing draws with any of this yet
  *
  * Story 11.1 moves a fence and draws nothing. On the day it lands the only
@@ -100,6 +132,17 @@
  *   `hpMid` and `superMeterFull` are near-identical golds in the reference and
  *   are copied that way deliberately -- they never share a bar, and diverging
  *   from the reference to "fix" a similarity it chose is not this epic's job.
+ * - `<REF>/game_source/js/screens.js:2333` -- the reference's `mana` ramp, the
+ *   violet bar it draws for its third spendable resource. Story 11.3 takes it
+ *   for the **Token Bank**, which is this project's third resource and sits in
+ *   the same position in the same column. Named `bank` rather than `mana`
+ *   because the name should say what it meters here.
+ * - `<REF>/game_source/js/screens.js:2455` -- the bevel and frame the reference
+ *   strokes its bars with, and the damage-lag ghost it fills them with. All
+ *   three are `rgba(255,255,255,α)` over the stage there; they arrive here as
+ *   the opaque colours that composite resolves to over `hudPlate`, because
+ *   `hero/raster.ts` stores palette indices and cannot blend. `hudGhost` is the
+ *   0.35 white, `hudBevel` the lit top edge, `hudFrame` the 0.2 outline.
  * - `<REF>/game_source/js/data.js:87,102,117,132` -- one `brandHex` per
  *   fighter, for the four in this project's roster.
  *
@@ -162,8 +205,14 @@ export interface ArenaAura {
 export interface ArenaPalette {
   /** Arcade gold. The full super meter, the win banner, the Ultimate's key art. */
   readonly gold: string;
-  /** The dark plate the HUD bars sit on. Colour only; the compositing alpha is the caller's. */
+  /** The dark plate the HUD bars sit on. Drawn opaque by `render/hud.ts` -- see the docblock. */
   readonly hudPlate: string;
+  /** The skewed outline around every HUD bar. 3.36:1 on `hudPlate`. */
+  readonly hudFrame: string;
+  /** The lit top row of a filled bar, which is what makes it read as bevelled. */
+  readonly hudBevel: string;
+  /** The damage-lag layer behind the live health bar: a chip receding to the new value. */
+  readonly hudGhost: string;
   /** Health above the first tier boundary. */
   readonly hpHigh: ArenaGradient;
   /** Health in the middle tier -- the warning that a round is turning. */
@@ -174,6 +223,8 @@ export interface ArenaPalette {
   readonly superMeter: ArenaGradient;
   /** The super meter at full, which is the cue that an Ultimate is available. */
   readonly superMeterFull: ArenaGradient;
+  /** The Token Bank meter -- the reference's third-resource violet, renamed for what it meters. */
+  readonly bank: ArenaGradient;
   /** Per-fighter aura, for glows and Ultimate FX that must read as *whose*. */
   readonly aura: ArenaAura;
 }
@@ -186,11 +237,15 @@ export interface ArenaPalette {
 export const ARENA_PALETTE: ArenaPalette = Object.freeze({
   gold: '#ffd24a',
   hudPlate: '#080a10',
+  hudFrame: '#5a6480',
+  hudBevel: '#cfd8e6',
+  hudGhost: '#f2f5fa',
   hpHigh: Object.freeze({ from: '#8cf3b5', to: '#1fb85c' }),
   hpMid: Object.freeze({ from: '#ffe08a', to: '#c99a16' }),
   hpLow: Object.freeze({ from: '#ff8a8a', to: '#c41e1e' }),
   superMeter: Object.freeze({ from: '#7fefff', to: '#0e9fb8' }),
   superMeterFull: Object.freeze({ from: '#ffe58a', to: '#d9a21a' }),
+  bank: Object.freeze({ from: '#b9a7ff', to: '#6e5bd8' }),
   aura: Object.freeze({
     clawde: '#d97706',
     chatty: '#10a37f',

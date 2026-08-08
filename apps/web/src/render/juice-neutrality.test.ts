@@ -3,6 +3,7 @@ import { DEFAULT_FIGHTER_CONFIG } from '../../../../packages/env-fighter/src/con
 import { createFighterEnvironment } from '../../../../packages/env-fighter/src/environment';
 import { buildReplayFilm } from '../replay/film';
 import { buildDemoLog } from '../testing/demo-log';
+import { ARENA_PALETTE } from './arena-palette';
 import type { Canvas2D } from './canvas2d';
 import { DEFAULT_JUICE_TUNING, buildJuiceTrack, type JuiceTuning } from './juice';
 import { drawJuicedFrame } from './juice-draw';
@@ -233,6 +234,48 @@ describe('the juice layer is hash-neutral on the demo Match (AC4, INV-2, AD-15)'
     expect(withSheet.filter((call) => call.startsWith('drawImage(')).length).toBeGreaterThan(0);
     expect(without.filter((call) => call.startsWith('drawImage('))).toStrictEqual([]);
     expect(withSheet.filter((call) => !call.startsWith('drawImage('))).toStrictEqual([...without]);
+  });
+
+  it('re-derives the same hash with the arcade HUD painted, reduced and not (Story 11.3, AC7)', async () => {
+    // The 11.3 half. The arcade HUD reads more state than the flat one did --
+    // `to` as well as `from`, and `progressBasisPoints` for the damage-lag
+    // ghost -- and reading more state is exactly the circumstance under which a
+    // presentation layer accidentally starts writing some of it back. AD-15
+    // says it may not, and this is the check rather than the assumption.
+    //
+    // Both motion settings, because `reducedMotion` selects a different branch
+    // through the armed gauge and a branch nothing exercises is a branch
+    // nothing has cleared.
+    const log = await buildDemoLog();
+    const film = buildReplayFilm(log, createFighterEnvironment());
+    const before = film.finalStateHash;
+    const track = buildJuiceTrack(film.frames, DEFAULT_JUICE_TUNING);
+
+    const drawn = new Map<boolean, readonly string[]>();
+    for (const reducedMotion of [false, true]) {
+      const ctx = createRecordingCanvas();
+      const options = { config: DEFAULT_FIGHTER_CONFIG, viewport: VIEWPORT, reducedMotion };
+      for (let index = 0; index < track.frameCount; index += 1) {
+        drawJuicedFrame(ctx, film.frames[track.filmIndexAt(index)], track.at(index), options);
+      }
+      expect(ctx.calls().length).toBeGreaterThan(1_000);
+      drawn.set(reducedMotion, ctx.calls());
+
+      const rederived = buildReplayFilm(log, createFighterEnvironment());
+      expect(rederived.finalStateHash).toBe(before);
+      expect(rederived.finalStateHash).toBe(log.finalStateHash);
+      expect(rederived.recordedStateHash).toBe(film.recordedStateHash);
+      expect(rederived.matchesRecordedHash).toBe(true);
+    }
+
+    expect(film.finalStateHash).toBe(before);
+    expect(film.matchesRecordedHash).toBe(true);
+
+    // The HUD is drawn on every frame of both playbacks, so a run that somehow
+    // skipped it would still have satisfied every hash assertion above.
+    for (const calls of drawn.values()) {
+      expect(calls.some((call) => call.includes(ARENA_PALETTE.hudFrame))).toBe(true);
+    }
   });
 
   it('produces one hash whether it is stripped, shipped or retuned', async () => {

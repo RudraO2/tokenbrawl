@@ -1,5 +1,13 @@
 import { beforeAll, describe, expect, it } from 'vitest';
+import { ARENA_PALETTE } from '../render/arena-palette';
+import {
+  ARCADE_HUD_COLOURS,
+  HP_HIGH_BANDS,
+  HP_LOW_BANDS,
+  HP_MID_BANDS,
+} from '../render/hud';
 import { THEME } from '../render/theme';
+import { TRANSPARENT_INDEX } from './gif';
 import { buildHeroLog } from '../testing/hero-match';
 import {
   HERO_ARENA_HEIGHT,
@@ -71,8 +79,35 @@ describe('wrapCaption', () => {
 });
 
 describe('the hero palette', () => {
-  it('is exactly the five design colours, in table order', () => {
-    expect(heroPalette()).toStrictEqual([THEME.bg, THEME.ink, THEME.accent, THEME.warn, THEME.muted]);
+  it('leads with the five design colours, in table order', () => {
+    // Still first and still in this order: the tests below and `gif.test.ts`
+    // both index these slots by number, and the caption panel is page chrome
+    // that uses nothing else. Story 11.3 appends rather than reorders for
+    // exactly that reason.
+    expect(heroPalette().slice(0, 5)).toStrictEqual([
+      THEME.bg,
+      THEME.ink,
+      THEME.accent,
+      THEME.warn,
+      THEME.muted,
+    ]);
+  });
+
+  it('carries every colour the arcade HUD can set, because the hero is the player', () => {
+    // `hero/raster.ts` resolves `fillStyle` through a Map that throws on a
+    // miss, so this is what turns a band table added to `hud.ts` and forgotten
+    // here into a loud failure in the change that caused it rather than a
+    // silent recolouring three stories later.
+    for (const colour of ARCADE_HUD_COLOURS) {
+      expect(heroPalette()).toContain(colour);
+    }
+  });
+
+  it('fits the colour table it is encoded into, with the transparency slot spare', () => {
+    // The GIF's global colour table is a fixed power of two and the last slot
+    // is reserved. A palette that outgrew it would encode indices the decoder
+    // reads as transparent -- a hero that silently developed holes.
+    expect(heroPalette().length).toBeLessThanOrEqual(TRANSPARENT_INDEX);
   });
 
   it('holds no duplicate, which would make two design colours indistinguishable in the GIF', () => {
@@ -107,12 +142,63 @@ describe('the hero scene', () => {
     expect(() => renderHeroFrame(state.scene, state.scene.frames.length)).toThrow(/no film frame/);
   });
 
-  it('puts every design colour on the opening frame', () => {
-    // Ground, ink, the accent health bar, the warn health bar, and the muted
-    // Token Bank fill. A frame missing one of these means a HUD block silently
-    // stopped being drawn.
+  it('puts every HUD block on the opening frame', () => {
+    // A frame missing one of these means a HUD block silently stopped being
+    // drawn, which is the defect this test has always existed to catch.
+    //
+    // Story 11.3 changes *which* colours say that. The health bars were the
+    // accent and the warn; they are now banded from the arena's health ramps,
+    // and the bar is built from a plate, a bevel and a frame that did not exist
+    // before. So the assertion is restated in terms of what each colour means
+    // rather than relaxed -- and it is written as an index lookup through
+    // `heroPalette()` so that a palette reorder moves it rather than breaks it.
+    const slot = (colour: string): number => heroPalette().indexOf(colour);
     const colours = coloursIn(renderHeroFrame(state.scene, 0));
-    expect([...colours].sort((a, b) => a - b)).toStrictEqual([0, 1, 2, 3, 4]);
+
+    for (const colour of [
+      THEME.bg, // the ground
+      THEME.ink, // the caption text and the panel borders
+      THEME.accent, // the caption bar, which is page chrome and still flat
+      ARENA_PALETTE.hudPlate, // every bar sits on one
+      ARENA_PALETTE.hudBevel, // ... and every filled bar is lit along its top
+      ARENA_PALETTE.hudFrame, // ... and closed with a skewed outline
+      HP_HIGH_BANDS[0], // both fighters open at full health
+    ]) {
+      expect(slot(colour)).toBeGreaterThanOrEqual(0);
+      expect(colours.has(slot(colour)), colour).toBe(true);
+    }
+  });
+
+  it('draws a damaged fighter and an armed gauge without the palette throwing (AC6)', () => {
+    // The assertion that `heroPalette()` and `ARCADE_HUD_COLOURS` have not
+    // drifted, made against the states that reach the *widest* set of colours:
+    // a fighter low enough to be on the red ramp, and a gauge armed and
+    // pulsing. `createRasterSurface` throws on an unpalettised `fillStyle`, so
+    // a miss here is an exception rather than a wrong pixel.
+    //
+    // Every sampled frame rather than one: the hero runs a real Match, and the
+    // frame that first reaches a tier boundary is not one this test should have
+    // to know the index of.
+    for (const index of heroFrameIndices(state.scene)) {
+      expect(() => renderHeroFrame(state.scene, index)).not.toThrow();
+    }
+  });
+
+  it('actually reaches more than one health tier, so the case above is not vacuous', () => {
+    // A hero Match that never dropped a fighter below half would exercise the
+    // green ramp and nothing else, and the sweep above would prove very little.
+    const tiers = [HP_HIGH_BANDS[0], HP_MID_BANDS[0], HP_LOW_BANDS[0]].map((colour) =>
+      heroPalette().indexOf(colour),
+    );
+    const seen = new Set<number>();
+    for (const index of heroFrameIndices(state.scene)) {
+      for (const value of coloursIn(renderHeroFrame(state.scene, index))) {
+        if (tiers.includes(value)) {
+          seen.add(value);
+        }
+      }
+    }
+    expect(seen.size).toBeGreaterThan(1);
   });
 
   it('shows the Token Bank draining and then exhausted (AC2)', () => {

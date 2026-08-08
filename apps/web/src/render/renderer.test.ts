@@ -17,6 +17,13 @@ import { BASIS_POINTS_FULL } from '../replay/film';
 import type { Canvas2D } from './canvas2d';
 import { createBlockArtist } from './artist';
 import { drawFrame } from './renderer';
+import {
+  ARCADE_HUD_COLOURS,
+  ARMED_PULSE_HOLD_FRAMES,
+  FRAME_THICKNESS,
+  SUPER_METER_BANDS,
+} from './hud';
+import { ARENA_PALETTE } from './arena-palette';
 import { THEME, phaseFill } from './theme';
 
 /**
@@ -196,26 +203,49 @@ describe('drawing a frame', () => {
     expect(phaseFill(THEME, 99)).toBe(THEME.ink);
   });
 
-  it('uses only theme colours -- no hex is invented at draw time', () => {
-    const allowed = new Set([THEME.bg, THEME.ink, THEME.accent, THEME.warn, THEME.muted, '']);
+  it('uses only declared colours -- no hex is invented at draw time', () => {
+    // Story 11.3 widens the allowed set for the first time since 4.1, and the
+    // widening is the point rather than a concession: `render/` now draws from
+    // two declared sources, the brand in `theme.ts` and the arena in
+    // `arena-palette.ts`, and `ARCADE_HUD_COLOURS` is the arena half enumerated
+    // by the module that emits it. What the sweep still forbids is a colour
+    // that belongs to *neither* -- a hex computed at a call site, which is the
+    // defect this test has always existed to catch and which `hero/raster.ts`
+    // would turn into a throw.
+    const allowed = new Set([
+      THEME.bg,
+      THEME.ink,
+      THEME.accent,
+      THEME.warn,
+      THEME.muted,
+      ...ARCADE_HUD_COLOURS,
+      '',
+    ]);
     const ctx = createRecordingCanvas();
     // Every branch that draws, in one frame: both Commitment Windows open, both
     // HUD stacks populated, one Token Bank draining and one exhausted. Drawing
     // the plain frame here would have left Story 4.4's two new colour paths
     // outside the sweep entirely.
     // Story 10.3 extends the same sweep to the armed Super Gauge: p1 is at
-    // exactly `maxMeter`, which is the one meter value that takes the
-    // warn-as-fill branch and the only one that ever sets an accent stroke.
+    // exactly `maxMeter`, which is the one meter value that arms it. 11.3 puts
+    // the levels on `to`, which is the state the HUD now reads, and damages p2
+    // across the step so the ghost layer is swept too.
     drawFrame(
       ctx,
       frameWith(
         stateWith({
           committedAction: [COMMITTED_ATTACK, COMMITTED_SPECIAL],
           commitmentRemaining: [20, 40],
+          health: [55, 40],
+          meter: [DEFAULT_FIGHTER_CONFIG.maxMeter, 15],
+        }),
+        stateWith({
+          committedAction: [COMMITTED_ATTACK, COMMITTED_SPECIAL],
+          commitmentRemaining: [20, 40],
           health: [55, 12],
           meter: [DEFAULT_FIGHTER_CONFIG.maxMeter, 15],
         }),
-        stateWith(),
+        3_000,
       ),
       {
         config: DEFAULT_FIGHTER_CONFIG,
@@ -353,18 +383,42 @@ describe('the Token Bank meter (4.4)', () => {
   it('puts ground ink on the warn fill, never warn text on the ground', () => {
     // --tb-warn on --tb-bg measures 4.26:1 and misses the 4.5:1 floor. The pair
     // the other way round is what docs/DESIGN.md sanctions.
+    //
+    // Story 11.3 makes REFLEX an arcade callout, which is two `fillText` calls
+    // rather than one: a `hudPlate` shadow and the legible copy on top. So the
+    // assertion is about the copy a viewer actually reads -- the last one --
+    // and, separately, that warn is never the *text* colour on any pass. The
+    // first-match form this test used before would now be inspecting the
+    // shadow and would pass for a callout drawn entirely in it.
     const ctx = drawWithBanks([reading(0), null]);
     const reflex = ctx
       .calls()
-      .find((call) => call.op === 'fillText' && String(call.args[0]).includes('REFLEX'));
+      .filter((call) => call.op === 'fillText' && String(call.args[0]).includes('REFLEX'));
 
-    expect(reflex?.fillStyle).toBe(THEME.bg);
+    expect(reflex).toHaveLength(2);
+    expect(reflex[0].fillStyle).toBe(ARENA_PALETTE.hudPlate);
+    expect(reflex[1].fillStyle).toBe(THEME.bg);
+    for (const call of ctx.calls()) {
+      if (call.op === 'fillText') {
+        expect(call.fillStyle).not.toBe(THEME.warn);
+      }
+    }
   });
 
   it('shows both banks exhausted at once, and keeps drawing the fight (AC4)', () => {
     const ctx = drawWithBanks([reading(0), reading(0)]);
 
-    expect(texts(ctx).filter((text) => text.includes('REFLEX')).length).toBe(2);
+    // Counted on the legible copy, so the pair is two callouts rather than one
+    // callout and its shadow.
+    const reflex = ctx
+      .calls()
+      .filter(
+        (call) =>
+          call.op === 'fillText' &&
+          String(call.args[0]).includes('REFLEX') &&
+          call.fillStyle === THEME.bg,
+      );
+    expect(reflex).toHaveLength(2);
     // The fighters and the arena are still there.
     expect(ctx.calls()[0].op).toBe('clearRect');
     expect(texts(ctx).some((text) => text.startsWith('HP '))).toBe(true);
@@ -401,41 +455,77 @@ describe('the Token Bank meter (4.4)', () => {
  * Appearance itself remains the visual gate's job (`docs/VISUAL-CHECK.md`).
  */
 describe('the Super Gauge (10.3)', () => {
-  /** `HUD_SIDE_INSET` and `HUD_BAR_WIDTH`. Renderer-local, so mirrored rather than imported. */
-  const LEFT_INSET = 32;
+  /** Renderer-local layout, mirrored rather than imported -- the constants are not exported. */
   const GAUGE_WIDTH = 320;
+  const SEGMENT_WIDTH = 74;
+  const HEALTH_TOP = 24;
+  const METER_TOP = 52;
+  const BANK_TOP = 98;
   const FULL = DEFAULT_FIGHTER_CONFIG.maxMeter;
 
+  /**
+   * A frame whose `from` and `to` agree, so the only thing under test is the
+   * meter. Story 11.3 reads the HUD's levels off `to` -- see `drawFrame`'s
+   * docblock -- and a helper that set them on `from` alone would draw an empty
+   * gauge and pass nothing.
+   */
   function drawMeter(
     meter: number,
     index = 0,
     banks?: readonly (BankReading | null)[],
+    reducedMotion = false,
   ): RecordingCanvas {
     const ctx = createRecordingCanvas();
+    const state = stateWith({ meter: [meter, 0] });
     drawFrame(
       ctx,
-      { ...frameWith(stateWith({ meter: [meter, 0] }), stateWith()), index },
-      { config: DEFAULT_FIGHTER_CONFIG, viewport: VIEWPORT, banks },
+      { ...frameWith(state, state), index },
+      { config: DEFAULT_FIGHTER_CONFIG, viewport: VIEWPORT, banks, reducedMotion },
     );
     return ctx;
   }
 
   /**
-   * p1's HUD bars in draw order: health, gauge, and the Token Bank when one is
-   * supplied. Selected by the left inset *and* the bar width together -- a
-   * fighter's own border is a `strokeRect` too, and it is never 320 wide.
+   * p1's bar rules: the full-width, frame-thickness fills an arcade bar closes
+   * with, which is the arcade HUD's equivalent of the `strokeRect` this suite
+   * used to select on. Filtered to the left half of the viewport, because p2's
+   * mirrored stack draws the identical shapes on the other side.
+   *
+   * `width` picks which bar: the health bar and the Token Bank span the whole
+   * 320, and the Super Gauge is four 74-wide segments.
    */
-  function hudBars(ctx: RecordingCanvas): readonly RecordedCall[] {
+  function barRules(ctx: RecordingCanvas, width: number): readonly RecordedCall[] {
     return ctx
       .calls()
       .filter(
         (call) =>
-          call.op === 'strokeRect' && call.args[0] === LEFT_INSET && call.args[2] === GAUGE_WIDTH,
+          call.op === 'fillRect' &&
+          call.fillStyle === ARENA_PALETTE.hudFrame &&
+          call.args[2] === width &&
+          call.args[3] === FRAME_THICKNESS &&
+          (call.args[0] as number) < VIEWPORT.width / 2,
       );
   }
 
-  function gauge(ctx: RecordingCanvas): RecordedCall {
-    return hudBars(ctx)[1];
+  /** The distinct vertical positions bars of `width` were ruled at, top to bottom. */
+  function ruleTops(ctx: RecordingCanvas, width: number): readonly number[] {
+    return [...new Set(barRules(ctx, width).map((call) => call.args[1] as number))].sort(
+      (a, b) => a - b,
+    );
+  }
+
+  /** How many of the gauge's segments are lit -- a bevel is drawn only over a fill. */
+  function litSegments(ctx: RecordingCanvas): number {
+    return ctx
+      .calls()
+      .filter(
+        (call) =>
+          call.op === 'fillRect' &&
+          call.fillStyle === ARENA_PALETTE.hudBevel &&
+          // Inside the frame, so the bevel sits a frame-thickness down.
+          call.args[1] === METER_TOP + FRAME_THICKNESS &&
+          (call.args[0] as number) < VIEWPORT.width / 2,
+      ).length;
   }
 
   function texts(ctx: RecordingCanvas): readonly string[] {
@@ -445,33 +535,46 @@ describe('the Super Gauge (10.3)', () => {
       .map((call) => String(call.args[0]));
   }
 
+  /** The legible copy of each callout: the top pass, not its `hudPlate` shadow. */
+  function callouts(ctx: RecordingCanvas, word: string): readonly RecordedCall[] {
+    return ctx
+      .calls()
+      .filter(
+        (call) =>
+          call.op === 'fillText' &&
+          String(call.args[0]).includes(word) &&
+          call.fillStyle === THEME.bg,
+      );
+  }
+
   it('is sized as a resource rather than as a rule (AC1)', () => {
-    // The defect this story exists for was a 10px hairline. The floor is set
+    // The defect Story 10.3 exists for was a 10px hairline. The floor is set
     // against the health bar beside it (20px): a gauge that reads as a third of
     // its neighbour reads as a divider between two things, which is exactly what
-    // a visitor took it for.
-    expect(gauge(drawMeter(50)).args[3] as number).toBeGreaterThanOrEqual(16);
+    // a visitor took it for. 11.3 changed how the gauge is drawn and must not
+    // change that, so the height is measured off the rules the segments close
+    // with rather than off a `strokeRect` that no longer happens.
+    const rules = ruleTops(drawMeter(50), SEGMENT_WIDTH);
+    expect(rules).toHaveLength(2);
+    expect(rules[1] - rules[0] + FRAME_THICKNESS).toBeGreaterThanOrEqual(16);
   });
 
-  it('fills proportionally while charging (AC1)', () => {
-    const filledWidth = (meter: number): number => {
-      const ctx = drawMeter(meter);
-      const top = gauge(ctx).args[1];
-      const fill = ctx
-        .calls()
-        .find(
-          (call) =>
-            call.op === 'fillRect' &&
-            call.args[0] === LEFT_INSET &&
-            call.args[1] === top &&
-            call.fillStyle === THEME.ink,
-        );
-      return fill?.args[2] as number;
-    };
+  it('fills chunk by chunk while charging, so the gauge is countable (AC1)', () => {
+    // 11.3 replaces the proportional rail with the reference's four segments.
+    // The property is the same one the old test made -- more meter, more gauge
+    // -- but a viewer now reads it by counting rather than by measuring.
+    expect(litSegments(drawMeter(0))).toBe(0);
+    expect(litSegments(drawMeter(25))).toBe(1);
+    expect(litSegments(drawMeter(75))).toBe(3);
+    expect(litSegments(drawMeter(FULL))).toBe(4);
+  });
 
-    expect(filledWidth(25)).toBeGreaterThan(0);
-    expect(filledWidth(75)).toBeGreaterThan(filledWidth(25));
-    expect(filledWidth(75)).toBeLessThan(GAUGE_WIDTH);
+  it('charges on the ramp and arms on the gold, so the two states are different colours', () => {
+    const chargingFills = new Set(drawMeter(75).calls().map((call) => call.fillStyle));
+    const armedFills = new Set(drawMeter(FULL).calls().map((call) => call.fillStyle));
+
+    expect(chargingFills.has(SUPER_METER_BANDS[3])).toBe(true);
+    expect(armedFills.has(SUPER_METER_BANDS[3])).toBe(false);
   });
 
   it('arms at exactly full and at no other value (AC2)', () => {
@@ -486,37 +589,62 @@ describe('the Super Gauge (10.3)', () => {
     expect(drawMeter(FULL).calls()).not.toStrictEqual(drawMeter(FULL - 1).calls());
   });
 
-  it('puts ground ink on the warn fill, never warn text on the ground (AC2)', () => {
-    // Same pair drawTokenBank uses for REFLEX, and for the same measured reason:
-    // --tb-warn on --tb-bg is 4.26:1 and misses the 4.5:1 floor.
+  it('puts ground ink on the gold fill, never gold text on the ground (AC2)', () => {
+    // Story 10.3 armed the gauge with warn-as-fill because warn was the loudest
+    // value the flat palette allowed. 11.3 arms it in gold, which is what the
+    // reference does and what Story 11.1 made legal here -- but the *direction*
+    // of the pairing is unchanged and is the part that was measured: the ground
+    // colour goes on the bright fill, never the bright colour on the ground.
     const armed = drawMeter(FULL);
 
-    const label = armed
-      .calls()
-      .find((call) => call.op === 'fillText' && String(call.args[0]).includes('ULTIMATE'));
-    expect(label?.fillStyle).toBe(THEME.bg);
-
-    const inverted = armed
-      .calls()
-      .find(
-        (call) =>
-          call.op === 'fillRect' &&
-          call.args[0] === LEFT_INSET &&
-          call.args[2] === GAUGE_WIDTH &&
-          call.fillStyle === THEME.warn,
-      );
-    expect(inverted).toBeDefined();
+    expect(callouts(armed, 'ULTIMATE')).toHaveLength(1);
+    for (const call of armed.calls()) {
+      if (call.op === 'fillText') {
+        expect(ARENA_PALETTE.gold).not.toBe(call.fillStyle);
+      }
+    }
   });
 
   it('pulses off the frame counter, never off a clock (AC3)', () => {
-    const stroke = (index: number): string => gauge(drawMeter(FULL, index)).strokeStyle;
-
     // A replay seeked to the same frame twice must draw the identical gauge.
     expect(drawMeter(FULL, 7).calls()).toStrictEqual(drawMeter(FULL, 7).calls());
-    // It holds for a whole half-period and then flips -- stepped, not eased.
-    expect(stroke(0)).toBe(stroke(11));
-    expect(stroke(0)).not.toBe(stroke(12));
-    expect(stroke(0)).toBe(stroke(24));
+    // It holds for a whole step and then changes -- stepped, not eased.
+    expect(drawMeter(FULL, 0).calls()).toStrictEqual(
+      drawMeter(FULL, ARMED_PULSE_HOLD_FRAMES - 1).calls(),
+    );
+    expect(drawMeter(FULL, 0).calls()).not.toStrictEqual(
+      drawMeter(FULL, ARMED_PULSE_HOLD_FRAMES).calls(),
+    );
+    // And it comes back round on its own period, which is what makes a scrub to
+    // an arbitrary frame draw what playback drew when it passed through.
+    expect(drawMeter(FULL, 0).calls()).toStrictEqual(
+      drawMeter(FULL, ARMED_PULSE_HOLD_FRAMES * 4).calls(),
+    );
+  });
+
+  it('stops breathing under reduced motion and changes nothing else (AC5)', () => {
+    // The whole of AC5 for this element, stated as the difference it is allowed
+    // to make: at a frame the pulse would have moved off level 0, the reduced
+    // frame is the level-0 frame exactly -- same layout, same information, same
+    // number of calls -- and it stays that way at every index.
+    const moved = ARMED_PULSE_HOLD_FRAMES;
+    expect(drawMeter(FULL, moved, undefined, true).calls()).toStrictEqual(
+      drawMeter(FULL, 0, undefined, false).calls(),
+    );
+    expect(drawMeter(FULL, moved, undefined, true).calls()).not.toStrictEqual(
+      drawMeter(FULL, moved, undefined, false).calls(),
+    );
+    for (const index of [0, 3, 6, 13, 24, 137]) {
+      expect(drawMeter(FULL, index, undefined, true).calls()).toStrictEqual(
+        drawMeter(FULL, 0, undefined, true).calls(),
+      );
+    }
+  });
+
+  it('leaves a charging gauge alone under reduced motion, because it never moved (AC5)', () => {
+    expect(drawMeter(50, 0, undefined, true).calls()).toStrictEqual(
+      drawMeter(50, 0, undefined, false).calls(),
+    );
   });
 
   it('leaves the charging gauge with nothing that moves (AC3)', () => {
@@ -533,14 +661,13 @@ describe('the Super Gauge (10.3)', () => {
       exhausted: false,
     };
     const ctx = drawMeter(FULL, 0, [bank, null]);
-    const bars = hudBars(ctx);
 
-    // health, gauge, bank -- still three, still in that order.
-    expect(bars).toHaveLength(3);
-    const [, gaugeBar, bankBar] = bars;
-    expect(bankBar.args[1] as number).toBeGreaterThanOrEqual(
-      (gaugeBar.args[1] as number) + (gaugeBar.args[3] as number),
-    );
+    // health, gauge, bank -- still three bars, still in that order down the
+    // column, and the gauge still does not overlap the row beneath it.
+    expect(ruleTops(ctx, GAUGE_WIDTH)).toStrictEqual([HEALTH_TOP, 42, BANK_TOP, 116]);
+    const gaugeRules = ruleTops(ctx, SEGMENT_WIDTH);
+    expect(gaugeRules[0]).toBe(METER_TOP);
+    expect(BANK_TOP).toBeGreaterThanOrEqual(gaugeRules[1] + FRAME_THICKNESS);
     expect(texts(ctx)).toContain('BANK 9000');
   });
 
@@ -552,15 +679,15 @@ describe('the Super Gauge (10.3)', () => {
 
   it('arms both fighters independently and keeps drawing the fight', () => {
     const ctx = createRecordingCanvas();
-    drawFrame(ctx, frameWith(stateWith({ meter: [FULL, FULL] }), stateWith()), {
+    const both = stateWith({ meter: [FULL, FULL] });
+    drawFrame(ctx, frameWith(both, both), {
       config: DEFAULT_FIGHTER_CONFIG,
       viewport: VIEWPORT,
     });
 
-    const armed = ctx
-      .calls()
-      .filter((call) => call.op === 'fillText' && String(call.args[0]) === 'ULTIMATE READY');
-    expect(armed).toHaveLength(2);
+    // Counted on the legible copy of each callout rather than on every pass, so
+    // two fighters armed is two gauges and not one gauge and its shadow.
+    expect(callouts(ctx, 'ULTIMATE READY')).toHaveLength(2);
     expect(ctx.calls()[0].op).toBe('clearRect');
   });
 
@@ -568,6 +695,81 @@ describe('the Super Gauge (10.3)', () => {
     for (const text of texts(drawMeter(FULL))) {
       expect(text).not.toMatch(/\b(ms|sec|second|per|rate|elapsed)\b/i);
     }
+  });
+});
+
+/**
+ * Story 11.3's AC1, the half that is about the *fight* rather than about the
+ * bar: a big hit has to be visible as a receding second bar, not only as a
+ * number changing.
+ *
+ * What makes this worth its own block is that the ghost is the one part of the
+ * arcade HUD with no counterpart in the reference that could be copied. The
+ * reference decays `state.hudGhost` by a fixed amount per rendered frame out of
+ * a module-level accumulator -- one of the four mechanisms `docs/DEV-REFERENCE.md`
+ * forbids, because a stepped accumulator cannot be scrubbed backwards. So the
+ * assertions here are the ones that would catch a port of it sneaking in: the
+ * ghost has to be a function of `progressBasisPoints` and of nothing else.
+ */
+describe('the damage-lag ghost (11.3 AC1)', () => {
+  const CONFIG = DEFAULT_FIGHTER_CONFIG;
+
+  function drawHit(progress: number): RecordingCanvas {
+    const ctx = createRecordingCanvas();
+    drawFrame(
+      ctx,
+      frameWith(stateWith({ health: [100, 100] }), stateWith({ health: [60, 100] }), progress),
+      { config: CONFIG, viewport: VIEWPORT },
+    );
+    return ctx;
+  }
+
+  function ghostWidth(ctx: RecordingCanvas): number {
+    const ghost = ctx
+      .calls()
+      .find((call) => call.op === 'fillRect' && call.fillStyle === ARENA_PALETTE.hudGhost);
+    return (ghost?.args[2] as number) ?? 0;
+  }
+
+  it('draws a chip layer wider than the live bar the moment a hit lands', () => {
+    const ctx = drawHit(0);
+    const live = ctx
+      .calls()
+      .filter(
+        (call) =>
+          call.op === 'fillRect' &&
+          call.args[1] === 24 &&
+          (call.args[0] as number) < VIEWPORT.width / 2 &&
+          call.fillStyle !== ARENA_PALETTE.hudPlate &&
+          call.fillStyle !== ARENA_PALETTE.hudGhost &&
+          call.fillStyle !== ARENA_PALETTE.hudFrame &&
+          call.fillStyle !== ARENA_PALETTE.hudBevel,
+      );
+
+    expect(ghostWidth(ctx)).toBeGreaterThan(0);
+    expect(ghostWidth(ctx)).toBeGreaterThan(live[0].args[2] as number);
+  });
+
+  it('catches the live bar up across the Decision Point, then stops existing', () => {
+    expect(ghostWidth(drawHit(0))).toBeGreaterThan(ghostWidth(drawHit(BASIS_POINTS_FULL / 2)));
+    expect(ghostWidth(drawHit(BASIS_POINTS_FULL / 2))).toBeGreaterThan(0);
+    expect(ghostWidth(drawHit(BASIS_POINTS_FULL))).toBe(0);
+  });
+
+  it('draws no ghost at all on a step where nothing was taken', () => {
+    const ctx = createRecordingCanvas();
+    const still = stateWith({ health: [80, 80] });
+    drawFrame(ctx, frameWith(still, still, 4_000), { config: CONFIG, viewport: VIEWPORT });
+    expect(ghostWidth(ctx)).toBe(0);
+  });
+
+  it('depends on the frame and nothing else, so a scrub reproduces it exactly', () => {
+    // The property a ported accumulator would fail: arriving at the same
+    // progress twice, out of order, has to draw the same ghost both times.
+    const forwards = [0, 2_500, 5_000, 7_500].map((progress) => ghostWidth(drawHit(progress)));
+    const backwards = [7_500, 5_000, 2_500, 0].map((progress) => ghostWidth(drawHit(progress)));
+    expect(backwards).toStrictEqual([...forwards].reverse());
+    expect(drawHit(3_300).calls()).toStrictEqual(drawHit(3_300).calls());
   });
 });
 

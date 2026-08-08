@@ -225,7 +225,7 @@ function frameOf(width: number, height: number, fill: (x: number, y: number) => 
 }
 
 describe('encodeAnimatedGif', () => {
-  it('writes a GIF89a header, the screen size, and an 8-entry colour table', () => {
+  it('writes a GIF89a header, the screen size, and the declared colour table', () => {
     const decoded = decodeGif(
       encodeAnimatedGif({
         width: 4,
@@ -326,23 +326,42 @@ describe('encodeAnimatedGif', () => {
   });
 
   it('refuses a palette that would collide with the transparency index', () => {
+    // One colour past the last usable slot. Built from the table size rather
+    // than written out, so widening the table (Story 11.3 took it from 8 to 64
+    // for the arcade HUD's banded ramps) cannot leave this case asserting a
+    // boundary the encoder no longer has.
+    const oneTooMany = Array.from(
+      { length: TRANSPARENT_INDEX + 1 },
+      (_unused, index) => `#${index.toString(16).padStart(2, '0').repeat(3)}`,
+    );
+    expect(oneTooMany).toHaveLength(TRANSPARENT_INDEX + 1);
     expect(() =>
       encodeAnimatedGif({
         width: 2,
         height: 2,
-        palette: [
-          '#000000',
-          '#111111',
-          '#222222',
-          '#333333',
-          '#444444',
-          '#555555',
-          '#666666',
-          '#777777',
-        ],
+        palette: oneTooMany,
         frames: [frameOf(2, 2, () => 0)],
       }),
-    ).toThrow(/at most 7 colours/);
+    ).toThrow(new RegExp(`at most ${String(TRANSPARENT_INDEX)} colours`));
+  });
+
+  it('round-trips a palette that fills the widened table (Story 11.3)', () => {
+    // The arcade HUD pushes the hero's palette past the eight slots this
+    // encoder shipped with, so "a wide table still decodes" is the property
+    // that made widening it safe rather than merely legal. Every index is
+    // exercised, including the highest usable one.
+    const wide = Array.from(
+      { length: TRANSPARENT_INDEX },
+      (_unused, index) => `#${index.toString(16).padStart(2, '0').repeat(3)}`,
+    );
+    const width = 21;
+    const height = 13;
+    const frame = frameOf(width, height, (x, y) => (x * 5 + y * 11) % TRANSPARENT_INDEX);
+
+    const decoded = decodeGif(encodeAnimatedGif({ width, height, palette: wide, frames: [frame] }));
+    expect(decoded.colourTable).toHaveLength(COLOUR_TABLE_SIZE);
+    expect(decoded.colourTable[TRANSPARENT_INDEX - 1]).toStrictEqual([0x3e, 0x3e, 0x3e]);
+    expect(composite(decoded)[0]).toStrictEqual([...frame.pixels]);
   });
 
   it('refuses a frame whose pixel count does not match the screen', () => {

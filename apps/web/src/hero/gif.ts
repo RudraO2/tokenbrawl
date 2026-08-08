@@ -23,12 +23,35 @@
  * silently shorten playback by its delay.
  */
 
-/** The palette slot reserved for "unchanged since the previous frame". */
-export const TRANSPARENT_INDEX = 7;
-/** Entries in the global colour table. A power of two, as the format requires. */
-export const COLOUR_TABLE_SIZE = 8;
-/** LZW code width floor for an 8-entry table. */
-const MIN_CODE_SIZE = 3;
+/**
+ * Entries in the global colour table. A power of two, as the format requires.
+ *
+ * Eight until Story 11.3, which is what the five design colours plus a
+ * transparency slot needed and no more. The arcade HUD draws banded gradients
+ * -- three health tiers, a super meter, a Token Bank ramp and three gold pulse
+ * levels, four stops each -- and the hero is the *player*, so every one of
+ * those colours reaches this encoder through `heroPalette()`. Thirty-odd
+ * colours do not fit in eight slots, and quantising them is exactly what
+ * `hero/raster.ts` refuses to do: it throws on an unpalettised `fillStyle`
+ * precisely so a new colour is a loud build failure rather than a silent
+ * recolouring.
+ *
+ * Sixty-four rather than 256 because the cost is not free: `MIN_CODE_SIZE` is
+ * the LZW code width floor, so a wider table starts the stream at a wider code
+ * and compresses the hero's large flat areas slightly less well. Sixty-four
+ * leaves room for the epic's remaining drawing stories without paying for
+ * slots nothing will ever use.
+ */
+export const COLOUR_TABLE_SIZE = 64;
+/**
+ * The palette slot reserved for "unchanged since the previous frame".
+ *
+ * The last slot, so every colour the caller supplies keeps a contiguous index
+ * from zero and `snapshot()`'s indices need no remapping on the way in.
+ */
+export const TRANSPARENT_INDEX = COLOUR_TABLE_SIZE - 1;
+/** LZW code width floor. `log2(COLOUR_TABLE_SIZE)`, which is what the format means by it. */
+const MIN_CODE_SIZE = 6;
 
 export interface GifFrame {
   /** One palette index per pixel, row-major, `width * height` long. */
@@ -40,7 +63,7 @@ export interface GifFrame {
 export interface GifOptions {
   readonly width: number;
   readonly height: number;
-  /** Up to 7 colours as `#rrggbb`. Slot 7 is reserved for transparency. */
+  /** Up to `TRANSPARENT_INDEX` colours as `#rrggbb`. The last slot is reserved for transparency. */
   readonly palette: readonly string[];
   readonly frames: readonly GifFrame[];
 }
@@ -252,7 +275,9 @@ export function encodeAnimatedGif(options: GifOptions): Uint8Array {
 
   pushUint16(out, width);
   pushUint16(out, height);
-  // Global colour table present, 8 bits of colour resolution, 8 entries.
+  // Global colour table present, 8 bits of colour resolution, and a table of
+  // `1 << (n + 1)` entries where `n` is the low three bits -- which is
+  // `MIN_CODE_SIZE - 1`, because the LZW floor is `log2` of the same size.
   out.push(0x80 | 0x70 | (MIN_CODE_SIZE - 1));
   out.push(0); // Background: palette slot 0, the ground colour.
   out.push(0); // No pixel aspect ratio.

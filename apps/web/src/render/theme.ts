@@ -36,6 +36,33 @@ export interface Theme {
   readonly shadowOffset: number;
   readonly displayFont: string;
   readonly monoFont: string;
+  /**
+   * The HUD callout face (Story 11.3), and the reason it is not a third family.
+   *
+   * `docs/DESIGN.md`'s fourth audited rule -- *the two chosen faces and no
+   * third family* -- was deliberately **kept** by Story 11.1 and deferred to
+   * this story, with two priced routes offered: render arcade type from a
+   * glyph table the way `hero/font.ts` does, or add a third `@font-face` and
+   * amend the rule and `docs/ASSETS.md` in the same change.
+   *
+   * 11.3 took neither, because it turned out to need neither. What an arcade
+   * callout actually needs is *weight and a hard offset shadow* at HUD size,
+   * and the display face is already 800-weight Bricolage Grotesque with an
+   * `'Arial Black'` fallback -- the whole reason that face was chosen was its
+   * width axis. So this is `displayFont` at 16px rather than 20px: the same
+   * family, the same weight, the same fallback stack, one size step down so a
+   * callout sits inside a 20px bar instead of over it. The offset shadow is
+   * `hud.ts`'s `arcadeText`, drawn as two `fillText` calls, which is the same
+   * hard-shadow rule the page applies to a panel.
+   *
+   * No `@font-face`, no new family, no `docs/ASSETS.md` entry, and nothing for
+   * the rule to be amended about. `style-discipline.test.ts` checks the claim
+   * rather than trusting it: every family named here must appear in
+   * `tokens.css` or be a generic/system fallback, so an arcade face cannot
+   * drift in through the canvas font shorthand -- which is the one place the
+   * CSS-anchored two-faces rule cannot see.
+   */
+  readonly arcadeFont: string;
 }
 
 export const THEME: Theme = Object.freeze({
@@ -48,6 +75,7 @@ export const THEME: Theme = Object.freeze({
   shadowOffset: 6,
   displayFont: "800 20px 'Bricolage Grotesque', 'Arial Black', sans-serif",
   monoFont: "14px 'Departure Mono', ui-monospace, monospace",
+  arcadeFont: "800 16px 'Bricolage Grotesque', 'Arial Black', sans-serif",
 });
 
 /**

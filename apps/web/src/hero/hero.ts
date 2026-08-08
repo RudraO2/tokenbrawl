@@ -3,6 +3,7 @@ import { createFighterEnvironment } from '../../../../packages/env-fighter/src/e
 import { resolveDecision } from '../replay/decision-point';
 import { buildReplayFilm, type RenderFrame } from '../replay/film';
 import { createBankReadout } from '../replay/token-bank';
+import { ARCADE_HUD_COLOURS } from '../render/hud';
 import { drawFrame } from '../render/renderer';
 import { THEME } from '../render/theme';
 import { encodeAnimatedGif, type GifFrame } from './gif';
@@ -89,9 +90,25 @@ interface HeroLogView {
   readonly tokenBankStart?: number;
 }
 
-/** The five design colours, in the order the GIF's colour table carries them. */
+/**
+ * Every colour the hero can paint, in the order the GIF's colour table carries
+ * them.
+ *
+ * The five design colours first and unchanged -- `hero.test.ts` and
+ * `gif.test.ts` both index into those slots by number, and the caption panel is
+ * page chrome that uses nothing else. Story 11.3's arcade HUD follows: the hero
+ * *is* the player, drawing the same `drawFrame` at the same 960x400 viewport,
+ * so every band, plate, bevel, frame and ghost the HUD can set has to be here
+ * too.
+ *
+ * A missing entry is a `createRasterSurface` **throw**, not a silent
+ * quantisation to whatever colour happens to be nearest -- which is the whole
+ * reason that surface resolves through a `Map` rather than a nearest-match. So
+ * `ARCADE_HUD_COLOURS` drifting away from what `hud.ts` actually draws breaks
+ * the hero build loudly, in the same change that caused it.
+ */
 export function heroPalette(): readonly string[] {
-  return [THEME.bg, THEME.ink, THEME.accent, THEME.warn, THEME.muted];
+  return [THEME.bg, THEME.ink, THEME.accent, THEME.warn, THEME.muted, ...ARCADE_HUD_COLOURS];
 }
 
 /**
