@@ -624,6 +624,56 @@ describe('the Spectate panel (Story 9.3)', () => {
       expect(host.calls()).not.toStrictEqual(expectedCalls(film, track, cinematicClock!));
     });
 
+    it('a pack that decodes after the first paint reaches the canvas, even with no next frame coming', async () => {
+      // The defect the live page found. Under reduced motion the clock paints
+      // once and never schedules again, so "the walk's next frame will read the
+      // new dressing" -- true on an animating surface -- left a reduced-motion
+      // visitor looking at the block artists on a black stage for the whole
+      // session, however fast the sprite packs decoded.
+      const host = createHost();
+      const driver = createDriver();
+      const panel = mountSpectatePanel(host, {
+        ...baseDeps(driver),
+        view: {
+          requestAnimationFrame: driver.requestAnimationFrame,
+          cancelAnimationFrame: driver.cancelAnimationFrame,
+          matchMedia: (query: string) => ({ matches: query.includes('reduced-motion') }),
+        },
+      });
+      await flush();
+      // Nothing is scheduled, so nothing but a setter can repaint from here.
+      driver.pump(20);
+      host.clearCalls();
+
+      panel.setBackdrop({ draw: () => undefined } as never);
+
+      expect(host.calls().length).toBeGreaterThan(0);
+    });
+
+    it('a repaint does not re-fire the audio cues of the frame it redraws', async () => {
+      // The safety the repaint rests on: the director treats a repeated index
+      // as a jump, so a pack decoding mid-Match re-applies gains and fires
+      // nothing. Without it, every asset that landed would restart the bed.
+      const host = createHost();
+      const driver = createDriver();
+      const recording = createRecordingSink();
+      const panel = mountSpectatePanel(host, { ...baseDeps(driver), sink: recording.sink });
+      await flush();
+
+      panel.setAudioEnabled(true);
+      driver.pump(10);
+      const playedBefore = recording.played.length;
+
+      panel.setArtist(0, createBlockArtist());
+      panel.setBackdrop({ draw: () => undefined } as never);
+      panel.setVfx({} as never);
+
+      expect(recording.played.length).toBe(playedBefore);
+      // And the gains were re-stated, which is what makes the redraw correct
+      // rather than merely silent.
+      expect(recording.gains.length).toBeGreaterThan(10);
+    });
+
     it('honours reduced motion: no shake, and no loop churn', async () => {
       const host = createHost();
       const driver = createDriver();

@@ -256,7 +256,18 @@ export function mountSpectatePanel(host: SpectateHost, deps: SpectatePanelDeps):
     vfx: VfxSheet | undefined;
     /** Story 11.6. The Ultimate's art, on the same terms. */
     ult: UltSheet | undefined;
-  } = { artists: [blockArtist, blockArtist], backdrop: undefined, vfx: undefined, ult: undefined };
+    /**
+     * Story 11.6. The clock frame currently on screen, so a pack that decodes
+     * can be drawn onto it. Mirrors `mountPlayer`'s own `dressing.frameIndex`.
+     */
+    clockIndex: number;
+  } = {
+    artists: [blockArtist, blockArtist],
+    backdrop: undefined,
+    vfx: undefined,
+    ult: undefined,
+    clockIndex: 0,
+  };
 
   /**
    * Read once, at mount, and threaded into the paint -- never re-read per frame.
@@ -317,6 +328,7 @@ export function mountSpectatePanel(host: SpectateHost, deps: SpectatePanelDeps):
     if (film == null || track == null) {
       return;
     }
+    dressing.clockIndex = clockIndex;
     // Clock index in, film index out -- the same mapping `main.ts` makes, and
     // the reason a hitstop hold repaints the frame the hit landed on instead of
     // advancing past it.
@@ -349,6 +361,32 @@ export function mountSpectatePanel(host: SpectateHost, deps: SpectatePanelDeps):
     if (audio.enabled) {
       audio.director?.atFrame(clockIndex);
     }
+  };
+
+  /**
+   * Redraws the frame already on screen. Story 11.6.
+   *
+   * The dressing arrives after the first frame is painted -- that is the whole
+   * point of Story 4.2's critical path -- so every setter has to put what it
+   * received onto the canvas rather than wait. This panel used to leave that to
+   * the clock, on the reasoning that the next frame was at most one frame away.
+   *
+   * That reasoning stopped being true the moment this surface started honouring
+   * `prefers-reduced-motion`: a reduced-motion clock paints once and never
+   * schedules again, so there *is* no next frame, and the sprite packs and the
+   * backdrop -- which decode a few hundred milliseconds after the first paint --
+   * would never reach the canvas at all. A reduced-motion visitor got the block
+   * artists on a black stage, permanently. `mountPlayer` has always called
+   * `repaint()` from each of its setters; this is the same discipline, now that
+   * this panel has the same need.
+   *
+   * Painting the same clock index twice is safe by construction: the audio
+   * director treats a repeated index as a jump, so gains are re-applied and no
+   * cue fires -- which is exactly what `main.ts` relies on when a pack decodes
+   * mid-Match.
+   */
+  const repaint = (): void => {
+    paint(dressing.clockIndex);
   };
 
   /**
@@ -525,19 +563,23 @@ export function mountSpectatePanel(host: SpectateHost, deps: SpectatePanelDeps):
     pick: (entryId: string): void => {
       play(entryId);
     },
-    // No repaint is forced here. The walk drives its own animation frame, so
-    // the next `paint` -- at most one frame away -- already reads these.
+    // Every setter repaints (Story 11.6). See `repaint`'s docblock: waiting for
+    // the clock's next frame is only correct on a surface whose clock has one.
     setArtist: (agentIndex: 0 | 1, artist: FighterArtist): void => {
       dressing.artists[agentIndex] = artist;
+      repaint();
     },
     setBackdrop: (backdrop: Backdrop): void => {
       dressing.backdrop = backdrop;
+      repaint();
     },
     setVfx: (vfx: VfxSheet): void => {
       dressing.vfx = vfx;
+      repaint();
     },
     setUlt: (ult: UltSheet): void => {
       dressing.ult = ult;
+      repaint();
     },
     audioEnabled: (): boolean => audio.enabled,
     setAudioEnabled,
