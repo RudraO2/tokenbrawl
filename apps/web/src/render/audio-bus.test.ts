@@ -1,6 +1,8 @@
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { BASIS_POINTS_FULL } from '../replay/film';
-import type { AudioCue } from './audio';
+import { DEFAULT_AUDIO_TUNING, type AudioCue } from './audio';
 import {
   createAudioBus,
   type AudioBufferSourceLike,
@@ -493,5 +495,41 @@ describe('the name → URL convention stays same-origin', () => {
       // authority to redirect to.
       expect(url.slice('/audio/'.length).includes('/')).toBe(false);
     }
+  });
+
+  it('resolves every name the shipped tuning asks for to a file that is actually on disk', async () => {
+    // Found by Story 11.5's review. `docs-discipline.test.ts` sweeps the other
+    // direction -- every `.mp3` in `public/audio/` has a provenance row -- so a
+    // *file* cannot arrive unrecorded. Nothing swept this way, and a name is
+    // the half a story actually edits: `ultimateVoice: 'vo_ultimte'` would have
+    // shipped a green suite, one `console.warn` nobody reads and a silent
+    // Ultimate, which is the exact defect this story exists to close.
+    //
+    // The path is built by the real `defaultUrlFor`, by fetching through the
+    // real sink, rather than by writing `/audio/${name}.mp3` out again here: a
+    // convention asserted against a copy of itself asserts nothing.
+    const context = createFakeContext();
+    const fetchAudio = createCountingFetch(okResponse);
+    const sink = createAudioBus({
+      AudioContext: asConstructor(() => context),
+      fetch: fetchAudio,
+    });
+
+    const names = [
+      DEFAULT_AUDIO_TUNING.music.name,
+      ...Object.values(DEFAULT_AUDIO_TUNING.sfx),
+      ...Object.values(DEFAULT_AUDIO_TUNING.voice),
+      DEFAULT_AUDIO_TUNING.ultimate,
+      DEFAULT_AUDIO_TUNING.ultimateVoice,
+    ];
+    for (const name of names) {
+      sink?.play({ bus: 'sfx', name, loop: false });
+    }
+    await settle();
+
+    const urls = fetchAudio.urls();
+    expect(urls).toHaveLength(names.length);
+    const missing = urls.filter((url) => !existsSync(join(process.cwd(), 'public', url)));
+    expect(missing).toStrictEqual([]);
   });
 });

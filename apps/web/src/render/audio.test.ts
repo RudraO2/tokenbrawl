@@ -793,10 +793,19 @@ describe("the Ultimate's announcement (Story 11.5)", () => {
     });
     const audio = buildAudioTrack(doubled);
 
+    // Counted per *cue*, not per frame. "One frame names it" is satisfied by a
+    // frame naming it twice, which is precisely the flam this collapses -- and
+    // the voice half is collapsed by the rate limiter as well, so only the
+    // impact's count can tell the de-duplication apart from it. (Story 11.5's
+    // mutation M14 survived on a per-frame assertion.)
     expect(framesNaming(audio, DEFAULT_AUDIO_TUNING.ultimateVoice)).toStrictEqual([
       ULTIMATE_CLOCK,
     ]);
     expect(audio.at(ULTIMATE_CLOCK).cues.filter((cue) => cue.bus === 'voice')).toHaveLength(1);
+    expect(
+      audio.at(ULTIMATE_CLOCK).cues.filter((cue) => cue.name === DEFAULT_AUDIO_TUNING.ultimate),
+    ).toHaveLength(1);
+    expect(audio.at(ULTIMATE_CLOCK).cues).toHaveLength(2);
   });
 
   it('names it nowhere at all in a Match with no Ultimate', async () => {
@@ -863,6 +872,30 @@ describe('the music gets out of the way (Story 11.5, AC1)', () => {
     for (let age = shape.freezeFrames; age < span; age += 1) {
       expect(audio.at(ULTIMATE_CLOCK + age).musicGainBasisPoints).toBe(base);
     }
+  });
+
+  it('expresses the window as an integer count of clock frames and nothing else (AC2)', () => {
+    // The reference derives this length from a decoded buffer's `duration` plus
+    // a millisecond constant, and restores it with `setTimeout` and
+    // `setTargetAtTime(x, ctx.currentTime, tau)`. Every one of those is a wall
+    // clock. `source-discipline.test.ts` sweeps the source for the names; this
+    // asserts the shape of the value they would otherwise have produced --
+    // whole frames, with no fractional tail a millisecond conversion leaves
+    // behind, and a window whose edges are frame indexes.
+    expect(Number.isInteger(DEFAULT_AUDIO_TUNING.duckFrames)).toBe(true);
+    expect(Number.isInteger(DEFAULT_AUDIO_TUNING.voiceRateLimitFrames)).toBe(true);
+
+    const audio = buildAudioTrack(buildJuiceTrack(ultimateFilm()));
+    const ducked = duckedFrames(audio, DEFAULT_AUDIO_TUNING);
+    for (const clockIndex of ducked) {
+      expect(Number.isInteger(clockIndex)).toBe(true);
+      expect(Number.isInteger(audio.at(clockIndex).musicGainBasisPoints)).toBe(true);
+    }
+    // Contiguous: a window with a hole in it would be a scheduler's output, not
+    // a range of array entries.
+    expect(ducked).toStrictEqual(
+      Array.from({ length: ducked.length }, (_, offset) => ducked[0] + offset),
+    );
   });
 
   it('leaves the SFX and voice buses at their base level while the bed is down', () => {
@@ -970,6 +1003,25 @@ describe('the announcement and a fighter line share one voice bus (Story 11.5, A
     const base = patient.music.gainBasisPoints;
     expect(strict.at(ULTIMATE_CLOCK - 13 + patient.duckFrames).musicGainBasisPoints).toBe(base);
     expect(strict.at(ULTIMATE_CLOCK + patient.duckFrames - 1).musicGainBasisPoints).toBe(base);
+  });
+
+  it('lets a line through at exactly the limit, and holds it one frame short of that', () => {
+    // The limit is "the fewest frames *between* two lines", so a gap of exactly
+    // `voiceRateLimitFrames` is a gap that clears it. Pinned on both sides of
+    // the one frame that separates the two readings, because a comparison
+    // written `<=` instead of `<` is invisible to every case that is not
+    // standing on the edge -- Story 11.5's mutation M13 survived the whole
+    // suite until this existed.
+    const juice = buildJuiceTrack(ultimateFilm());
+    const gap = 13; // the heavy on agent 1 at clock 388, the Ultimate at 401
+    const exact: AudioTuning = Object.freeze({ ...CHATTY_ULT, voiceRateLimitFrames: gap });
+    const oneMore: AudioTuning = Object.freeze({ ...CHATTY_ULT, voiceRateLimitFrames: gap + 1 });
+
+    expect(framesNaming(buildAudioTrack(juice, exact), 'vo_heavy')).toContain(ULTIMATE_CLOCK - gap);
+    expect(framesNaming(buildAudioTrack(juice, exact), exact.ultimateVoice)).toStrictEqual([
+      ULTIMATE_CLOCK,
+    ]);
+    expect(framesNaming(buildAudioTrack(juice, oneMore), oneMore.ultimateVoice)).toStrictEqual([]);
   });
 
   it('still limits the two fighters separately when no Ultimate is involved', () => {
