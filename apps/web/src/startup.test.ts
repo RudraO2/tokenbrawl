@@ -242,6 +242,13 @@ function createHarness(
      * what `runFrames` means for the player they are about.
      */
     readonly spectateStream?: boolean;
+    /**
+     * Story 11.6. The Command Log the stream's one entry serves, when the demo
+     * Match will not do -- neither Baseline Bot in it ever submits `special`,
+     * so an Ultimate-shaped assertion against it would pass with the cinematic
+     * code unreached.
+     */
+    readonly spectateLog?: CommandLog;
   } = {},
 ): Harness {
   const root = createRoot();
@@ -286,7 +293,7 @@ function createHarness(
       };
     }
     if (options.spectateStream === true && url === '/replays/stream-01.command-log.json') {
-      return log;
+      return options.spectateLog ?? log;
     }
     // Sprite and backdrop layouts. `pending` is the default because "held open
     // forever" is the state this file exists to prove the player survives.
@@ -1947,6 +1954,52 @@ describe('the Ultimate FX sheet loads off the critical path, or not at all (Stor
     const remounted = result?.showLog(log as CommandLog);
     expect(remounted).toBeDefined();
     expect(remounted?.clock.isRunning()).toBe(true);
+  });
+
+  it('hands it to the Spectate stream as well, where the Ultimate actually plays (Story 11.6)', async () => {
+    // The Ultimate is the one effect on this page a visitor is most likely to
+    // see on Spectate rather than on the player: the stream runs forever and
+    // the player's Match fires once, on a Match that contains no Ultimate at
+    // all. So the sheet reaching `#app` and not `#spectate` is the version of
+    // this bug that matters, and it is the one that survived a first pass.
+    const { log, sidecar } = await buildDemoBundle();
+    const streamed = JSON.parse(
+      readFileSync(
+        join(
+          dirname(fileURLToPath(import.meta.url)),
+          '..',
+          'public',
+          'replays',
+          'spectate-03.command-log.json',
+        ),
+        'utf8',
+      ),
+    ) as CommandLog;
+    const harness = createHarness(log, {
+      spritesResolve: true,
+      sidecar,
+      ultLayout: shippedUltLayout(),
+      imagesDecode: true,
+      spectateStream: true,
+      spectateLog: streamed,
+    });
+
+    const result = await withWarnings(async () => {
+      const started = await startup(harness.globals);
+      await started?.dressed;
+      return started;
+    });
+    // Both clocks share one animation-frame queue here, and the cinematic sits
+    // two thirds of the way through a 630-frame track, so the budget has to
+    // cover the stream reaching it while the player consumes half the pumps.
+    harness.runFrames(2_000);
+
+    expect(result[0]?.spectate?.currentEntryId()).toBe('stream-01');
+    // No impact sheet is loaded in this case, so the only 1040-wide image on
+    // this page is the Ultimate atlas -- drawn on the *spectate* canvas, which
+    // can only happen if the sheet was handed to that panel and reached its
+    // cinematic.
+    expect(harness.spectateHost.drawnImageWidths()).toContain(1_040);
   });
 
   it('warns once and keeps playing when the layout will not arrive', async () => {

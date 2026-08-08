@@ -133,7 +133,19 @@ describe('the manifest walk (Story 9.3)', () => {
   }
 
   function fetchFor(ids: readonly string[], broken: ReadonlySet<string> = new Set()) {
+    // A hard ceiling on how many entries one case may load. No correct case in
+    // this file loads more than a handful, and a walk that spins -- mounting an
+    // entry, treating it as finished, mounting the next, forever -- would
+    // otherwise starve the event loop and hang the suite rather than fail it.
+    // Vitest's own timeout never fires against a livelock made of microtasks,
+    // so the bound has to live here. Past it every entry fails to load,
+    // `mount` exhausts its attempts, and the case ends on an assertion.
+    const budget = { remaining: 60 };
     return async (url: string): Promise<unknown> => {
+      budget.remaining -= 1;
+      if (budget.remaining < 0) {
+        throw new Error('the walk kept asking for entries');
+      }
       const id = ids.find((candidate) => url.includes(`/${candidate}.command-log`));
       if (id === undefined) {
         throw new Error(`unexpected url ${url}`);
@@ -575,11 +587,12 @@ describe('the manifest walk (Story 9.3)', () => {
       const driver = createDriver();
       const fetched: string[] = [];
 
+      const load = fetchFor(ids);
       const walk = createSpectateWalk({
         manifest,
         fetchJson: async (url: string) => {
           fetched.push(url);
-          return fetchFor(ids)(url);
+          return load(url);
         },
         env,
         requestFrame: driver.requestFrame,

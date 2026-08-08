@@ -13,6 +13,7 @@ import type { Canvas2D } from '../render/canvas2d';
 import { DEFAULT_JUICE_TUNING, arenaFor, buildJuiceTrack, type JuiceTrack } from '../render/juice';
 import { drawJuicedFrame } from '../render/juice-draw';
 import { DEFAULT_ROSTER } from '../render/roster';
+import type { UltSheet } from '../render/ult-sheet';
 import {
   mountSpectatePanel,
   spectateMarkup,
@@ -459,7 +460,11 @@ describe('the Spectate panel (Story 9.3)', () => {
       film: ReplayFilm,
       track: JuiceTrack,
       clockIndex: number,
-      options: { readonly roster?: typeof DEFAULT_ROSTER; readonly reducedMotion?: boolean } = {},
+      options: {
+        readonly roster?: typeof DEFAULT_ROSTER;
+        readonly reducedMotion?: boolean;
+        readonly ult?: UltSheet;
+      } = {},
     ): readonly string[] {
       const recorder = createRecordingContext();
       const blockArtist = createBlockArtist();
@@ -563,16 +568,60 @@ describe('the Spectate panel (Story 9.3)', () => {
       );
     });
 
-    it('threads the sheets through to the paint once they decode', async () => {
+    it('threads a decoded Ultimate sheet into the cinematic it draws', async () => {
+      // `setUlt` storing the sheet and never handing it to `drawJuicedFrame` is
+      // invisible to "the cinematic drew" -- Story 10.4's banner draws either
+      // way. So the sheet is handed over and the *same* frame is asserted to
+      // draw differently because of it, which is the only difference a call log
+      // can see between the second degrade level and the first.
+      const log = JSON.parse(readFileSync(SPECTATE_03, 'utf8')) as CommandLog;
+      const film = buildReplayFilm(log, env);
+      const track = trackOf(film);
+      const cinematicClocks = Array.from({ length: track.frameCount }, (_, index) => index).filter(
+        (index) => track.at(index).cinematic !== null,
+      );
+      // The middle of the run, not its first frame: the portrait and the beam
+      // both ease in from nothing, so on the opening frame a sheet and no sheet
+      // legitimately draw the same picture.
+      const cinematicClock = cinematicClocks[Math.floor(cinematicClocks.length / 2)];
+      expect(cinematicClock).toBeDefined();
+
+      const frame = { image: { width: 208, height: 208 }, sx: 0, sy: 0, sw: 208, sh: 208 };
+      const ult: UltSheet = {
+        fighters: ['clawde'],
+        imageUrls: ['/fx/ult.png'],
+        partFor: (id) => (id === 'clawde' ? frame : undefined),
+        portraitFor: (id) => (id === 'clawde' ? frame : undefined),
+      };
+
       const host = createHost();
       const driver = createDriver();
-      const panel = mountSpectatePanel(host, baseDeps(driver));
+      const panel = mountSpectatePanel(host, {
+        ...baseDeps(driver),
+        loadManifest: async () => ({
+          schemaVersion: '1.0.0',
+          loopStartEpochMs: 0,
+          totalLoopDurationMs: 1,
+          entries: [
+            {
+              id: 'ult',
+              commandLogUrl: '/replays/ult.command-log.json',
+              schemaVersion: '1.0.0',
+              frameCount: track.frameCount,
+            },
+          ],
+        }),
+        fetch: async () => ({ ok: true, status: 200, json: async () => log }),
+      });
       await flush();
+      panel.setUlt(ult);
 
-      // The handles exist and are callable before anything has decoded -- the
-      // wiring `startup.ts` uses on both the warm-cache and the late path.
-      expect(() => panel.setVfx({} as never)).not.toThrow();
-      expect(() => panel.setUlt({} as never)).not.toThrow();
+      driver.pump(cinematicClock! - 1);
+      host.clearCalls();
+      driver.pump(1);
+
+      expect(host.calls()).toStrictEqual(expectedCalls(film, track, cinematicClock!, { ult }));
+      expect(host.calls()).not.toStrictEqual(expectedCalls(film, track, cinematicClock!));
     });
 
     it('honours reduced motion: no shake, and no loop churn', async () => {

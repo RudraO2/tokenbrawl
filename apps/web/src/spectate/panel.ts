@@ -386,7 +386,14 @@ export function mountSpectatePanel(host: SpectateHost, deps: SpectatePanelDeps):
         // guard: the second call simply supersedes the first, and the first's
         // eventual (stale) load is dropped rather than mounted.
         play(entry.id);
-        say(`Playing ${entry.id}. Returns to the loop when it finishes.`);
+        // Under reduced motion the walk deliberately does not advance -- the
+        // stream is a still frame -- so promising a return to the loop would be
+        // a statement this panel has just been built not to honour.
+        say(
+          reducedMotion
+            ? `Showing ${entry.id}. Reduced motion: the stream is a still frame.`
+            : `Playing ${entry.id}. Returns to the loop when it finishes.`,
+        );
       });
     }
   }
