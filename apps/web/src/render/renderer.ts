@@ -369,17 +369,41 @@ function drawSuperGauge(
 ): void {
   const armed = meter >= config.specialMeterCost;
 
-  drawArcadeSegments(ctx, {
-    x,
-    y: METER_TOP,
-    width: HUD_BAR_WIDTH,
-    height: METER_HEIGHT,
-    mirror,
-    count: METER_SEGMENTS,
-    gap: METER_SEGMENT_GAP,
-    fillBasisPoints: levelBasisPoints(meter, config.maxMeter),
-    bands: armed ? ARMED_PULSE_BANDS[pulseLevel(frameIndex, reducedMotion)] : SUPER_METER_BANDS,
-  });
+  if (armed) {
+    // **One bar, not four.** The reference segments the meter while it charges
+    // and turns *the whole bar* gold at full (`screens.js:2460-2472`), and
+    // following it that far turns out to matter for more than fidelity: this
+    // story's own visual gate found ULTIMATE READY drawn across four gapped
+    // segments, with the gaps cutting through the letters. At the size the
+    // canvas actually renders at -- scaled to its column, not 1:1 -- the word
+    // degraded to mush.
+    //
+    // Filling solid fixes the callout's ground and sharpens AC2 at the same
+    // time: charging and armed are now different *shapes*, not the same shape
+    // in two colours, which is a distinction that survives being glanced at.
+    drawArcadeBar(ctx, {
+      x,
+      y: METER_TOP,
+      width: HUD_BAR_WIDTH,
+      height: METER_HEIGHT,
+      mirror,
+      fillBasisPoints: BASIS_POINTS_FULL,
+      ghostBasisPoints: 0,
+      bands: ARMED_PULSE_BANDS[pulseLevel(frameIndex, reducedMotion)],
+    });
+  } else {
+    drawArcadeSegments(ctx, {
+      x,
+      y: METER_TOP,
+      width: HUD_BAR_WIDTH,
+      height: METER_HEIGHT,
+      mirror,
+      count: METER_SEGMENTS,
+      gap: METER_SEGMENT_GAP,
+      fillBasisPoints: levelBasisPoints(meter, config.maxMeter),
+      bands: SUPER_METER_BANDS,
+    });
+  }
 
   if (armed) {
     // Ground ink on the gold fill, not gold text on the ground: the same

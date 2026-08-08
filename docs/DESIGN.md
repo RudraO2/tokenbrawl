@@ -151,7 +151,25 @@ a rule a later story may quietly reopen is not.
 | No translucent or blurred surface — `rgba(`, `linear-gradient`, `radial-gradient`, `backdrop-filter`, `filter: blur`, inset shadow | Every glow, vignette, aura and health-bar gradient | **Scoped to page files.** Arena released. |
 | No partial alpha — `globalAlpha` set to anything but `1` | Every additive and glow layer | **Scoped to page files.** `render/backdrop.ts`'s named exemption is now redundant and is kept deliberately, because it records *why* one file dims the scenery. |
 | Every hex literal lives in a declared colour source | The reference's gold, its three health tiers, its super meter, and one aura colour per fighter — none of them brand tokens | **Rule kept; a third source added.** `render/arena-palette.ts` joins `tokens.css` and `theme.ts`. A raw hex inside the arena still fails. |
-| The two chosen faces and no third family | An arcade display face for HUD numerals and callouts | **Kept, on both sides, and deferred.** Story 11.3 must either render arcade type from a glyph table the way `hero/font.ts` already does, or add a third `@font-face` **and** amend the rule and `docs/ASSETS.md` in the same change. It may not drift in behind the boundary. |
+| The two chosen faces and no third family | An arcade display face for HUD numerals and callouts | **Kept, on both sides — and now settled.** Story 11.3 took neither offered route, because it needed neither. See below. |
+
+**The fourth rule, settled by 11.3.** The two priced routes were a glyph table
+or a third `@font-face`. The story took neither: what an arcade callout
+actually needs at HUD size is *weight and a hard offset shadow*, and the
+display face is already 800-weight Bricolage Grotesque — its width axis was the
+reason it was chosen. So `THEME.arcadeFont` is `displayFont` at 16px rather
+than 20px: same family, same weight, same fallback stack, one size step down so
+a callout sits inside a 20px bar instead of over it. The shadow is two
+`fillText` calls two pixels apart, which is what this style's hard offset looks
+like when the type is 16px rather than a panel. No `@font-face`, no new family,
+no `docs/ASSETS.md` entry, and nothing for the rule to be amended about.
+
+The rule is now checked where it could previously not see. A canvas takes a
+font *shorthand string*, not a `font-family` declaration and not a token, so a
+third family could have arrived through `THEME.arcadeFont` while every
+CSS-anchored assertion stayed green. `style-discipline.test.ts` now asserts
+that every family named in `displayFont`, `monoFont` **and** `arcadeFont`
+appears in `tokens.css` or is a generic/system fallback.
 
 **Two rules looked like clashes and were not.** *"Blurs no shadow"* is anchored
 on the CSS `box-shadow:` declaration, so the canvas's `shadowBlur` property was

@@ -574,7 +574,18 @@ describe('the Super Gauge (10.3)', () => {
     expect(litSegments(drawMeter(0))).toBe(0);
     expect(litSegments(drawMeter(25))).toBe(1);
     expect(litSegments(drawMeter(75))).toBe(3);
-    expect(litSegments(drawMeter(FULL))).toBe(4);
+  });
+
+  it('arms as one solid bar rather than four gapped ones (AC2)', () => {
+    // Charging is segmented and armed is solid, which is the reference's own
+    // behaviour and is what gives ULTIMATE READY an unbroken ground to sit on.
+    // Asserted as a difference in *shape*: a charging gauge is ruled at the
+    // segment width, an armed one at the full bar width, and never both.
+    expect(ruleTops(drawMeter(75), SEGMENT_WIDTH)).toHaveLength(2);
+    expect(ruleTops(drawMeter(FULL), SEGMENT_WIDTH)).toHaveLength(0);
+    expect(ruleTops(drawMeter(FULL), GAUGE_WIDTH)).toContain(METER_TOP);
+    // And it is filled edge to edge, not merely wide.
+    expect(litSegments(drawMeter(FULL))).toBe(1);
   });
 
   it('charges on the ramp and arms on the gold, so the two states are different colours', () => {
@@ -611,6 +622,20 @@ describe('the Super Gauge (10.3)', () => {
         expect(ARENA_PALETTE.gold).not.toBe(call.fillStyle);
       }
     }
+
+    // And the ground it sits on is unbroken. The word spans more than a quarter
+    // of the bar, so a segmented armed gauge would have gaps running through
+    // the letters -- which is exactly what the visual gate caught.
+    const goldFills = armed
+      .calls()
+      .filter(
+        (call) =>
+          call.op === 'fillRect' &&
+          call.args[1] === METER_TOP &&
+          call.args[2] === GAUGE_WIDTH &&
+          (call.args[0] as number) < VIEWPORT.width / 2,
+      );
+    expect(goldFills.length).toBeGreaterThan(0);
   });
 
   it('pulses off the frame counter, never off a clock (AC3)', () => {
@@ -668,7 +693,10 @@ describe('the Super Gauge (10.3)', () => {
       filledBasisPoints: 3_600,
       exhausted: false,
     };
-    const ctx = drawMeter(FULL, 0, [bank, null]);
+    // Charging rather than armed, so the gauge is at its *widest* footprint --
+    // four segments plus their gaps -- which is the state that would collide
+    // with the row beneath it if the layout were wrong.
+    const ctx = drawMeter(50, 0, [bank, null]);
 
     // health, gauge, bank -- still three bars, still in that order down the
     // column, and the gauge still does not overlap the row beneath it.
