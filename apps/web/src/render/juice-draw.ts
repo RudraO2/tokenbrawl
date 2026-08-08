@@ -355,11 +355,24 @@ function centredSquare(ctx: Canvas2D, cx: number, cy: number, radius: number): v
  * at all but a solid square with two smaller squares on top of it, which is
  * what the first pass of this story drew.
  */
-const GLOW_LAYERS: readonly { readonly alpha: number; readonly radius: number }[] = Object.freeze([
-  Object.freeze({ alpha: 6_000, radius: BASIS_POINTS_FULL }),
-  Object.freeze({ alpha: 8_500, radius: 6_000 }),
-  Object.freeze({ alpha: 9_500, radius: 3_000 }),
-]);
+const GLOW_LAYERS: readonly { readonly alpha: number; readonly radius: number }[] = Object.freeze(
+  Array.from({ length: 8 }, (_unused, step) =>
+    Object.freeze({
+      // Rising inward, and *low*. Three layers at the reference's own alphas
+      // was the first pass and the visual gate rejected it on sight: at this
+      // stage size the outermost square is 480px across, and 60% of an aura
+      // additively over the arena is a hard-edged orange block covering half
+      // the fight, with two smaller blocks inside it. The reference gets its
+      // falloff from a radial gradient, which this port does not have; eight
+      // thin steps at a tenth to a third of full opacity accumulate into the
+      // same shape through calls it does have. The centre saturates because
+      // every layer stacks there; the outer edge adds nine percent and reads
+      // as light rather than as paint.
+      alpha: 900 + step * 300,
+      radius: BASIS_POINTS_FULL - step * 1_250,
+    }),
+  ),
+);
 
 /**
  * Story 10.4, deepened by Story 11.4. The Ultimate cinematic, in two halves.
@@ -666,7 +679,11 @@ export function drawCinematicPlate(
   const anchor = portraitAnchor(cinematic, viewport);
   const centreY = Math.round(viewport.height / 2);
   if (cinematic.portraitBasisPoints > 0 && aura !== undefined) {
-    const width = Math.max(1, Math.round(viewport.width / 4));
+    // A third of the stage's *height*, which is the reference's `360` of its
+    // own 1080 -- not a fraction of the width. Taking a quarter of 960 made the
+    // wash 480px across on a 400-tall stage, so it spanned more than the
+    // picture was tall and could only read as a rectangle.
+    const width = Math.max(1, Math.round(viewport.height / 3));
     for (const [index, layer] of GLOW_LAYERS.entries()) {
       additively(ctx, layer.alpha, () => {
         ctx.fillStyle = index === GLOW_LAYERS.length - 1 ? ARENA_PALETTE.ultFlash : aura;

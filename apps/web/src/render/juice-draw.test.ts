@@ -426,11 +426,14 @@ function ultSheetFor(fighters: readonly string[], options: { portraits?: boolean
 }
 
 /**
- * How many layers a glow is stacked from. Read off the drawing rather than
- * imported, because the assertion it serves is about the *shape* of the stack
- * and must not be able to agree with a stack of one.
+ * How many layers a glow is stacked from.
+ *
+ * Written here rather than imported, because the assertion it serves is about
+ * the *shape* of the stack: a test that read the count off the table it is
+ * checking could never notice the table collapsing to a single entry, which is
+ * the flat block the visual gate rejected.
  */
-const GLOW_LAYER_COUNT = 3;
+const GLOW_LAYER_COUNT = 8;
 
 /** A frame deep in the release act, with the beam swept out over the target. */
 function releasing(overrides: Partial<JuiceCinematic> = {}): JuiceCinematic {
@@ -943,7 +946,7 @@ describe('the cinematic degrades in three named steps (Story 11.4)', () => {
     expect(plate).toBeDefined();
     expect(plate?.fillStyle).not.toBe(ARENA_PALETTE.ultFlash);
     expect(plate?.fillStyle).not.toBe(auraFor('clawde'));
-    // 40% of clawde's `#d97706` into `#ffffff`, worked out by hand rather than
+    // 40% of clawde's aura into `#ffffff`, worked out by hand rather than
     // read back off the mixer: 255 - 0.4*(255-217) = 240 = `f0`,
     // 255 - 0.4*(255-119) = 201 = `c9`, 255 - 0.4*(255-6) = 155 = `9b`.
     expect(plate?.fillStyle).toMatch(/^#[0-9a-f]{6}$/);
