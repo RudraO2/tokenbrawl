@@ -26,7 +26,7 @@ import { ARENA_PALETTE } from './arena-palette';
 import { FLOOR_INSET } from './renderer';
 import { DEFAULT_ROSTER, ROSTER_NAMES, auraFor } from './roster';
 import { THEME } from './theme';
-import { createUltSheet, validateUltSheetLayout, type UltSheet } from './ult-sheet';
+import { ULT_PARTS, createUltSheet, validateUltSheetLayout, type UltSheet } from './ult-sheet';
 import {
   createVfxSheet,
   validateVfxSheetLayout,
@@ -616,7 +616,8 @@ describe('the cinematic degrades in three named steps (Story 11.4)', () => {
   }
 
   it('level 1: draws the caster own beam, muzzle and impact art', () => {
-    const calls = stageImages(releasing(), ultSheetFor(['clawde', 'chatty']), 'clawde');
+    const ult = ultSheetFor(['clawde', 'chatty']);
+    const calls = stageImages(releasing(), ult, 'clawde');
     expect(calls.length).toBeGreaterThan(0);
     // Additive, and nearest-neighbour: an impact sheet drawn bilinear over a
     // stage is the one thing in the arena that would not look like a sprite.
@@ -624,6 +625,43 @@ describe('the cinematic degrades in three named steps (Story 11.4)', () => {
       expect(call.globalCompositeOperation).toBe('lighter');
       expect(call.imageSmoothingEnabled).toBe(false);
     }
+
+    // **All three parts, by their own source rectangles.** "Some drawImage
+    // happened" is satisfied by a beam alone -- the muzzle could be dropped
+    // entirely and every assertion above would still pass, which is exactly
+    // what mutation M10 did. The cells are read back off the sheet rather than
+    // written out, so this stays true of a re-authored layout and false of a
+    // part that stopped being drawn.
+    const drawn = new Set(calls.map((call) => `${String(call.args[0])},${String(call.args[1])}`));
+    for (const part of ULT_PARTS) {
+      const cell = ult.partFor('clawde', part);
+      expect(drawn.has(`${String(cell?.sx)},${String(cell?.sy)}`), part).toBe(true);
+    }
+    // And the beam is tiled rather than stretched: more segments than parts.
+    expect(calls.length).toBeGreaterThan(ULT_PARTS.length);
+  });
+
+  it('level 1: draws the beam on a whiff and withholds only the impact art', () => {
+    // The whiff case, driven through the *sprite* path. The existing whiff case
+    // runs with no sheet, so it exercises the level-3 fallback and would pass
+    // with the sprite path's `connected` check removed entirely -- which is
+    // what mutation M7 did.
+    const ult = ultSheetFor(['clawde']);
+    const impact = ult.partFor('clawde', 'impact');
+    const beam = ult.partFor('clawde', 'beam');
+
+    const hit = stageImages(releasing(), ult, 'clawde');
+    const whiff = stageImages(releasing({ connected: false }), ult, 'clawde');
+
+    const cells = (calls: readonly Call[]): Set<string> =>
+      new Set(calls.map((call) => `${String(call.args[0])},${String(call.args[1])}`));
+
+    // The beam fires either way -- the fighter threw it.
+    expect(cells(whiff).has(`${String(beam?.sx)},${String(beam?.sy)}`)).toBe(true);
+    // The impact art is the damage, and only the connecting case has any.
+    expect(cells(hit).has(`${String(impact?.sx)},${String(impact?.sy)}`)).toBe(true);
+    expect(cells(whiff).has(`${String(impact?.sx)},${String(impact?.sy)}`)).toBe(false);
+    expect(whiff.length).toBe(hit.length - 1);
   });
 
   it('level 1: two fighters produce two different cinematics', () => {

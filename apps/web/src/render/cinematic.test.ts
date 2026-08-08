@@ -569,14 +569,22 @@ describe('the Ultimate plays as three acts (AC1, AC2)', () => {
   });
 
   it('builds an orb that accelerates to its maximum and then blooms', () => {
-    // `age^2` rather than linear: at the halfway frame the orb must be nearer
-    // its start than its midpoint, which is true of a squared ramp and false
-    // of a straight one. 39 is half of the reference's 78.
-    const halfway = at(39).orbRadiusPx;
-    const midpoint = (shape.orbMinPx + shape.orbMaxPx) / 2;
-    expect(halfway).toBeLessThan(midpoint);
+    // `age^2` rather than linear, pinned as the *value* a squared ramp produces
+    // rather than as "less than the midpoint" -- which a straight ramp clears
+    // by half a pixel and which therefore pinned nothing (mutation M2).
+    //
+    // At the halfway frame a squared ramp has covered a quarter of the span:
+    // 3 + floor(27 / 4) = 9, worked out from the endpoints rather than read
+    // back off the implementation. A linear ramp would be at 16.
+    expect(at(39).orbRadiusPx).toBe(9);
     expect(at(0).orbRadiusPx).toBe(shape.orbMinPx);
     expect(at(78).orbRadiusPx).toBe(shape.orbMaxPx);
+    // And the shape of the whole curve, not just one sample: the first half of
+    // the build covers less than a third of the span, the second half more than
+    // two thirds. True of any accelerating ramp, false of every straight one.
+    const span = shape.orbMaxPx - shape.orbMinPx;
+    expect(at(39).orbRadiusPx - shape.orbMinPx).toBeLessThan(span / 3);
+    expect(shape.orbMaxPx - at(39).orbRadiusPx).toBeGreaterThan((span * 2) / 3);
     // Monotonic across the whole build, with no step backwards.
     for (let age = 1; age <= 78; age += 1) {
       expect(at(age).orbRadiusPx).toBeGreaterThanOrEqual(at(age - 1).orbRadiusPx);
@@ -648,6 +656,29 @@ describe('the Ultimate plays as three acts (AC1, AC2)', () => {
     const start = indexOfFirstCinematic(whiff);
     expect(whiff.at(start + 120).cinematic?.connected).toBe(false);
     expect(whiff.at(start + 120).cinematic?.reachBasisPoints).toBeGreaterThan(0);
+  });
+
+  it('covers nothing on the frame the beam fires, even at zero separation', () => {
+    // A degenerate arena collapses both fighters onto one position, and a
+    // separation of zero is satisfied by a reach of zero. Without the extra
+    // term the impact would be marked as landed on the frame the beam fires,
+    // before it has swept a single basis point.
+    const collapsed = buildJuiceTrack(
+      longUltimateFilm(22),
+      DEFAULT_JUICE_TUNING,
+      { min: 0, max: 0 },
+      false,
+      CONFIG,
+    );
+    const start = indexOfFirstCinematic(collapsed);
+    const fired = collapsed.at(start + shape.releaseFromFrame).cinematic;
+    expect(fired?.targetBasisPoints).toBe(fired?.casterBasisPoints);
+    expect(fired?.reachBasisPoints).toBe(0);
+    expect(fired?.impactCovers).toBe(false);
+    // And it does cover once the sweep has started, so this is not vacuous.
+    expect(
+      collapsed.at(start + shape.releaseFromFrame + shape.beamSweepFrames).cinematic?.impactCovers,
+    ).toBe(true);
   });
 
   it('runs 130 clock frames while freezing exactly 90 of them', () => {

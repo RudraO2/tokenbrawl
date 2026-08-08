@@ -1360,7 +1360,11 @@ function cinematicAt(
   const toward = event.targetBasisPoints >= event.casterBasisPoints ? 1 : -1;
   const leadingEdge = event.casterBasisPoints + toward * reachBasisPoints;
   const separation = Math.abs(event.targetBasisPoints - event.casterBasisPoints);
-  const impactCovers = releasing && reachBasisPoints >= separation;
+  // `reachBasisPoints > 0` as well as reaching the separation, and it is not
+  // redundant: two fighters at the same arena position have a separation of
+  // zero, so without it a beam that has not started sweeping would be reported
+  // as already covering its target on the frame it fires.
+  const impactCovers = releasing && reachBasisPoints > 0 && reachBasisPoints >= separation;
   const impactBasisPoints = impactCovers ? event.targetBasisPoints : leadingEdge;
 
   // --- Act 2, the slam. One rise and one fall across `slamFrames`, no repeat.
