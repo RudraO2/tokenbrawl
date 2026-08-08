@@ -344,8 +344,22 @@ function centredSquare(ctx: Canvas2D, cx: number, cy: number, radius: number): v
   ctx.fillRect(Math.round(cx - size / 2), Math.round(cy - size / 2), size, size);
 }
 
-/** How many bands the layered glow and orb are built from. */
-const GLOW_LAYERS = 3;
+/**
+ * The layered glow and orb, outermost first, as `(alpha, radius)` fractions of
+ * their full size -- both in basis points.
+ *
+ * The reference stacks three `createRadialGradient` circles and its alphas
+ * *rise* inward: a wide dim aura wash at 0.6, a brighter mid layer at 0.85, a
+ * white-hot core at 0.95. The order matters more than the numbers do. Drawn the
+ * other way round -- the widest layer at full opacity -- a glow is not a glow
+ * at all but a solid square with two smaller squares on top of it, which is
+ * what the first pass of this story drew.
+ */
+const GLOW_LAYERS: readonly { readonly alpha: number; readonly radius: number }[] = Object.freeze([
+  Object.freeze({ alpha: 6_000, radius: BASIS_POINTS_FULL }),
+  Object.freeze({ alpha: 8_500, radius: 6_000 }),
+  Object.freeze({ alpha: 9_500, radius: 3_000 }),
+]);
 
 /**
  * Story 10.4, deepened by Story 11.4. The Ultimate cinematic, in two halves.
@@ -392,6 +406,13 @@ export function drawCinematicStage(
   const aura = caster === undefined ? undefined : auraFor(caster);
   const beamCell = caster === undefined ? undefined : ult?.partFor(caster, 'beam');
 
+  // Deliberately **not** clamped to the stage, on the same terms and for the
+  // same reason `paintImpacts` is not: a beam is fired from a fighter's own
+  // position toward a point, and sliding it inward so it fits would draw it
+  // somewhere it was not fired. The canvas clips it, which is the truthful
+  // picture for a caster pinned against a wall. Story 10.4's accent band, the
+  // last-resort fallback below, keeps its own clamp -- it is a *mark* rather
+  // than a projectile, and a mark that left the stage would simply be missing.
   if (cinematic.reachBasisPoints > 0) {
     const toward = cinematic.targetBasisPoints >= cinematic.casterBasisPoints ? 1 : -1;
     // The one viewport multiplication for the beam, in the same place and for
@@ -480,11 +501,10 @@ export function drawCinematicStage(
       // rather than three stroked lines, because the port has no `stroke` with
       // a `lineCap` and a bar is what a beam is anyway.
       const width = Math.max(0, right - left);
-      for (const layer of Array.from({ length: GLOW_LAYERS }, (_unused, at) => at)) {
-        const band = Math.max(1, Math.round(thickness / (layer + 1)));
-        const colour = layer === GLOW_LAYERS - 1 ? ARENA_PALETTE.ultFlash : aura;
-        const alpha = BASIS_POINTS_FULL - layer * BEAM_LAYER_FALLOFF_BASIS_POINTS;
-        additively(ctx, alpha, () => {
+      for (const [index, layer] of GLOW_LAYERS.entries()) {
+        const band = Math.max(1, Math.round((thickness * layer.radius) / BASIS_POINTS_FULL));
+        const colour = index === GLOW_LAYERS.length - 1 ? ARENA_PALETTE.ultFlash : aura;
+        additively(ctx, layer.alpha, () => {
           ctx.fillStyle = colour;
           ctx.fillRect(left, axisY - Math.round(band / 2), width, band);
         });
@@ -549,10 +569,6 @@ const BANNER_WORD = 'ULTIMATE';
 const VIGNETTE_BANDS = 6;
 /** How thick one vignette band is, as a fraction of the viewport's shorter axis, in basis points. */
 const VIGNETTE_BAND_BASIS_POINTS = 600;
-/** How much dimmer each successive glow layer is. */
-const GLOW_FALLOFF_BASIS_POINTS = 2_800;
-/** How much dimmer each successive beam layer is. */
-const BEAM_LAYER_FALLOFF_BASIS_POINTS = 2_500;
 /** The muzzle sprite is drawn a little larger than the beam it comes out of. */
 const MUZZLE_SCALE_BASIS_POINTS = 13_000;
 /** The reference's 1.8x: an Ultimate's impact must clearly out-scale an ordinary blast's. */
@@ -628,7 +644,14 @@ export function drawCinematicPlate(
       if (width <= 0 || height <= 0) {
         break;
       }
-      const alpha = Math.floor(cinematic.vignetteBasisPoints / VIGNETTE_BANDS);
+      // Graded outward-in, not divided equally. These rings are disjoint --
+      // each is a frame at its own inset -- so an equal share would darken the
+      // centre exactly as much as the edge, which is a grey wash rather than a
+      // vignette. The outermost ring gets the full strength and each one inward
+      // gets a step less.
+      const alpha = Math.floor(
+        (cinematic.vignetteBasisPoints * (VIGNETTE_BANDS - step)) / VIGNETTE_BANDS,
+      );
       atAlpha(ctx, alpha, () => {
         ctx.fillRect(inset, inset, width, band);
         ctx.fillRect(inset, inset + height - band, width, band);
@@ -644,11 +667,15 @@ export function drawCinematicPlate(
   const centreY = Math.round(viewport.height / 2);
   if (cinematic.portraitBasisPoints > 0 && aura !== undefined) {
     const width = Math.max(1, Math.round(viewport.width / 4));
-    for (const layer of Array.from({ length: GLOW_LAYERS }, (_unused, at) => at)) {
-      const radius = width - layer * Math.round(width / GLOW_LAYERS);
-      additively(ctx, BASIS_POINTS_FULL - layer * GLOW_FALLOFF_BASIS_POINTS, () => {
-        ctx.fillStyle = layer === GLOW_LAYERS - 1 ? ARENA_PALETTE.ultFlash : aura;
-        centredSquare(ctx, anchor.x, centreY, Math.max(1, radius));
+    for (const [index, layer] of GLOW_LAYERS.entries()) {
+      additively(ctx, layer.alpha, () => {
+        ctx.fillStyle = index === GLOW_LAYERS.length - 1 ? ARENA_PALETTE.ultFlash : aura;
+        centredSquare(
+          ctx,
+          anchor.x,
+          centreY,
+          Math.max(1, Math.round((width * layer.radius) / BASIS_POINTS_FULL)),
+        );
       });
     }
   }
@@ -704,11 +731,15 @@ export function drawCinematicPlate(
     const handX =
       portraitX +
       anchor.facing * Math.round((portraitWidth * HAND_OFFSET_BASIS_POINTS) / BASIS_POINTS_FULL);
-    for (const layer of Array.from({ length: GLOW_LAYERS }, (_unused, at) => at)) {
-      const radius = Math.max(1, bloomed - layer * Math.round(bloomed / GLOW_LAYERS));
-      additively(ctx, BASIS_POINTS_FULL - layer * GLOW_FALLOFF_BASIS_POINTS, () => {
-        ctx.fillStyle = layer === GLOW_LAYERS - 1 ? ARENA_PALETTE.ultFlash : aura;
-        centredSquare(ctx, handX, centreY, radius);
+    for (const [index, layer] of GLOW_LAYERS.entries()) {
+      additively(ctx, layer.alpha, () => {
+        ctx.fillStyle = index === GLOW_LAYERS.length - 1 ? ARENA_PALETTE.ultFlash : aura;
+        centredSquare(
+          ctx,
+          handX,
+          centreY,
+          Math.max(1, Math.round((bloomed * layer.radius) / BASIS_POINTS_FULL)),
+        );
       });
     }
   }

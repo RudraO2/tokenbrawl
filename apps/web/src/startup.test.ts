@@ -6,6 +6,8 @@ import type { CommandLog } from '@tokenbrawl/contracts';
 import { DEFAULT_FIGHTER_CONFIG } from '../../../packages/env-fighter/src/config';
 import type { Canvas2D } from './render/canvas2d';
 import type { MountPoint, MountPointChild } from './main';
+import { DEFAULT_ROSTER, ROSTER_IDS } from './render/roster';
+import { imageUrlsFor, validateUltSheetLayout } from './render/ult-sheet';
 import { DEMO_REPLAY_URL, resolveSidecarUrl, startup, type BrowserGlobals } from './startup';
 import { runByokMatch } from './byok/run';
 import { buildDemoBundle } from './testing/demo-log';
@@ -210,6 +212,17 @@ function createHarness(
      * and the only fail-soft path a document-shaped fake cannot reach.
      */
     readonly fxStatus?: number;
+    /**
+     * Story 11.4's `/fx/ult-layout.json`. Routed separately from the FX sheet
+     * for exactly the reason `fxLayout` is routed separately from the sprite
+     * packs: it is a *third* document shape, and without its own arm the
+     * default `{ clips: {} }` answers it, `validateUltSheetLayout` rejects it,
+     * and every case in this file quietly logs "Ultimate FX unavailable" while
+     * asserting something else.
+     */
+    readonly ultLayout?: unknown;
+    /** An HTTP status for `/fx/ult-layout.json`. Anything but `200` is a 404-shaped failure. */
+    readonly ultStatus?: number;
     /** Whether the fake `Image` decodes. Pending forever by default. */
     readonly imagesDecode?: boolean;
     readonly json?: (url: string) => Promise<unknown>;
@@ -241,6 +254,9 @@ function createHarness(
     }
     if (url === '/fx/layout.json' && options.fxLayout !== undefined) {
       return options.fxLayout;
+    }
+    if (url === '/fx/ult-layout.json' && options.ultLayout !== undefined) {
+      return options.ultLayout;
     }
     // Sprite and backdrop layouts. `pending` is the default because "held open
     // forever" is the state this file exists to prove the player survives.
@@ -285,7 +301,12 @@ function createHarness(
       cancelAnimationFrame: () => undefined,
     },
     fetch: async (url: string) => {
-      const status = url === '/fx/layout.json' ? (options.fxStatus ?? 200) : 200;
+      const status =
+        url === '/fx/layout.json'
+          ? (options.fxStatus ?? 200)
+          : url === '/fx/ult-layout.json'
+            ? (options.ultStatus ?? 200)
+            : 200;
       return { ok: status === 200, status, json: async () => respond(url) };
     },
     Image: class {
@@ -1765,5 +1786,114 @@ describe('the impact FX sheet loads off the critical path, or not at all (Story 
 
     expect(result?.mounted.clock.isRunning()).toBe(true);
     expect(harness.frames()).toBe(1);
+  });
+});
+
+/**
+ * Story 11.4. The Ultimate's per-character art arrives the same way the impact
+ * sheet does, and the cases that matter are the same three: it reaches the
+ * running player, its absence costs nothing, and the fetch set is the fighters
+ * actually in play rather than the whole roster.
+ *
+ * The last one is not a micro-optimisation. Four portraits are roughly 800 KB,
+ * and this page's whole first-frame budget is the two seconds Story 4.2 exists
+ * to defend -- fetching the two the Match shows is the difference between a
+ * decoration and a regression.
+ */
+describe('the Ultimate FX sheet loads off the critical path, or not at all (Story 11.4)', () => {
+  /** The two layouts this repo actually ships, so a retune of either retunes this too. */
+  function shipped(name: string): unknown {
+    const repo = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
+    return JSON.parse(readFileSync(join(repo, 'apps', 'web', 'public', 'fx', name), 'utf8'));
+  }
+  const shippedUltLayout = (): unknown => shipped('ult-layout.json');
+  const shippedFxLayout = (): unknown => shipped('layout.json');
+
+  async function withWarnings<T>(body: () => Promise<T>): Promise<[T, unknown[][]]> {
+    const consoleWarn = console.warn;
+    const warnings: unknown[][] = [];
+    console.warn = (...args: unknown[]): void => {
+      warnings.push(args);
+    };
+    try {
+      return [await body(), warnings];
+    } finally {
+      console.warn = consoleWarn;
+    }
+  }
+
+  it('fetches the layout and the portraits of the pair actually fighting', () => {
+    // Derived from the shipped layout rather than written out, so a character
+    // select story that changes `DEFAULT_ROSTER` changes this with it -- and a
+    // loader that quietly fetched all four would fail here rather than in a
+    // performance trace nobody runs.
+    const layout = validateUltSheetLayout(shippedUltLayout());
+    const urls = imageUrlsFor(layout, DEFAULT_ROSTER);
+
+    for (const id of DEFAULT_ROSTER) {
+      expect(urls).toContain(`/portraits/${id}.png`);
+    }
+    for (const id of ROSTER_IDS.filter((other) => !DEFAULT_ROSTER.includes(other))) {
+      expect(urls).not.toContain(`/portraits/${id}.png`);
+    }
+    // One atlas, shared: three files rather than six.
+    expect(urls).toHaveLength(DEFAULT_ROSTER.length + 1);
+  });
+
+  it('requests the layout and hands the sheet to the running player', async () => {
+    const { log, sidecar } = await buildDemoBundle();
+    const harness = createHarness(log, {
+      spritesResolve: true,
+      sidecar,
+      fxLayout: shippedFxLayout(),
+      ultLayout: shippedUltLayout(),
+      imagesDecode: true,
+    });
+
+    const [result, warnings] = await withWarnings(async () => {
+      const started = await startup(harness.globals);
+      await started?.dressed;
+      return started;
+    });
+
+    expect(harness.requested()).toContain('/fx/ult-layout.json');
+    expect(warnings.filter((args) => String(args[0]).includes('Ultimate FX'))).toStrictEqual([]);
+    expect(result?.mounted.clock.isRunning()).toBe(true);
+
+    // "Fetched, validated, and then dropped on the floor" satisfies both
+    // assertions above, which is the Story 11.2 lesson applied here: the sheet
+    // has to reach the *player*, and `setUlt` is the only thing that puts it
+    // there. A re-mount must keep it too, because the art belongs to the page
+    // rather than to whichever Match was on screen when it decoded.
+    const remounted = result?.showLog(log as CommandLog);
+    expect(remounted).toBeDefined();
+    expect(remounted?.clock.isRunning()).toBe(true);
+  });
+
+  it('warns once and keeps playing when the layout will not arrive', async () => {
+    const { log, sidecar } = await buildDemoBundle();
+    const harness = createHarness(log, {
+      spritesResolve: true,
+      sidecar,
+      fxLayout: shippedFxLayout(),
+      ultLayout: shippedUltLayout(),
+      imagesDecode: true,
+      ultStatus: 404,
+    });
+
+    const [result, warnings] = await withWarnings(async () => {
+      const started = await startup(harness.globals);
+      await started?.dressed;
+      return started;
+    });
+
+    const ultWarnings = warnings.filter((args) => String(args[0]).includes('Ultimate FX'));
+    expect(ultWarnings).toHaveLength(1);
+    expect(String(ultWarnings[0][0])).toContain('without per-character art');
+    // The fail-soft claim measured where it matters: the fight still plays, and
+    // the *impact* sheet -- a separate document, separately fetched -- is
+    // untouched by the Ultimate art's failure.
+    expect(result?.mounted.clock.isRunning()).toBe(true);
+    expect(warnings.filter((args) => String(args[0]).includes('Impact FX'))).toStrictEqual([]);
   });
 });

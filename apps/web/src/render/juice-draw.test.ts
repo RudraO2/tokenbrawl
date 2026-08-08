@@ -425,6 +425,13 @@ function ultSheetFor(fighters: readonly string[], options: { portraits?: boolean
   return createUltSheet(images, layout);
 }
 
+/**
+ * How many layers a glow is stacked from. Read off the drawing rather than
+ * imported, because the assertion it serves is about the *shape* of the stack
+ * and must not be able to agree with a stack of one.
+ */
+const GLOW_LAYER_COUNT = 3;
+
 /** A frame deep in the release act, with the beam swept out over the target. */
 function releasing(overrides: Partial<JuiceCinematic> = {}): JuiceCinematic {
   return cinematicWith({
@@ -753,6 +760,133 @@ describe('the cinematic degrades in three named steps (Story 11.4)', () => {
     );
     expect(ctx.globalCompositeOperation).toBe('source-over');
     expect(ctx.globalAlpha).toBe(1);
+  });
+
+  it('grades every layered glow outward-in: wider means dimmer', () => {
+    // Round 1 shipped all three of these inverted -- the widest layer at full
+    // opacity -- and every call-sequence assertion in this file passed. A glow
+    // drawn that way is not a glow: it is a solid square with two smaller
+    // squares on it, and no amount of checking *that* the calls happened can
+    // see it. So the ordering is what is asserted.
+    //
+    // Written as "strictly wider implies strictly dimmer" rather than against
+    // the alpha table's own numbers, which would hold for any table including
+    // the inverted one.
+    const cases: readonly [string, () => readonly Call[]][] = [
+      [
+        'the orb at the caster hand',
+        () => {
+          const ctx = createRecordingCanvas();
+          drawCinematicPlate(
+            ctx,
+            cinematicWith({ orbRadiusPx: 24, portraitBasisPoints: BASIS_POINTS_FULL, letterboxPx: 52 }),
+            VIEWPORT,
+            THEME,
+            undefined,
+            'clawde',
+          );
+          return ctx.calls;
+        },
+      ],
+      [
+        'the procedural beam',
+        () => {
+          const ctx = createRecordingCanvas();
+          // `impactCovers: false` so only the beam's own stack is recorded:
+          // the impact flare is a fourth additive fill and belongs to a
+          // different question.
+          drawCinematicStage(
+            ctx,
+            releasing({ impactCovers: false }),
+            VIEWPORT,
+            THEME,
+            undefined,
+            'clawde',
+          );
+          return ctx.calls;
+        },
+      ],
+    ];
+
+    for (const [what, run] of cases) {
+      const fills = run().filter((call) => call.op === 'fillRect');
+      expect(fills.length, what).toBeGreaterThanOrEqual(GLOW_LAYER_COUNT);
+
+      // Every additive layer, in the order it was drawn, as (extent, alpha).
+      const layers = fills
+        .filter((call) => call.globalCompositeOperation === 'lighter')
+        .map((call) => ({
+          // The *narrow* axis. A layered orb varies on both, but a beam layer
+          // varies only in thickness -- its length is the sweep and is the same
+          // for all three -- so the wide axis would report every layer as
+          // equally large and the ordering would go unchecked.
+          extent: Math.min(call.args[2] as number, call.args[3] as number),
+          alpha: call.globalAlpha,
+        }));
+      expect(layers.length % GLOW_LAYER_COUNT, what).toBe(0);
+      expect(layers.length, what).toBeGreaterThanOrEqual(GLOW_LAYER_COUNT);
+
+      // One plate frame can carry two stacks -- the wash behind the portrait
+      // and the orb at the hand -- so they are checked a stack at a time
+      // rather than as one run. Across a stack boundary the extent legitimately
+      // jumps back up, and a flat sweep would read that as an inversion.
+      for (let at = 0; at < layers.length; at += GLOW_LAYER_COUNT) {
+        const stack = layers.slice(at, at + GLOW_LAYER_COUNT);
+        for (const [index, layer] of stack.entries()) {
+          if (index === 0) {
+            continue;
+          }
+          const previous = stack[index - 1];
+          // Each successive layer is no wider than the last, and where it is
+          // strictly narrower it must be strictly brighter.
+          expect(layer.extent, what).toBeLessThanOrEqual(previous.extent);
+          if (layer.extent < previous.extent) {
+            expect(layer.alpha, what).toBeGreaterThan(previous.alpha);
+          }
+        }
+        // And the widest layer is never fully opaque, which is what made the
+        // inverted version read as a block rather than as light.
+        expect(stack[0].alpha, what).toBeLessThan(1);
+        expect(stack[stack.length - 1].alpha, what).toBeGreaterThan(stack[0].alpha);
+        expect(stack[stack.length - 1].extent, what).toBeLessThan(stack[0].extent);
+      }
+    }
+  });
+
+  it('grades the vignette darkest at the edge, not evenly across the frame', () => {
+    // Round 1 divided one strength equally between six *disjoint* rings, which
+    // darkens the centre exactly as much as the edge -- a grey wash rather than
+    // a vignette. The rings do not overlap, so the alpha has to fall inward on
+    // its own.
+    const ctx = createRecordingCanvas();
+    drawCinematicPlate(
+      ctx,
+      cinematicWith({ vignetteBasisPoints: 6_500 }),
+      VIEWPORT,
+      THEME,
+    );
+    const rings = ctx.calls.filter(
+      (call) => call.op === 'fillRect' && call.fillStyle === ARENA_PALETTE.curtain,
+    );
+    expect(rings.length).toBeGreaterThan(4);
+
+    // The alpha of the ring at each inset, outermost first.
+    const byInset = new Map<number, number>();
+    for (const ring of rings) {
+      const inset = Math.min(ring.args[0] as number, ring.args[1] as number);
+      byInset.set(inset, ring.globalAlpha);
+    }
+    const insets = [...byInset.keys()].sort((a, b) => a - b);
+    expect(insets.length).toBeGreaterThan(4);
+    for (const [index, inset] of insets.entries()) {
+      if (index === 0) {
+        continue;
+      }
+      expect(byInset.get(inset)).toBeLessThan(byInset.get(insets[index - 1]) ?? 0);
+    }
+    // The innermost ring is nearly clear and the outermost is not, which is
+    // what "vignette" means and what an even division could never produce.
+    expect(byInset.get(insets[0])).toBeGreaterThan(byInset.get(insets[insets.length - 1]) ?? 0);
   });
 
   it('tints the slam with the caster aura rather than painting flat white', () => {

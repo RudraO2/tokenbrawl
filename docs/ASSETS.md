@@ -133,6 +133,64 @@ malformed layout, a remote image URL, a pose that overruns the image, or an
 undecodable PNG — and `juice-draw.ts` then paints the Story 9.5 square sparks
 it always did. A fight with no impact art is worse-looking, never broken.
 
+### Ultimate FX and portraits
+
+| Asset | Source | Licence | Checked |
+|---|---|---|---|
+| `apps/web/public/fx/fx_ult.png` | authored in this repo's reference lineage — the author's own prior project's Ultimate FX atlas (own IP), copied byte-for-byte from its `fx/fx_ult.png` | **Author-owned, used with permission** | 2026-08-08 |
+| `apps/web/public/portraits/clawde.png` | the same source project's `portraits/clawde.png` (own IP), copied byte-for-byte | **Author-owned, used with permission** | 2026-08-08 |
+| `apps/web/public/portraits/chatty.png` | the same source project's `portraits/chatty.png` (own IP), copied byte-for-byte | **Author-owned, used with permission** | 2026-08-08 |
+| `apps/web/public/portraits/gemini.png` | the same source project's `portraits/gemini.png` (own IP), copied byte-for-byte | **Author-owned, used with permission** | 2026-08-08 |
+| `apps/web/public/portraits/grokk.png` | the same source project's `portraits/grokk.png` (own IP), copied byte-for-byte | **Author-owned, used with permission** | 2026-08-08 |
+
+Story 11.4. The atlas is 1040×1040 of 208×208 cells on the same 5×5 grid the
+impact sheet uses; the portraits are 512×512 each. Same source project, same
+owner, same basis as everything above, and the same rule about the bytes: only
+the images were copied, and nothing that names the source project travelled
+with them.
+
+The source atlas carries eight fighters. **Four are shipped** — the roster in
+`apps/web/src/render/roster.ts` — and the other four are simply not copied,
+because art in `public/` that nothing can ask for is a claim the code does not
+make.
+
+**`apps/web/public/fx/ult-layout.json` beside it is authored in this repo.** It
+holds one `{ image, x, y }` per `(fighter, part)` with the grid arithmetic
+`(i % 5 × 208, floor(i / 5) × 208)` already done, plus each fighter's portrait
+path — and it carries **no timing field at all**, because every ult pose in the
+source is a single cell at `fps: 1`. There is nothing to hold and nothing to
+convert, which is why this is not a strip layout like the impact sheet's.
+
+| Fighter | Cells | `muzzle` | `beam` | `impact` |
+|---|---|---|---|---|
+| `clawde` | 0–2 | `(0, 0)` | `(208, 0)` | `(416, 0)` |
+| `chatty` | 3–5 | `(624, 0)` | `(832, 0)` | `(0, 208)` |
+| `gemini` | 6–8 | `(208, 208)` | `(416, 208)` | `(624, 208)` |
+| `grokk` | 9–11 | `(832, 208)` | `(0, 416)` | `(208, 416)` |
+
+Two of the twelve wrap onto the next row, which is exactly where a hand-copied
+grid goes wrong; `ult-sheet.test.ts` reads this file from disk and re-derives
+every cell from its atlas index.
+
+**Only the pair in `DEFAULT_ROSTER` is fetched.** `imageUrlsFor(layout, roster)`
+in `apps/web/src/render/ult-sheet.ts` returns the atlas plus the portraits of
+the two fighters a live Match shows — three files rather than five, and about
+400 KB rather than 800. A character-select story passes a different pair and
+nothing else changes.
+
+Fail-soft in three named steps, and each is reachable:
+
+1. **Per-character art**, when the sheet bound that fighter.
+2. **A procedural beam in the caster's aura**, when the sheet is absent —
+   `loadUlt` in `apps/web/src/startup.ts` warns once and returns `undefined` on
+   a 404, a malformed layout, a remote image URL, a cell that overruns the
+   image, or an undecodable PNG.
+3. **Story 10.4's banner-and-band**, when the drawing has no roster at all.
+
+A fighter whose portrait 404'd but whose cells decoded keeps the cells and
+takes the banner in place of the portrait: the two are separate files and are
+dropped separately.
+
 ### Arena backdrop
 
 | Asset | Source | Licence | Checked |
