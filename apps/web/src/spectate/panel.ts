@@ -1,9 +1,20 @@
 import { DEFAULT_FIGHTER_CONFIG } from '../../../../packages/env-fighter/src/config';
 import { createFighterEnvironment } from '../../../../packages/env-fighter/src/environment';
-import { escapeHtml, type CanvasSurface, type HostView } from '../main';
+import { escapeHtml, prefersReducedMotion, type CanvasSurface, type HostView } from '../main';
 import { createBlockArtist, type FighterArtist } from '../render/artist';
+import {
+  DEFAULT_AUDIO_TUNING,
+  buildAudioTrack,
+  createAudioDirector,
+  type AudioDirector,
+  type AudioSink,
+  type AudioTrack,
+} from '../render/audio';
 import type { Backdrop } from '../render/backdrop';
-import { drawFrame } from '../render/renderer';
+import { drawJuicedFrame } from '../render/juice-draw';
+import { DEFAULT_ROSTER } from '../render/roster';
+import type { UltSheet } from '../render/ult-sheet';
+import type { VfxSheet } from '../render/vfx-sheet';
 import {
   fetchSpectateManifest,
   offsetForNow,
@@ -33,6 +44,36 @@ import { createSpectateWalk, type SpectateWalkHandle } from './walk';
  * `mountPlayer` for the single-log case. `buildReplayFilm` and
  * `createPlaybackClock` are still reused unmodified -- through `walk.ts`,
  * never reimplemented here.
+ *
+ * ## Story 11.6: the juice and the audio, reused rather than rebuilt
+ *
+ * Until this story this panel called `drawFrame` directly, so the surface a
+ * visitor looks at first and longest had no hitstop, no sparks, no damage
+ * numbers, no impact sheet, no Ultimate cinematic and no sound. It now paints
+ * through `drawJuicedFrame` against the `JuiceTrack` `walk.ts` builds per entry,
+ * dressed with the same `vfx`, `ult` and `DEFAULT_ROSTER` `main.ts` hands the
+ * replay player. Nothing here draws anything of its own -- the whole story is
+ * that two surfaces call one drawing layer.
+ *
+ * ### Why the sound starts off
+ *
+ * Spectate begins playing the moment it mounts, with no visitor action at all,
+ * and the page's audio context is unlocked by *any* gesture anywhere on the page
+ * -- including one aimed at Arcade. An ambient surface that starts making noise
+ * because a visitor pressed something else is a defect, so the default is
+ * silence and the toggle below is the only thing that lifts it.
+ *
+ * It also settles an ownership question this panel is the first to raise. The
+ * sink is built once per *page* (Story 9.6) and Spectate is the first surface
+ * that can play at the same time as the replay player -- Arcade and BYOK
+ * re-mount the same `#app` player, so before this story only one director ever
+ * existed. Two directors writing the same three `GainNode`s, and two looping
+ * music beds, is exactly the stacking `stopAll` exists to prevent. The rule is
+ * therefore: **the page's sound follows the last surface the visitor asked
+ * for.** Enabling here takes ownership (`stopAll`, then this track's gains every
+ * frame); a Match started in the player afterwards takes it back through
+ * `mountPlayer`'s own `stopAll`, and Spectate's bed returns at its next entry.
+ * Silence is the right direction for that hand-over to fail in.
  */
 
 export type SpectateEvent = 'click';
@@ -70,6 +111,15 @@ export interface SpectatePanelDeps {
    * the player's context suspended for the whole session.
    */
   readonly onGesture?: () => void;
+  /**
+   * Story 11.6. The page's one audio graph (Story 9.6), or absent/null on a
+   * browser with no WebAudio and in every test that does not assert on sound.
+   *
+   * Absent is a supported configuration rather than a degraded one: the toggle
+   * still flips and still reads back, and the director runs sink-less -- which
+   * is its own documented no-op path, the same one `mountPlayer` relies on.
+   */
+  readonly sink?: AudioSink | null;
 }
 
 export interface SpectatePanel {
@@ -87,10 +137,35 @@ export interface SpectatePanel {
    */
   readonly setArtist: (agentIndex: 0 | 1, artist: FighterArtist) => void;
   readonly setBackdrop: (backdrop: Backdrop) => void;
+  /**
+   * Story 11.6. The impact FX sheet, on the same terms the player's is: absent
+   * until it decodes, absent forever if it never does, and its absence is Story
+   * 9.5's square-spark path rather than a failure.
+   */
+  readonly setVfx: (vfx: VfxSheet) => void;
+  /** Story 11.6. The Ultimate's per-character art, on the same terms as `setVfx`. */
+  readonly setUlt: (ult: UltSheet) => void;
+  /** Story 11.6. Whether this surface is currently driving the page's audio. Starts `false`. */
+  readonly audioEnabled: () => boolean;
+  /**
+   * Story 11.6. What the panel's sound button does, exposed so the decision is
+   * assertable without dispatching a DOM event -- and so a later surface (Story
+   * 9.8's carousel) can make the same choice without duplicating it.
+   */
+  readonly setAudioEnabled: (enabled: boolean) => void;
 }
 
 const CANVAS_WIDTH = 960;
 const CANVAS_HEIGHT = 400;
+
+/**
+ * The sound button's two labels. Story 11.6.
+ *
+ * A frozen table rather than a ternary at the one call site, so the default the
+ * markup ships with and the label the toggle writes cannot drift apart -- the
+ * button is rendered once, statically, and updated later from a different line.
+ */
+const SOUND_LABEL = Object.freeze({ off: 'Sound: off', on: 'Sound: on' });
 
 /** Escapes `\` and `"` so `id` is safe to interpolate inside a double-quoted `[attr="..."]` CSS attribute selector. */
 function escapeAttributeSelector(value: string): string {
@@ -121,6 +196,7 @@ export function spectateMarkup(entries: readonly SpectateManifestEntry[] = []): 
       <canvas class="tb-spectate-canvas"></canvas>
     </div>
     <p class="tb-spectate-status" data-spectate-status role="status" aria-live="polite"></p>
+    <button class="tb-button tb-spectate-sound" type="button" data-spectate-sound aria-pressed="false">${SOUND_LABEL.off}</button>
     <div class="tb-spectate-picker" data-spectate-picker>${pickerMarkup(entries)}</div>
   `;
 }
@@ -143,14 +219,16 @@ export function mountSpectatePanel(host: SpectateHost, deps: SpectatePanelDeps):
   const canvasNode = host.querySelector('canvas');
   const statusNode = host.querySelector('[data-spectate-status]');
   const pickerNode = host.querySelector('[data-spectate-picker]');
+  const soundNode = host.querySelector('[data-spectate-sound]');
 
-  if (canvasNode === null || statusNode === null || pickerNode === null) {
+  if (canvasNode === null || statusNode === null || pickerNode === null || soundNode === null) {
     throw new Error('mountSpectatePanel: the panel did not mount.');
   }
 
   const canvas = canvasNode as unknown as SpectateCanvasNode;
   const status = statusNode;
   const picker = pickerNode;
+  const soundButton = soundNode;
 
   canvas.width = CANVAS_WIDTH;
   canvas.height = CANVAS_HEIGHT;
@@ -174,7 +252,20 @@ export function mountSpectatePanel(host: SpectateHost, deps: SpectatePanelDeps):
   const dressing: {
     artists: [FighterArtist, FighterArtist];
     backdrop: Backdrop | undefined;
-  } = { artists: [blockArtist, blockArtist], backdrop: undefined };
+    /** Story 11.6. The impact sheet, absent until `startup.ts` decodes it. */
+    vfx: VfxSheet | undefined;
+    /** Story 11.6. The Ultimate's art, on the same terms. */
+    ult: UltSheet | undefined;
+  } = { artists: [blockArtist, blockArtist], backdrop: undefined, vfx: undefined, ult: undefined };
+
+  /**
+   * Read once, at mount, and threaded into the paint -- never re-read per frame.
+   *
+   * The same value `walk.ts` hands `buildJuiceTrack` and the clock, so the
+   * track's shape, the transport's autoplay decision and what the overlay draws
+   * cannot disagree about a preference the visitor expressed once.
+   */
+  const reducedMotion = prefersReducedMotion(deps.view);
 
   const say = (message: string): void => {
     status.innerHTML = escapeHtml(message);
@@ -185,23 +276,79 @@ export function mountSpectatePanel(host: SpectateHost, deps: SpectatePanelDeps):
     manifest: null,
   };
 
+  /**
+   * Story 11.6. This surface's audio, and whether it is switched on.
+   *
+   * `track` is kept alongside the director because the director has to be
+   * *replaced* rather than reused in two places -- see `resetDirector`.
+   */
+  const audio: { enabled: boolean; track: AudioTrack | null; director: AudioDirector | null } = {
+    enabled: false,
+    track: null,
+    director: null,
+  };
+
+  /**
+   * A fresh director over the current entry's audio track.
+   *
+   * Replaced rather than reused, on every entry change and on every enable,
+   * because `createAudioDirector` holds `last` and treats `last === -1` as "the
+   * first frame ever presented" -- which is the only condition under which the
+   * looping music bed at clock frame 0 starts. A director carried across an
+   * entry boundary would see the next entry's frame 0 as a backwards jump,
+   * re-apply gains, fire nothing, and leave the stream playing hits over
+   * silence.
+   */
+  const resetDirector = (): void => {
+    audio.director =
+      audio.track === null
+        ? null
+        : createAudioDirector({ track: audio.track, sink: deps.sink ?? null });
+  };
+
   // A `const` arrow function, not a `function` declaration: TypeScript does
   // not carry a narrowing into a hoisted function declaration (it could in
   // principle be called before the guard above runs), but it does into a
   // `const` closure created after it -- the same reason `main.ts`'s `paint`
   // is written the same way.
-  const paint = (frameIndex: number): void => {
+  const paint = (clockIndex: number): void => {
     const film = state.walk?.currentFilm();
-    const frame = film?.frames[frameIndex];
+    const track = state.walk?.currentTrack();
+    if (film == null || track == null) {
+      return;
+    }
+    // Clock index in, film index out -- the same mapping `main.ts` makes, and
+    // the reason a hitstop hold repaints the frame the hit landed on instead of
+    // advancing past it.
+    const frame = film.frames[track.filmIndexAt(clockIndex)];
     if (frame === undefined) {
       return;
     }
-    drawFrame(ctx, frame, {
+    drawJuicedFrame(ctx, frame, track.at(clockIndex), {
       config: DEFAULT_FIGHTER_CONFIG,
       viewport,
       artists: dressing.artists,
       backdrop: dressing.backdrop,
+      // Story 11.6. Absent until each decodes; absent is a named degrade in both
+      // cases (9.5's square sparks, and 11.4's procedural beam) rather than a
+      // failure.
+      vfx: dressing.vfx,
+      ult: dressing.ult,
+      // Always passed. `render/roster.ts` is the single place an `agentIndex`
+      // becomes a fighter id, so the caster's aura and portrait are resolved
+      // here exactly as they are on the replay player -- Spectate passing
+      // neither sheet nor roster was the level-3 degrade this story exists to
+      // stop taking.
+      roster: DEFAULT_ROSTER,
+      reducedMotion,
     });
+    // Last, and after the draw, for the reason `main.ts` gives: the audio
+    // describes the frame now on screen. Gated rather than sink-less, so a
+    // muted Spectate writes nothing at all to a graph the replay player may be
+    // using at the same moment.
+    if (audio.enabled) {
+      audio.director?.atFrame(clockIndex);
+    }
   };
 
   /**
@@ -244,6 +391,54 @@ export function mountSpectatePanel(host: SpectateHost, deps: SpectatePanelDeps):
     }
   }
 
+  /**
+   * Turns this surface's sound on or off. Story 11.6.
+   *
+   * Enabling is a visitor gesture and does three things in order: unlocks the
+   * page's context through `deps.onGesture` (the same hook a pick already
+   * uses), stops whatever the page had running so no second music bed can
+   * accumulate under this one, and starts a fresh director.
+   *
+   * `atFrame(0)` immediately afterwards is what makes enabling *mid-Match*
+   * sound like enabling at the start of one: clock frame 0 is the only frame
+   * carrying the looping bed, so a director that never sees it plays hits over
+   * silence until the next entry. It cannot double the bed, because the very
+   * next real frame is a jump as far as the director is concerned -- including
+   * when the enable happens on frame 0 itself, where `index === last` is not
+   * `last + 1`.
+   */
+  const renderSound = (): void => {
+    soundButton.innerHTML = escapeHtml(audio.enabled ? SOUND_LABEL.on : SOUND_LABEL.off);
+    soundButton.setAttribute?.('aria-pressed', audio.enabled ? 'true' : 'false');
+  };
+
+  const setAudioEnabled = (enabled: boolean): void => {
+    if (audio.enabled === enabled) {
+      return;
+    }
+    audio.enabled = enabled;
+    renderSound();
+    if (enabled) {
+      deps.onGesture?.();
+    }
+    // Both edges. Enabling takes the buses over; disabling has to actually stop
+    // the bed, which is a looping source and would otherwise outlive the mute.
+    deps.sink?.stopAll();
+    if (enabled) {
+      resetDirector();
+      audio.director?.atFrame(0);
+    }
+  };
+
+  // Written once at mount as well as on every change, so the label a visitor
+  // reads is always the one `SOUND_LABEL` says -- the markup's own default is a
+  // string in a template, and a panel whose button said "off" while its state
+  // said otherwise would be a lie about the only control it has.
+  renderSound();
+  soundButton.addEventListener('click', () => {
+    setAudioEnabled(!audio.enabled);
+  });
+
   say('Loading the Spectate stream…');
 
   const loadManifest = deps.loadManifest ?? fetchSpectateManifest;
@@ -271,8 +466,22 @@ export function mountSpectatePanel(host: SpectateHost, deps: SpectatePanelDeps):
         env,
         requestFrame: (callback) => deps.view.requestAnimationFrame(() => callback()),
         cancelFrame: (handle) => deps.view.cancelAnimationFrame(handle),
+        reducedMotion,
         onFrame: paint,
-        onEntryChange: (entry) => {
+        onEntryChange: (entry, _film, track) => {
+          // Story 11.6. The audio for this entry, built from the same juice
+          // track its clock runs on -- `buildAudioTrack` takes the juice track
+          // rather than the film precisely so the two layers cannot each own a
+          // timer source (Story 9.6's constraint, unchanged here).
+          audio.track = buildAudioTrack(track, DEFAULT_AUDIO_TUNING);
+          resetDirector();
+          if (audio.enabled) {
+            // The outgoing entry's sources, the looping bed included. Only when
+            // this surface owns the sound: Spectate advances every few seconds,
+            // and stopping a shared graph it is not driving would silence the
+            // replay player beside it.
+            deps.sink?.stopAll();
+          }
           say(`Now playing ${entry.id}.`);
         },
         onWarning: (message) => {
@@ -317,5 +526,13 @@ export function mountSpectatePanel(host: SpectateHost, deps: SpectatePanelDeps):
     setBackdrop: (backdrop: Backdrop): void => {
       dressing.backdrop = backdrop;
     },
+    setVfx: (vfx: VfxSheet): void => {
+      dressing.vfx = vfx;
+    },
+    setUlt: (ult: UltSheet): void => {
+      dressing.ult = ult;
+    },
+    audioEnabled: (): boolean => audio.enabled,
+    setAudioEnabled,
   });
 }

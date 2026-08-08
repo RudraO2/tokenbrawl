@@ -232,6 +232,16 @@ function createHarness(
     readonly noArcadeHost?: boolean;
     /** A page with no spectate panel at all -- which must still play the replay. */
     readonly noSpectateHost?: boolean;
+    /**
+     * Story 11.6. Answer `/replays/manifest.json` with a real one-entry manifest
+     * (the demo log standing in for a streamed Match), so the Spectate panel
+     * actually plays rather than failing soft on a manifest it cannot parse.
+     *
+     * Off by default: every case above this story predates Spectate playing at
+     * all in this harness, and starting a second clock in them would change
+     * what `runFrames` means for the player they are about.
+     */
+    readonly spectateStream?: boolean;
   } = {},
 ): Harness {
   const root = createRoot();
@@ -257,6 +267,26 @@ function createHarness(
     }
     if (url === '/fx/ult-layout.json' && options.ultLayout !== undefined) {
       return options.ultLayout;
+    }
+    if (options.spectateStream === true && url === '/replays/manifest.json') {
+      return {
+        schemaVersion: '1.0.0',
+        loopStartEpochMs: 0,
+        totalLoopDurationMs: 1,
+        entries: [
+          {
+            id: 'stream-01',
+            commandLogUrl: '/replays/stream-01.command-log.json',
+            schemaVersion: log.schemaVersion,
+            // Only the join offset reads this; the clock runs the real juice
+            // track `walk.ts` builds either way (Story 11.6).
+            frameCount: 1,
+          },
+        ],
+      };
+    }
+    if (options.spectateStream === true && url === '/replays/stream-01.command-log.json') {
+      return log;
     }
     // Sprite and backdrop layouts. `pending` is the default because "held open
     // forever" is the state this file exists to prove the player survives.
@@ -1598,6 +1628,24 @@ describe('the Spectate panel, mounted alongside the demo player (Story 9.3)', ()
 
     expect(result?.spectate).not.toBeNull();
   });
+
+  it('leaves the Spectate stream silent until a visitor asks for sound (Story 11.6)', async () => {
+    // The page-level half of the panel's own default: an ambient surface that
+    // starts making noise because a visitor pressed something else is a defect,
+    // and `startup.ts` is where the shared sink is handed over.
+    const { log, sidecar } = await buildDemoBundle();
+    const harness = createHarness(log, {
+      spritesResolve: true,
+      sidecar,
+      spectateStream: true,
+    });
+
+    const result = await startup(harness.globals);
+    await result?.dressed;
+    harness.runFrames(120);
+
+    expect(result?.spectate?.audioEnabled()).toBe(false);
+  });
 });
 
 /**
@@ -1672,6 +1720,37 @@ describe('the impact FX sheet loads off the critical path, or not at all (Story 
     // 1040 is the fake FX sheet; the fake sprite packs are 64 wide. Nothing
     // else on this page decodes to that size.
     expect(harness.root.drawnImageWidths()).toContain(1_040);
+  });
+
+  it('hands the sheet to the Spectate stream too, not to the replay player alone (Story 11.6)', async () => {
+    // The gap Story 11.6 closed, measured where it was actually visible: the
+    // sheet reached `#app` and nothing reached `#spectate`, so the surface a
+    // visitor looks at first and longest drew Story 9.5's plain squares for the
+    // whole session while the player beside it drew the real art.
+    const { log, sidecar } = await buildDemoBundle();
+    const harness = createHarness(log, {
+      spritesResolve: true,
+      sidecar,
+      fxLayout: shippedFxLayout(),
+      imagesDecode: true,
+      spectateStream: true,
+    });
+
+    const result = await withWarnings(async () => {
+      const started = await startup(harness.globals);
+      await started?.dressed;
+      return started;
+    });
+    // Enough frames for both clocks on this page: the stream and the player
+    // share one `requestAnimationFrame` queue here, and an impact exists only
+    // on the clock frames a hit is alive for.
+    harness.runFrames(1_200);
+
+    expect(result[0]?.spectate?.currentEntryId()).toBe('stream-01');
+    // 1040 is the fake FX sheet and nothing else on this page decodes to that
+    // size -- asserted on the *spectate* canvas, a different element from the
+    // player's.
+    expect(harness.spectateHost.drawnImageWidths()).toContain(1_040);
   });
 
   it('draws no sheet at all when the layout never arrives', async () => {

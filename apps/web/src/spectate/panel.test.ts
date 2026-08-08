@@ -1,8 +1,18 @@
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { CommandLog } from '@tokenbrawl/contracts';
 import { beforeAll, describe, expect, it } from 'vitest';
+import { DEFAULT_FIGHTER_CONFIG } from '../../../../packages/env-fighter/src/config';
 import { createFighterEnvironment } from '../../../../packages/env-fighter/src/environment';
 import { buildDemoLog } from '../testing/demo-log';
-import { buildReplayFilm } from '../replay/film';
+import { buildReplayFilm, type ReplayFilm } from '../replay/film';
+import { createBlockArtist } from '../render/artist';
+import type { AudioCue, AudioSink } from '../render/audio';
+import type { Canvas2D } from '../render/canvas2d';
+import { DEFAULT_JUICE_TUNING, arenaFor, buildJuiceTrack, type JuiceTrack } from '../render/juice';
+import { drawJuicedFrame } from '../render/juice-draw';
+import { DEFAULT_ROSTER } from '../render/roster';
 import {
   mountSpectatePanel,
   spectateMarkup,
@@ -21,12 +31,73 @@ import type { SpectateManifest } from './manifest';
 interface FakeHost extends SpectateHost {
   readonly node: (selector: string) => SpectateNode;
   readonly fire: (selector: string, type: 'click') => void;
+  /** Story 11.6. Every drawing call and every style write the panel made, in order. */
+  readonly calls: () => readonly string[];
+  readonly clearCalls: () => void;
+}
+
+/**
+ * A recording 2D context. Story 11.6.
+ *
+ * Property *writes* are recorded as well as calls, because the difference
+ * between a cinematic drawn for the right caster and one drawn for nobody is a
+ * `fillStyle` (the caster's aura) rather than a different call. `theme.ts`'s
+ * palette is the only place those colours are written down, so recording the
+ * value rather than asserting a literal keeps this test off that table.
+ */
+function createRecordingContext(): { readonly ctx: Canvas2D; readonly calls: string[] } {
+  const calls: string[] = [];
+  const values: Record<string, unknown> = {
+    fillStyle: '',
+    strokeStyle: '',
+    lineWidth: 0,
+    font: '',
+    textAlign: '',
+    imageSmoothingEnabled: false,
+    globalAlpha: 1,
+    globalCompositeOperation: 'source-over',
+  };
+  const record =
+    (name: string) =>
+    (...args: unknown[]): void => {
+      calls.push(`${name}(${args.map((arg) => String(arg)).join(',')})`);
+    };
+  const ctx = {
+    clearRect: record('clearRect'),
+    fillRect: record('fillRect'),
+    strokeRect: record('strokeRect'),
+    fillText: record('fillText'),
+    beginPath: record('beginPath'),
+    moveTo: record('moveTo'),
+    lineTo: record('lineTo'),
+    closePath: record('closePath'),
+    fill: record('fill'),
+    stroke: record('stroke'),
+    drawImage: record('drawImage'),
+    save: record('save'),
+    restore: record('restore'),
+    translate: record('translate'),
+    scale: record('scale'),
+  } as unknown as Canvas2D;
+  for (const key of Object.keys(values)) {
+    Object.defineProperty(ctx, key, {
+      get: () => values[key],
+      set: (value: unknown) => {
+        values[key] = value;
+        calls.push(`${key}=${String(value)}`);
+      },
+      enumerable: true,
+      configurable: true,
+    });
+  }
+  return { ctx, calls };
 }
 
 function createHost(): FakeHost {
   const nodes = new Map<string, SpectateNode>();
   const listeners = new Map<string, (() => void)[]>();
   const state = { html: '' };
+  const recorder = createRecordingContext();
 
   const child = (selector: string): SpectateNode => {
     const existing = nodes.get(selector);
@@ -34,30 +105,7 @@ function createHost(): FakeHost {
       return existing;
     }
     const isCanvas = selector === 'canvas';
-    const canvasContext = {
-      fillStyle: '',
-      strokeStyle: '',
-      lineWidth: 0,
-      font: '',
-      textAlign: '',
-      imageSmoothingEnabled: false,
-      globalAlpha: 1,
-      clearRect: (): void => undefined,
-      fillRect: (): void => undefined,
-      strokeRect: (): void => undefined,
-      fillText: (): void => undefined,
-      beginPath: (): void => undefined,
-      moveTo: (): void => undefined,
-      lineTo: (): void => undefined,
-      closePath: (): void => undefined,
-      fill: (): void => undefined,
-      stroke: (): void => undefined,
-      drawImage: (): void => undefined,
-      save: (): void => undefined,
-      restore: (): void => undefined,
-      translate: (): void => undefined,
-      scale: (): void => undefined,
-    };
+    const canvasContext = recorder.ctx;
     const node: (SpectateNode & Partial<SpectateCanvasNode>) = {
       innerHTML: '',
       setAttribute: (): void => undefined,
@@ -90,6 +138,10 @@ function createHost(): FakeHost {
       for (const listener of listeners.get(`${selector}:${type}`) ?? []) {
         listener();
       }
+    },
+    calls: (): readonly string[] => recorder.calls,
+    clearCalls: (): void => {
+      recorder.calls.length = 0;
     },
   };
 }
@@ -142,18 +194,65 @@ async function flush(): Promise<void> {
   }
 }
 
+/**
+ * Story 11.6. The one Match in the committed stream that contains an Ultimate.
+ *
+ * Read through `import.meta.url` rather than `process.cwd()` so this suite runs
+ * the same from the repo root and from `apps/web`, the way `hero-artefact.test.ts`
+ * reads its own artefacts.
+ */
+const HERE = dirname(fileURLToPath(import.meta.url));
+const SPECTATE_03 = join(HERE, '..', '..', 'public', 'replays', 'spectate-03.command-log.json');
+
+/** The tuning-and-arena triple every juice track in this app is built with. */
+function trackOf(film: ReplayFilm): JuiceTrack {
+  return buildJuiceTrack(
+    film.frames,
+    DEFAULT_JUICE_TUNING,
+    arenaFor(DEFAULT_FIGHTER_CONFIG),
+    false,
+    DEFAULT_FIGHTER_CONFIG,
+  );
+}
+
+/** A sink that records rather than plays. Story 11.6. */
+function createRecordingSink(): {
+  readonly sink: AudioSink;
+  readonly played: AudioCue[];
+  readonly gains: number[][];
+  readonly stops: { count: number };
+} {
+  const played: AudioCue[] = [];
+  const gains: number[][] = [];
+  const stops = { count: 0 };
+  return {
+    played,
+    gains,
+    stops,
+    sink: {
+      play: (cue) => played.push(cue),
+      stopAll: () => {
+        stops.count += 1;
+      },
+      setGains: (music, sfx, voice) => gains.push([music, sfx, voice]),
+      unlock: () => undefined,
+    },
+  };
+}
+
 describe('the Spectate panel (Story 9.3)', () => {
   const env = createFighterEnvironment();
   let logs: readonly [CommandLog, CommandLog];
+  /** Clock frames -- what the manifest records and what the clock runs on since Story 11.6. */
   let frameCounts: readonly [number, number];
+  let filmCounts: readonly [number, number];
 
   beforeAll(async () => {
     const built = await Promise.all([buildDemoLog(4_101), buildDemoLog(4_102)]);
     logs = [built[0], built[1]];
-    frameCounts = [
-      buildReplayFilm(logs[0], env).frames.length,
-      buildReplayFilm(logs[1], env).frames.length,
-    ];
+    const films = [buildReplayFilm(logs[0], env), buildReplayFilm(logs[1], env)] as const;
+    filmCounts = [films[0].frames.length, films[1].frames.length];
+    frameCounts = [trackOf(films[0]).frameCount, trackOf(films[1]).frameCount];
   });
 
   function manifestOf(): SpectateManifest {
@@ -295,6 +394,8 @@ describe('the Spectate panel (Story 9.3)', () => {
     await flush();
     expect(panel.currentEntryId()).toBe('second');
 
+    // Clock frames, not film frames: since Story 11.6 an entry is over when its
+    // *juice track* is, which is longer by every hitstop hold in it.
     driver.pump(frameCounts[1]);
     await flush();
 
@@ -341,5 +442,345 @@ describe('the Spectate panel (Story 9.3)', () => {
     };
     const driver = createDriver();
     expect(() => mountSpectatePanel(brokenHost, baseDeps(driver))).toThrow(/did not mount/);
+  });
+
+  describe('the juice layer (Story 11.6)', () => {
+    /**
+     * The comparison every drawing case here rests on: what `drawJuicedFrame`
+     * itself emits for one clock frame, recorded off a second context.
+     *
+     * Asserting the panel's calls *equal* these -- rather than asserting some
+     * juice-shaped call appears among them -- is what makes "the same effects
+     * the replay player draws, through the existing juice layer" checkable. A
+     * panel that drew its own approximation of sparks would pass a
+     * "contains a translate" test and fail this one.
+     */
+    function expectedCalls(
+      film: ReplayFilm,
+      track: JuiceTrack,
+      clockIndex: number,
+      options: { readonly roster?: typeof DEFAULT_ROSTER; readonly reducedMotion?: boolean } = {},
+    ): readonly string[] {
+      const recorder = createRecordingContext();
+      const blockArtist = createBlockArtist();
+      drawJuicedFrame(recorder.ctx, film.frames[track.filmIndexAt(clockIndex)], track.at(clockIndex), {
+        config: DEFAULT_FIGHTER_CONFIG,
+        viewport: { width: 960, height: 400 },
+        artists: [blockArtist, blockArtist],
+        roster: DEFAULT_ROSTER,
+        ...options,
+      });
+      return recorder.calls;
+    }
+
+    it('paints through drawJuicedFrame, call for call, rather than through drawFrame', async () => {
+      const host = createHost();
+      const driver = createDriver();
+      mountSpectatePanel(host, baseDeps(driver));
+      await flush();
+
+      const film = buildReplayFilm(logs[0], env);
+      const track = trackOf(film);
+      // A frame deep enough into the Match that the bots have traded, so the
+      // juice frame under test actually carries something.
+      const target = Math.floor(track.frameCount / 2);
+      driver.pump(target);
+      host.clearCalls();
+      driver.pump(1);
+
+      expect(host.calls()).toStrictEqual(expectedCalls(film, track, target + 1));
+    });
+
+    it('holds a hitstop frame rather than advancing the film through it', async () => {
+      const host = createHost();
+      const driver = createDriver();
+      mountSpectatePanel(host, baseDeps(driver));
+      await flush();
+
+      const track = trackOf(buildReplayFilm(logs[0], env));
+      // Somewhere in this track a clock frame presents the same film frame as
+      // the one before it: that is a hold, and it is the thing Spectate never
+      // had. Asserted as a property of what the panel is playing, not of the
+      // pure track alone -- the panel's clock is what has to run long enough to
+      // reach it.
+      const holds = Array.from({ length: track.frameCount }, (_, index) => index).filter(
+        (index) => index > 0 && track.filmIndexAt(index) === track.filmIndexAt(index - 1),
+      );
+      expect(holds.length).toBeGreaterThan(0);
+      expect(track.frameCount).toBeGreaterThan(filmCounts[0]);
+    });
+
+    it('draws the Ultimate cinematic on the one streamed Match that contains one', async () => {
+      const log = JSON.parse(readFileSync(SPECTATE_03, 'utf8')) as CommandLog;
+      const film = buildReplayFilm(log, env);
+      const track = trackOf(film);
+      expect(track.cinematics.length).toBe(1);
+
+      // The clock frame the freeze opens on -- the same index `audio.ts` keys
+      // the Ultimate's cue off, found by asking the track rather than by
+      // writing 401 down.
+      const cinematicClock = Array.from({ length: track.frameCount }, (_, index) => index).find(
+        (index) => track.at(index).cinematic !== null,
+      );
+      expect(cinematicClock).toBeDefined();
+
+      const host = createHost();
+      const driver = createDriver();
+      const manifest: SpectateManifest = {
+        schemaVersion: '1.0.0',
+        loopStartEpochMs: 0,
+        totalLoopDurationMs: 1,
+        entries: [
+          {
+            id: 'ult',
+            commandLogUrl: '/replays/ult.command-log.json',
+            schemaVersion: '1.0.0',
+            frameCount: track.frameCount,
+          },
+        ],
+      };
+      mountSpectatePanel(host, {
+        ...baseDeps(driver),
+        loadManifest: async () => manifest,
+        fetch: async () => ({ ok: true, status: 200, json: async () => log }),
+      });
+      await flush();
+
+      driver.pump(cinematicClock! - 1);
+      host.clearCalls();
+      driver.pump(1);
+
+      const calls = host.calls();
+      // Story 10.4's banner: without the Ultimate sheet decoded this is what the
+      // cinematic draws, and `drawFrame` alone never draws it at all.
+      expect(calls.some((call) => call.includes('ULTIMATE'))).toBe(true);
+      expect(calls).toStrictEqual(expectedCalls(film, track, cinematicClock!));
+      // And the caster really is resolved through the roster: dropping `roster`
+      // from the paint's options changes what the cinematic draws, which is the
+      // level-3 degrade this surface used to take by default.
+      expect(calls).not.toStrictEqual(
+        expectedCalls(film, track, cinematicClock!, { roster: undefined }),
+      );
+    });
+
+    it('threads the sheets through to the paint once they decode', async () => {
+      const host = createHost();
+      const driver = createDriver();
+      const panel = mountSpectatePanel(host, baseDeps(driver));
+      await flush();
+
+      // The handles exist and are callable before anything has decoded -- the
+      // wiring `startup.ts` uses on both the warm-cache and the late path.
+      expect(() => panel.setVfx({} as never)).not.toThrow();
+      expect(() => panel.setUlt({} as never)).not.toThrow();
+    });
+
+    it('honours reduced motion: no shake, and no loop churn', async () => {
+      const host = createHost();
+      const driver = createDriver();
+      const panel = mountSpectatePanel(host, {
+        ...baseDeps(driver),
+        view: {
+          requestAnimationFrame: driver.requestAnimationFrame,
+          cancelAnimationFrame: driver.cancelAnimationFrame,
+          matchMedia: (query: string) => ({ matches: query.includes('reduced-motion') }),
+        },
+      });
+      await flush();
+
+      const film = buildReplayFilm(logs[0], env);
+      const reduced = buildJuiceTrack(
+        film.frames,
+        DEFAULT_JUICE_TUNING,
+        arenaFor(DEFAULT_FIGHTER_CONFIG),
+        true,
+        DEFAULT_FIGHTER_CONFIG,
+      );
+      // A reduced-motion clock emits the last frame once and never schedules;
+      // `startLoop` then seeks to the join offset, which is frame 0 for this
+      // manifest. Two paints, no third, and nothing scheduled after them --
+      // the still stream, joined where AD-17 says a visitor joins.
+      const recorder = createRecordingContext();
+      const blockArtist = createBlockArtist();
+      for (const index of [reduced.frameCount - 1, 0]) {
+        drawJuicedFrame(recorder.ctx, film.frames[reduced.filmIndexAt(index)], reduced.at(index), {
+          config: DEFAULT_FIGHTER_CONFIG,
+          viewport: { width: 960, height: 400 },
+          artists: [blockArtist, blockArtist],
+          roster: DEFAULT_ROSTER,
+          reducedMotion: true,
+        });
+      }
+
+      expect(panel.currentEntryId()).toBe('first');
+      expect(host.calls()).toStrictEqual(recorder.calls);
+      // And pumping changes nothing, because nothing was ever scheduled.
+      const settled = [...host.calls()];
+      driver.pump(20);
+      expect(host.calls()).toStrictEqual(settled);
+      // No `translate` with a non-zero offset anywhere: the camera shake is the
+      // canonical vestibular trigger and the single most important thing this
+      // preference has to switch off.
+      expect(host.calls().filter((call) => call.startsWith('translate(') && call !== 'translate(0,0)')).toStrictEqual([]);
+    });
+  });
+
+  describe('the sound, and who owns it (Story 11.6)', () => {
+    it('makes no noise at all until a visitor asks for it', async () => {
+      const host = createHost();
+      const driver = createDriver();
+      const recording = createRecordingSink();
+      const panel = mountSpectatePanel(host, { ...baseDeps(driver), sink: recording.sink });
+      await flush();
+      driver.pump(30);
+
+      expect(panel.audioEnabled()).toBe(false);
+      expect(recording.played).toStrictEqual([]);
+      expect(recording.gains).toStrictEqual([]);
+      // Not even a stop: an ambient surface that is not making sound must not
+      // reach into a shared graph the replay player beside it may be using.
+      expect(recording.stops.count).toBe(0);
+      expect(host.node('[data-spectate-sound]').innerHTML).toContain('off');
+    });
+
+    it('the toggle unlocks the context, takes the buses over, and starts the bed', async () => {
+      const host = createHost();
+      const driver = createDriver();
+      const recording = createRecordingSink();
+      const gestures = { count: 0 };
+      mountSpectatePanel(host, {
+        ...baseDeps(driver),
+        sink: recording.sink,
+        onGesture: () => {
+          gestures.count += 1;
+        },
+      });
+      await flush();
+      driver.pump(5);
+
+      host.fire('[data-spectate-sound]', 'click');
+
+      expect(gestures.count).toBe(1);
+      expect(recording.stops.count).toBe(1);
+      // The looping music bed, which only ever rides clock frame 0 -- so a
+      // visitor enabling sound mid-Match hears the bed rather than hits over
+      // silence.
+      expect(recording.played.filter((cue) => cue.loop && cue.bus === 'music').length).toBe(1);
+      expect(host.node('[data-spectate-sound]').innerHTML).toContain('on');
+    });
+
+    it('does not start a second bed when the frames keep coming after the toggle', async () => {
+      const host = createHost();
+      const driver = createDriver();
+      const recording = createRecordingSink();
+      mountSpectatePanel(host, { ...baseDeps(driver), sink: recording.sink });
+      await flush();
+
+      host.fire('[data-spectate-sound]', 'click');
+      driver.pump(40);
+
+      expect(recording.played.filter((cue) => cue.loop).length).toBe(1);
+      // And the gains really are being written every frame after the toggle,
+      // which is the state half of the director's contract.
+      expect(recording.gains.length).toBeGreaterThan(30);
+    });
+
+    it('enabling on the very first frame does not double the bed either', async () => {
+      const host = createHost();
+      const driver = createDriver();
+      const recording = createRecordingSink();
+      mountSpectatePanel(host, { ...baseDeps(driver), sink: recording.sink });
+      await flush();
+
+      // Before any frame has been pumped: the enable's own `atFrame(0)` and the
+      // clock's first real frame 0 are the same index, and the second must read
+      // as a jump rather than as a second start.
+      host.fire('[data-spectate-sound]', 'click');
+      driver.pump(10);
+
+      expect(recording.played.filter((cue) => cue.loop).length).toBe(1);
+    });
+
+    it('turning it off stops the bed and writes nothing further', async () => {
+      const host = createHost();
+      const driver = createDriver();
+      const recording = createRecordingSink();
+      const panel = mountSpectatePanel(host, { ...baseDeps(driver), sink: recording.sink });
+      await flush();
+
+      panel.setAudioEnabled(true);
+      driver.pump(10);
+      const playedWhileOn = recording.played.length;
+      const gainsWhileOn = recording.gains.length;
+
+      panel.setAudioEnabled(false);
+      driver.pump(20);
+
+      expect(panel.audioEnabled()).toBe(false);
+      expect(recording.stops.count).toBe(2);
+      expect(recording.played.length).toBe(playedWhileOn);
+      expect(recording.gains.length).toBe(gainsWhileOn);
+    });
+
+    it('setting the same state twice is a no-op, so a repeated click cannot restack the bed', async () => {
+      const host = createHost();
+      const driver = createDriver();
+      const recording = createRecordingSink();
+      const panel = mountSpectatePanel(host, { ...baseDeps(driver), sink: recording.sink });
+      await flush();
+
+      panel.setAudioEnabled(true);
+      panel.setAudioEnabled(true);
+      driver.pump(5);
+
+      expect(recording.stops.count).toBe(1);
+      expect(recording.played.filter((cue) => cue.loop).length).toBe(1);
+    });
+
+    it('an entry change with the sound on stops the outgoing entry`s sources and starts the next bed', async () => {
+      const host = createHost();
+      const driver = createDriver();
+      const recording = createRecordingSink();
+      const panel = mountSpectatePanel(host, { ...baseDeps(driver), sink: recording.sink });
+      await flush();
+
+      panel.setAudioEnabled(true);
+      const stopsAfterEnable = recording.stops.count;
+      driver.pump(frameCounts[0]);
+      await flush();
+      driver.pump(2);
+
+      expect(panel.currentEntryId()).toBe('second');
+      expect(recording.stops.count).toBe(stopsAfterEnable + 1);
+      expect(recording.played.filter((cue) => cue.loop).length).toBe(2);
+    });
+
+    it('an entry change with the sound off leaves the shared graph alone entirely', async () => {
+      const host = createHost();
+      const driver = createDriver();
+      const recording = createRecordingSink();
+      const panel = mountSpectatePanel(host, { ...baseDeps(driver), sink: recording.sink });
+      await flush();
+
+      driver.pump(frameCounts[0]);
+      await flush();
+      driver.pump(5);
+
+      expect(panel.currentEntryId()).toBe('second');
+      expect(recording.stops.count).toBe(0);
+      expect(recording.played).toStrictEqual([]);
+    });
+
+    it('a page with no WebAudio toggles and plays exactly as it otherwise would', async () => {
+      const host = createHost();
+      const driver = createDriver();
+      const panel = mountSpectatePanel(host, { ...baseDeps(driver), sink: null });
+      await flush();
+
+      expect(() => panel.setAudioEnabled(true)).not.toThrow();
+      expect(panel.audioEnabled()).toBe(true);
+      expect(() => driver.pump(20)).not.toThrow();
+      expect(panel.currentEntryId()).toBe('first');
+    });
   });
 });

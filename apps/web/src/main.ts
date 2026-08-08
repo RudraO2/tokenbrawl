@@ -186,8 +186,14 @@ export interface MountedApp extends MountedPlayer {
  * in some embedded browsers, and a player that threw on mount because it could
  * not read a preference would be a worse accessibility outcome than the one the
  * preference exists to fix.
+ *
+ * Exported since Story 11.6. Spectate draws its own canvas outside `renderApp`
+ * and now has a juice layer to switch off, so it needs the same answer this
+ * player gets -- and it has to be the *same* read rather than a second one, or
+ * the two surfaces on one page could disagree about a preference the visitor
+ * expressed once.
  */
-function prefersReducedMotion(view: HostView): boolean {
+export function prefersReducedMotion(view: HostView): boolean {
   const query = view.matchMedia?.('(prefers-reduced-motion: reduce)');
   return query?.matches === true;
 }

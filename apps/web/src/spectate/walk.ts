@@ -1,7 +1,9 @@
 import type { EnvironmentAdapter } from '@tokenbrawl/contracts';
+import { DEFAULT_FIGHTER_CONFIG } from '../../../../packages/env-fighter/src/config';
 import type { FighterState } from '../../../../packages/env-fighter/src/state';
 import { createPlaybackClock, type CancelFrame, type PlaybackClock, type RequestFrame } from '../player/clock';
 import { buildReplayFilm, type ReplayFilm } from '../replay/film';
+import { DEFAULT_JUICE_TUNING, arenaFor, buildJuiceTrack, type JuiceTrack } from '../render/juice';
 import type { LoopOffset, SpectateManifest, SpectateManifestEntry } from './manifest';
 
 /**
@@ -34,6 +36,26 @@ import type { LoopOffset, SpectateManifest, SpectateManifestEntry } from './mani
  * catches, warns, and tries the next entry -- up to once around the whole
  * manifest, so a manifest whose every entry is broken reports a warning and
  * goes idle rather than spinning forever.
+ *
+ * ## Story 11.6: the clock's axis is the juice track's, not the film's
+ *
+ * Until this story the clock was created with `film.frames.length`, which is
+ * why Spectate had no hitstop, no sparks and no cinematic: there was no juice
+ * track for it to have. There is now one per mounted entry, built here rather
+ * than in `panel.ts` for a structural reason -- the clock's `frameCount` *is*
+ * the track's length, so the module that creates the clock has to be the module
+ * that creates the track, or the two could disagree on the one failure path
+ * neither caller can see.
+ *
+ * `buildJuiceTrack` is imported and called, never forked: same tuning, same
+ * arena, same config as `main.ts`'s `mountPlayer` hands it, so one Match looks
+ * the same on both surfaces by construction rather than by two call sites
+ * happening to agree.
+ *
+ * Audio deliberately does *not* live here. It needs a sink -- a host object --
+ * and this module is written to be host-free and shareable with Story 9.8's
+ * carousel. The track crosses that boundary once, as `onEntryChange`'s third
+ * argument, and `panel.ts` builds the audio track and director from it.
  */
 
 export interface SpectateWalkDeps {
@@ -43,9 +65,22 @@ export interface SpectateWalkDeps {
   readonly requestFrame: RequestFrame;
   readonly cancelFrame?: CancelFrame;
   readonly reducedMotion?: boolean;
-  /** Fired whenever the active entry changes -- a fresh loop step, a manual pick, or a resume. */
-  readonly onEntryChange?: (entry: SpectateManifestEntry, film: ReplayFilm) => void;
-  readonly onFrame?: (frameIndex: number) => void;
+  /**
+   * Fired whenever the active entry changes -- a fresh loop step, a manual pick, or a resume.
+   *
+   * Story 11.6 adds the entry's `JuiceTrack` as a third argument. It is what a
+   * caller needs to build the audio for this entry (`buildAudioTrack` takes the
+   * juice track, not the film), and handing it here rather than making the
+   * caller re-read `currentTrack()` removes any question of which entry's track
+   * it got.
+   */
+  readonly onEntryChange?: (entry: SpectateManifestEntry, film: ReplayFilm, track: JuiceTrack) => void;
+  /**
+   * Story 11.6: a **clock** index, not a film index. With hitstop the two
+   * diverge; `currentTrack()!.filmIndexAt` is the mapping, exactly as
+   * `main.ts`'s paint path uses `track.filmIndexAt`.
+   */
+  readonly onFrame?: (clockIndex: number) => void;
   /** Every fail-soft skip is reported here, never swallowed silently. */
   readonly onWarning?: (message: string) => void;
 }
@@ -59,6 +94,11 @@ export interface SpectateWalkHandle {
   readonly resumeLoop: () => Promise<void>;
   readonly currentEntryId: () => string | null;
   readonly currentFilm: () => ReplayFilm | null;
+  /**
+   * Story 11.6. The active entry's juice track -- the axis its clock runs on.
+   * Null exactly when `currentFilm()` is: the two are set and cleared together.
+   */
+  readonly currentTrack: () => JuiceTrack | null;
   readonly currentClock: () => PlaybackClock | null;
   readonly stop: () => void;
 }
@@ -96,6 +136,8 @@ export function createSpectateWalk(deps: SpectateWalkDeps): SpectateWalkHandle {
     entryIndex: number;
     entryId: string | null;
     film: ReplayFilm | null;
+    /** Story 11.6. Set and cleared with `film`, never independently. */
+    track: JuiceTrack | null;
     clock: PlaybackClock | null;
     /** Bumped on every load, so a stale async response from a superseded call is dropped rather than clobbering a newer one (re-entrancy guard). */
     generation: number;
@@ -106,6 +148,7 @@ export function createSpectateWalk(deps: SpectateWalkDeps): SpectateWalkHandle {
     entryIndex: 0,
     entryId: null,
     film: null,
+    track: null,
     clock: null,
     generation: 0,
     stopped: false,
@@ -182,14 +225,44 @@ export function createSpectateWalk(deps: SpectateWalkDeps): SpectateWalkHandle {
         state.entryIndex = index;
         state.entryId = entry.id;
         state.film = film;
+        // Story 11.6. Inside the same `try` the clock and the callbacks are in:
+        // a throw from here is a mount failure like any other -- warned, and the
+        // walk moves to the next entry -- rather than an unhandled rejection out
+        // of an async function.
+        const track = buildJuiceTrack(
+          film.frames,
+          DEFAULT_JUICE_TUNING,
+          arenaFor(DEFAULT_FIGHTER_CONFIG),
+          deps.reducedMotion === true,
+          DEFAULT_FIGHTER_CONFIG,
+        );
+        state.track = track;
         const clock = createPlaybackClock({
-          frameCount: film.frames.length,
+          // The track's length, not the film's: with hitstop and the Ultimate's
+          // freeze the two differ by up to a third of a Match, and a clock run
+          // on the film's length would cut every hold short.
+          frameCount: track.frameCount,
           requestFrame: deps.requestFrame,
           ...(deps.cancelFrame === undefined ? {} : { cancelFrame: deps.cancelFrame }),
           ...(deps.reducedMotion === undefined ? {} : { reducedMotion: deps.reducedMotion }),
-          onFrame: (frameIndex) => {
-            deps.onFrame?.(frameIndex);
-            if (frameIndex >= film.frames.length - 1) {
+          onFrame: (clockIndex) => {
+            deps.onFrame?.(clockIndex);
+            if (deps.reducedMotion === true) {
+              // Story 11.6. A reduced-motion clock never schedules: `start()`
+              // emits the last frame once, directly, and returns. That arrives
+              // here looking exactly like an entry that finished playing, and
+              // advancing on it would mount the next entry, which would emit
+              // *its* last frame, which would advance again -- the whole
+              // manifest fetched in a tight microtask chain, forever, on the
+              // browsers of precisely the visitors who asked for less.
+              //
+              // So the ambient loop does not advance under the preference. The
+              // stream is one still frame, which is what "honours it exactly as
+              // the player does" means for a surface whose player shows a
+              // still: no motion, and no traffic either.
+              return;
+            }
+            if (clockIndex >= track.frameCount - 1) {
               // The clock has already stopped itself (Story 4.1's own
               // contract); this call is what decides what plays next.
               if (myGeneration === state.generation && !state.stopped) {
@@ -199,12 +272,13 @@ export function createSpectateWalk(deps: SpectateWalkDeps): SpectateWalkHandle {
           },
         });
         state.clock = clock;
-        deps.onEntryChange?.(entry, film);
+        deps.onEntryChange?.(entry, film, track);
         clock.start();
         return;
       } catch (error) {
         state.entryId = null;
         state.film = null;
+        state.track = null;
         state.clock = null;
         warn(
           `Spectate: could not mount "${entry.id}" -- ${error instanceof Error ? error.message : String(error)}`,
@@ -263,8 +337,12 @@ export function createSpectateWalk(deps: SpectateWalkDeps): SpectateWalkHandle {
     // sees a Match already in progress"). `seek` never re-enters INV-3's
     // frame-counted path -- it is the same verb the existing timeline scrub
     // uses.
-    if (state.entryId === manifest.entries[clampedIndex].id && state.film !== null) {
-      const clamped = Math.max(0, Math.min(offset.frameOffset, state.film.frames.length - 1));
+    if (state.entryId === manifest.entries[clampedIndex].id && state.track !== null) {
+      // Clamped against the *track*, not the film (Story 11.6). The offset comes
+      // from `offsetForNow` over a manifest whose `frameCount` is now the
+      // track's length, so clamping to the film's would drag every mid-loop join
+      // backwards by exactly the juice this story added.
+      const clamped = Math.max(0, Math.min(offset.frameOffset, state.track.frameCount - 1));
       state.clock?.seek(clamped);
     }
   }
@@ -310,6 +388,7 @@ export function createSpectateWalk(deps: SpectateWalkDeps): SpectateWalkHandle {
     state.mode = 'loop';
     state.entryId = null;
     state.film = null;
+    state.track = null;
   }
 
   return Object.freeze({
@@ -318,6 +397,7 @@ export function createSpectateWalk(deps: SpectateWalkDeps): SpectateWalkHandle {
     resumeLoop,
     currentEntryId: (): string | null => state.entryId,
     currentFilm: (): ReplayFilm | null => state.film,
+    currentTrack: (): JuiceTrack | null => state.track,
     currentClock: (): PlaybackClock | null => state.clock,
     stop,
   });

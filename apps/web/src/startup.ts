@@ -6,6 +6,7 @@ import { escapeHtml, renderApp, type HostView, type MountPoint, type MountedApp 
 import { validateReasoningSidecar } from './replay/sidecar';
 import { createSpriteArtist, type FighterArtist } from './render/artist';
 import { createBackdrop, validateBackdropLayout, type Backdrop } from './render/backdrop';
+import type { AudioSink } from './render/audio';
 import { createAudioBus, type AudioContextLike, type AudioFetchResponse } from './render/audio-bus';
 import { createSpriteSheet, validateSpriteSheetLayout } from './render/sprite-sheet';
 import { DEFAULT_ROSTER, spriteLayoutUrlFor } from './render/roster';
@@ -455,7 +456,12 @@ function mountArcade(
  * its own film/clock sequence entirely (`spectate/walk.ts`) rather than
  * replacing the `#app` player.
  */
-function mountSpectate(globals: BrowserGlobals, onGesture: () => void): SpectatePanel | null {
+function mountSpectate(
+  globals: BrowserGlobals,
+  onGesture: () => void,
+  /** Story 11.6. The page's one graph, shared with the player -- see `spectate/panel.ts` on who owns it when. */
+  sink: AudioSink | null,
+): SpectatePanel | null {
   const host = globals.document?.querySelector('#spectate');
   const view = globals.window;
   if (host == null || view == null || globals.fetch == null) {
@@ -464,10 +470,12 @@ function mountSpectate(globals: BrowserGlobals, onGesture: () => void): Spectate
   try {
     return mountSpectatePanel(host as unknown as SpectateHost, {
       view,
-      // Story 9.6: this panel plays nothing, but a visitor whose only gesture
-      // is picking a Match here would otherwise leave the player's audio
-      // context suspended for the rest of the session.
+      // Story 9.6: a visitor whose only gesture is picking a Match here would
+      // otherwise leave the page's audio context suspended for the rest of the
+      // session. Story 11.6 gives this panel sound of its own, so the same hook
+      // now also unlocks the context for the stream itself.
       onGesture,
+      sink,
       // Not `globals.fetch` handed through directly: a real browser's
       // `fetch` is a WebIDL operation branded to `Window`, and extracting it
       // as a bare reference detaches that binding. `startup.ts`'s own
@@ -692,18 +700,21 @@ export async function startup(globals: BrowserGlobals): Promise<StartupResult | 
       panels.spectate?.setBackdrop(backdrop);
     };
     /**
-     * Story 11.2. The replay player only -- Spectate has no juice layer at all
-     * yet, and wiring it is Story 11.6's job rather than something to smuggle
-     * in here.
+     * Story 11.2, widened by Story 11.6: both live surfaces, not the player
+     * alone. Spectate paints through the same `drawJuicedFrame` now, so a sheet
+     * that reached only the player would leave the ambient stream drawing the
+     * square-spark fallback for the whole session.
      */
     const dressVfx = (vfx: VfxSheet): void => {
       dressing.vfx = vfx;
       player.mounted.setVfx(vfx);
+      panels.spectate?.setVfx(vfx);
     };
-    /** Story 11.4. The replay player only, for the reason `dressVfx` gives. */
+    /** Story 11.4, widened by Story 11.6 for the reason `dressVfx` gives. */
     const dressUlt = (ult: UltSheet): void => {
       dressing.ult = ult;
       player.mounted.setUlt(ult);
+      panels.spectate?.setUlt(ult);
     };
 
     const upgrades: Promise<void>[] = SPRITE_LAYOUT_URLS.map(async (url, index) => {
@@ -751,9 +762,13 @@ export async function startup(globals: BrowserGlobals): Promise<StartupResult | 
     }
 
     const arcadePanel = mountArcade(globals, mount);
-    const spectatePanel = mountSpectate(globals, () => {
-      sink?.unlock();
-    });
+    const spectatePanel = mountSpectate(
+      globals,
+      () => {
+        sink?.unlock();
+      },
+      sink,
+    );
     panels.spectate = spectatePanel;
     // Adopt whatever already landed. The upgrades started before this mount, so
     // on a warm cache a pack can resolve first and would otherwise be recorded
@@ -768,6 +783,16 @@ export async function startup(globals: BrowserGlobals): Promise<StartupResult | 
       }
       if (dressing.backdrop !== undefined) {
         spectatePanel.setBackdrop(dressing.backdrop);
+      }
+      // Story 11.6. The two sheets adopt on exactly the same terms the packs
+      // and the backdrop do -- a warm cache resolves them before this mount,
+      // and a surface dressed only by the *later* of the two paths is dressed
+      // by neither when the assets load fastest.
+      if (dressing.vfx !== undefined) {
+        spectatePanel.setVfx(dressing.vfx);
+      }
+      if (dressing.ult !== undefined) {
+        spectatePanel.setUlt(dressing.ult);
       }
     }
     const landingPanel = mountLanding(globals, arcadePanel, () => {

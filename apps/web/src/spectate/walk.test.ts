@@ -1,8 +1,10 @@
 import type { CommandLog } from '@tokenbrawl/contracts';
 import { beforeAll, describe, expect, it } from 'vitest';
+import { DEFAULT_FIGHTER_CONFIG } from '../../../../packages/env-fighter/src/config';
 import { createFighterEnvironment } from '../../../../packages/env-fighter/src/environment';
 import { buildDemoLog } from '../testing/demo-log';
 import { buildReplayFilm } from '../replay/film';
+import { DEFAULT_JUICE_TUNING, arenaFor, buildJuiceTrack } from '../render/juice';
 import { createSpectateWalk } from './walk';
 import type { SpectateManifest } from './manifest';
 
@@ -11,6 +13,14 @@ import type { SpectateManifest } from './manifest';
  * pairing) rather than hand-built fixtures, for the same reason `film.test.ts`
  * uses `buildDemoLog`: a fake log risks testing this module against a shape
  * `buildReplayFilm` would never actually see.
+ *
+ * Story 11.6. Every "pump an entry to its end" here counts **clock** frames,
+ * which is the film's length plus every hitstop hold plus any cinematic freeze.
+ * That is the whole of what this story changed in this module, and pumping the
+ * film's length instead is precisely the bug it fixes -- so the counts are
+ * derived from a real `buildJuiceTrack` rather than written down, and
+ * `expectsMoreClockThanFilmFrames` below is what stops the two silently
+ * becoming the same number again.
  */
 
 interface Driver {
@@ -69,7 +79,20 @@ function createDriver(): Driver {
 describe('the manifest walk (Story 9.3)', () => {
   const env = createFighterEnvironment();
   let logs: readonly [CommandLog, CommandLog, CommandLog];
+  /** Film frames, kept only so the clock/film divergence can be asserted rather than assumed. */
+  let filmCounts: readonly [number, number, number];
+  /** Clock frames -- the axis the clock actually runs on since Story 11.6. */
   let frameCounts: readonly [number, number, number];
+
+  function clockFramesOf(log: CommandLog): number {
+    return buildJuiceTrack(
+      buildReplayFilm(log, env).frames,
+      DEFAULT_JUICE_TUNING,
+      arenaFor(DEFAULT_FIGHTER_CONFIG),
+      false,
+      DEFAULT_FIGHTER_CONFIG,
+    ).frameCount;
+  }
 
   beforeAll(async () => {
     const built = await Promise.all([
@@ -78,11 +101,21 @@ describe('the manifest walk (Story 9.3)', () => {
       buildDemoLog(4_103),
     ]);
     logs = [built[0], built[1], built[2]];
-    frameCounts = [
+    filmCounts = [
       buildReplayFilm(logs[0], env).frames.length,
       buildReplayFilm(logs[1], env).frames.length,
       buildReplayFilm(logs[2], env).frames.length,
     ];
+    frameCounts = [clockFramesOf(logs[0]), clockFramesOf(logs[1]), clockFramesOf(logs[2])];
+  });
+
+  it('these fixtures really do have hitstop in them, so "pump to the end" means something', () => {
+    // Without this, every "advances at the end of an entry" case below would
+    // still pass against a walk that never built a juice track at all -- the
+    // two counts would simply be equal and the regression invisible.
+    expect(frameCounts[0]).toBeGreaterThan(filmCounts[0]);
+    expect(frameCounts[1]).toBeGreaterThan(filmCounts[1]);
+    expect(frameCounts[2]).toBeGreaterThan(filmCounts[2]);
   });
 
   function manifestOf(ids: readonly string[]): SpectateManifest {
@@ -386,5 +419,187 @@ describe('the manifest walk (Story 9.3)', () => {
 
     expect(walk.currentEntryId()).toBe('a');
     expect(walk.currentClock()).not.toBeNull();
+  });
+
+  describe('the juice layer (Story 11.6)', () => {
+    it('runs the clock on the juice track, so an entry is still playing at the end of its film', async () => {
+      const ids = ['a', 'b', 'c'];
+      const manifest = manifestOf(ids);
+      const driver = createDriver();
+
+      const walk = createSpectateWalk({
+        manifest,
+        fetchJson: fetchFor(ids),
+        env,
+        requestFrame: driver.requestFrame,
+        cancelFrame: driver.cancelFrame,
+      });
+
+      await walk.startLoop({ entryIndex: 0, frameOffset: 0 });
+      // One frame short of the *film's* length, which is where the clock used
+      // to end. The entry must still be "a", still running, with the hitstop
+      // holds ahead of it.
+      driver.pump(filmCounts[0]);
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(walk.currentEntryId()).toBe('a');
+      expect(walk.currentClock()?.isRunning()).toBe(true);
+    });
+
+    it('exposes the entry track, whose frame count is the clock`s and exceeds the film`s', async () => {
+      const ids = ['a'];
+      const manifest = manifestOf(ids);
+      const driver = createDriver();
+
+      const walk = createSpectateWalk({
+        manifest,
+        fetchJson: fetchFor(ids),
+        env,
+        requestFrame: driver.requestFrame,
+        cancelFrame: driver.cancelFrame,
+      });
+
+      await walk.startLoop({ entryIndex: 0, frameOffset: 0 });
+
+      const track = walk.currentTrack();
+      const film = walk.currentFilm();
+      expect(track).not.toBeNull();
+      expect(track?.frameCount).toBe(frameCounts[0]);
+      expect(track?.frameCount).toBeGreaterThan(film?.frames.length ?? 0);
+      // The mapping the panel paints through: a clock index past the film's own
+      // length still resolves to a real film frame.
+      expect(track?.filmIndexAt(frameCounts[0] - 1)).toBe((film?.frames.length ?? 0) - 1);
+    });
+
+    it('hands the track to onEntryChange, and reports clock indices to onFrame', async () => {
+      const ids = ['a'];
+      const manifest = manifestOf(ids);
+      const driver = createDriver();
+      const seen: number[] = [];
+      const entryTracks: number[] = [];
+
+      const walk = createSpectateWalk({
+        manifest,
+        fetchJson: fetchFor(ids),
+        env,
+        requestFrame: driver.requestFrame,
+        cancelFrame: driver.cancelFrame,
+        onEntryChange: (_entry, _film, track) => entryTracks.push(track.frameCount),
+        onFrame: (clockIndex) => seen.push(clockIndex),
+      });
+
+      await walk.startLoop({ entryIndex: 0, frameOffset: 0 });
+      driver.pump(3);
+
+      expect(entryTracks).toStrictEqual([frameCounts[0]]);
+      expect(seen.slice(0, 3)).toStrictEqual([0, 1, 2]);
+    });
+
+    it('joins at an offset that only exists on the track, rather than clamping to the film`s last frame', async () => {
+      const ids = ['a'];
+      const manifest = manifestOf(ids);
+      const driver = createDriver();
+      // A frame that exists on the clock and not in the film -- the exact range
+      // a mid-loop join lands in once `manifest.json` records track lengths.
+      const offset = filmCounts[0] + 1;
+
+      const walk = createSpectateWalk({
+        manifest,
+        fetchJson: fetchFor(ids),
+        env,
+        requestFrame: driver.requestFrame,
+        cancelFrame: driver.cancelFrame,
+      });
+
+      await walk.startLoop({ entryIndex: 0, frameOffset: offset });
+
+      expect(offset).toBeLessThan(frameCounts[0]);
+      expect(walk.currentClock()?.frameIndex()).toBe(offset);
+    });
+
+    it('clears the track with the film on stop(), so a caller never reads a stale pair', async () => {
+      const ids = ['a'];
+      const manifest = manifestOf(ids);
+      const driver = createDriver();
+
+      const walk = createSpectateWalk({
+        manifest,
+        fetchJson: fetchFor(ids),
+        env,
+        requestFrame: driver.requestFrame,
+        cancelFrame: driver.cancelFrame,
+      });
+
+      await walk.startLoop({ entryIndex: 0, frameOffset: 0 });
+      expect(walk.currentTrack()).not.toBeNull();
+
+      walk.stop();
+
+      expect(walk.currentTrack()).toBeNull();
+      expect(walk.currentFilm()).toBeNull();
+    });
+
+    it('honours reduced motion: same frame count, no shake, no autoplay', async () => {
+      const ids = ['a'];
+      const manifest = manifestOf(ids);
+      const driver = createDriver();
+
+      const walk = createSpectateWalk({
+        manifest,
+        fetchJson: fetchFor(ids),
+        env,
+        requestFrame: driver.requestFrame,
+        cancelFrame: driver.cancelFrame,
+        reducedMotion: true,
+      });
+
+      await walk.startLoop({ entryIndex: 0, frameOffset: 0 });
+
+      const track = walk.currentTrack();
+      // The mapping is deliberately not flattened -- same frame count, same
+      // clock→film mapping -- so the manifest's recorded count stays correct
+      // under either preference. Only the shake and the particles go.
+      expect(track?.frameCount).toBe(frameCounts[0]);
+      const shaken = Array.from({ length: frameCounts[0] }, (_, index) => track?.at(index)).filter(
+        (frame) => frame !== undefined && (frame.shakeX !== 0 || frame.shakeY !== 0),
+      );
+      expect(shaken).toStrictEqual([]);
+      // And the clock declines to autoplay, exactly as the player's does.
+      expect(walk.currentClock()?.isRunning()).toBe(false);
+    });
+
+    it('reduced motion does not spin the manifest: a still stream fetches one entry, not every entry forever', async () => {
+      const ids = ['a', 'b', 'c'];
+      const manifest = manifestOf(ids);
+      const driver = createDriver();
+      const fetched: string[] = [];
+
+      const walk = createSpectateWalk({
+        manifest,
+        fetchJson: async (url: string) => {
+          fetched.push(url);
+          return fetchFor(ids)(url);
+        },
+        env,
+        requestFrame: driver.requestFrame,
+        cancelFrame: driver.cancelFrame,
+        reducedMotion: true,
+      });
+
+      await walk.startLoop({ entryIndex: 0, frameOffset: 0 });
+      // A reduced-motion clock emits the final frame the instant it starts,
+      // which reads exactly like an entry that finished. Left as an "advance",
+      // that mounts the next entry, which emits *its* last frame, and so on:
+      // the whole manifest fetched in a tight microtask chain that never yields.
+      // Draining generously is what makes the absence of that chain checkable.
+      for (const _ of Array.from({ length: 50 }, (__, index) => index)) {
+        await Promise.resolve();
+      }
+      driver.pump(20);
+
+      expect(fetched).toStrictEqual(['/replays/a.command-log.json']);
+      expect(walk.currentEntryId()).toBe('a');
+    });
   });
 });

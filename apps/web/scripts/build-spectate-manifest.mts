@@ -12,6 +12,7 @@ import {
   createSpacingBot,
 } from '../../../packages/env-fighter/src/bots';
 import { PLAYBACK_FPS, FRAMES_PER_DECISION, buildReplayFilm } from '../src/replay/film';
+import { DEFAULT_JUICE_TUNING, arenaFor, buildJuiceTrack } from '../src/render/juice';
 
 /**
  * Story 9.3: generates the Spectate stream's manifest and its Command Logs.
@@ -85,6 +86,32 @@ async function buildOne(pairing: Pairing): Promise<{ readonly log: CommandLog; r
   });
 
   const film = buildReplayFilm(log, env);
+  /**
+   * Story 11.6. The **track's** length, not the film's.
+   *
+   * Spectate plays through the juice layer now, and a juice track is the film's
+   * length plus every hitstop hold plus the Ultimate's cinematic freeze --
+   * between +3% and +31% across these six pairings. `frameCount` is what
+   * `spectate/manifest.ts`'s `offsetForNow` walks to decide where a visitor
+   * arriving right now joins the loop, so recording the film's length while the
+   * clock runs the track's put the join offset on a different axis from
+   * playback and drifted it by up to a third of a Match.
+   *
+   * Every argument matches `spectate/walk.ts`'s call exactly -- same tuning,
+   * same arena, same config -- because a manifest generated under different
+   * numbers from the ones the page plays under would be wrong in precisely the
+   * way this line exists to fix. `reducedMotion` is `false` and the choice does
+   * not matter: `buildJuiceTrack` keeps the same frame count and the same
+   * clock→film mapping under the preference, deliberately, so one recorded
+   * number is correct for both.
+   */
+  const track = buildJuiceTrack(
+    film.frames,
+    DEFAULT_JUICE_TUNING,
+    arenaFor(DEFAULT_FIGHTER_CONFIG),
+    false,
+    DEFAULT_FIGHTER_CONFIG,
+  );
 
   return {
     log,
@@ -92,7 +119,7 @@ async function buildOne(pairing: Pairing): Promise<{ readonly log: CommandLog; r
       id: pairing.id,
       commandLogUrl: `/replays/${pairing.id}.command-log.json`,
       schemaVersion: log.schemaVersion,
-      frameCount: film.frames.length,
+      frameCount: track.frameCount,
     },
   };
 }
@@ -105,7 +132,7 @@ for (const pairing of PAIRINGS) {
   writeFileSync(join(OUT, `${pairing.id}.command-log.json`), `${JSON.stringify(log, null, 2)}\n`, 'utf8');
   entries.push(entry);
   process.stdout.write(
-    `${pairing.id}: seed ${String(pairing.seed)} ${pairing.p1} vs ${pairing.p2} -- ${String(entry.frameCount)} frames\n`,
+    `${pairing.id}: seed ${String(pairing.seed)} ${pairing.p1} vs ${pairing.p2} -- ${String(entry.frameCount)} clock frames\n`,
   );
 }
 
