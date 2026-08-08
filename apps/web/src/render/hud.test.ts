@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BASIS_POINTS_FULL } from '../replay/film';
+import { BASIS_POINTS_FULL, FRAMES_PER_DECISION } from '../replay/film';
 import { ARENA_PALETTE } from './arena-palette';
 import type { Canvas2D } from './canvas2d';
 import {
@@ -197,9 +197,39 @@ describe('the health tiers (AC1)', () => {
 });
 
 describe('the armed pulse (AC4, AC5, INV-1, INV-3)', () => {
-  it('holds each step for a whole count of frames and then steps -- stepped, never eased', () => {
-    expect(pulseLevel(0, false)).toBe(pulseLevel(ARMED_PULSE_HOLD_FRAMES - 1, false));
-    expect(pulseLevel(0, false)).not.toBe(pulseLevel(ARMED_PULSE_HOLD_FRAMES, false));
+  it('breathes across two Decision Points, which is the cadence claimed for it', () => {
+    // Written with the number in it, deliberately, and this is the second
+    // attempt at this test. The first expressed every case in terms of
+    // `ARMED_PULSE_HOLD_FRAMES` itself -- "holds for HOLD - 1 and changes at
+    // HOLD" -- which is true of *every* value the constant could take. A
+    // mutation to 1 passed the whole suite. A test phrased in the units of the
+    // thing it is pinning pins nothing.
+    //
+    // So the cadence is asserted twice over: as the literal it is, and against
+    // the film's own sampling rate, which is where the six came from. The
+    // source deliberately does not import `FRAMES_PER_DECISION` -- a later
+    // change to the film's sampling must not silently retune the HUD -- but
+    // asserting that the two currently agree costs nothing and makes the
+    // retune a visible, deliberate edit here.
+    expect(ARMED_PULSE_HOLD_FRAMES).toBe(6);
+    expect(ARMED_PULSE_HOLD_FRAMES * 4).toBe(FRAMES_PER_DECISION * 2);
+  });
+
+  it('holds each step for six frames and then steps -- stepped, never eased', () => {
+    expect(pulseLevel(0, false)).toBe(pulseLevel(5, false));
+    expect(pulseLevel(0, false)).not.toBe(pulseLevel(6, false));
+    expect(pulseLevel(6, false)).toBe(pulseLevel(11, false));
+    expect(pulseLevel(6, false)).not.toBe(pulseLevel(12, false));
+  });
+
+  it('runs a 24-frame cycle, not a shorter one that merely repeats', () => {
+    // The other half of what the mutation got past: a hold of 1 gives a
+    // four-frame cycle that satisfies every *relative* assertion about the
+    // triangle's shape. The period is the observable thing a viewer sees.
+    const walk = Array.from({ length: 24 }, (_unused, index) => pulseLevel(index, false));
+    expect(walk).toStrictEqual([
+      0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 1, 1, 1, 1, 1, 1,
+    ]);
   });
 
   it('walks up and back down rather than snapping, so the gauge breathes', () => {

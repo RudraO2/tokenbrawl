@@ -41,6 +41,8 @@ interface RecordedCall {
   readonly args: readonly (number | string)[];
   readonly fillStyle: string;
   readonly strokeStyle: string;
+  /** Story 11.3: which face a callout was drawn in is now a thing worth asserting. */
+  readonly font: string;
 }
 
 interface RecordingCanvas extends Canvas2D {
@@ -59,7 +61,13 @@ function createRecordingCanvas(): RecordingCanvas {
   } as unknown as RecordingCanvas;
 
   const record = (op: string, args: readonly (number | string)[]): void => {
-    calls.push({ op, args, fillStyle: surface.fillStyle, strokeStyle: surface.strokeStyle });
+    calls.push({
+      op,
+      args,
+      fillStyle: surface.fillStyle,
+      strokeStyle: surface.strokeStyle,
+      font: surface.font,
+    });
   };
 
   surface.fillRect = (x, y, w, h) => record('fillRect', [x, y, w, h]);
@@ -694,6 +702,56 @@ describe('the Super Gauge (10.3)', () => {
   it('says nothing about time (INV-3)', () => {
     for (const text of texts(drawMeter(FULL))) {
       expect(text).not.toMatch(/\b(ms|sec|second|per|rate|elapsed)\b/i);
+    }
+  });
+});
+
+/**
+ * Story 11.3's AC3: the callouts take the arcade treatment, the readouts do
+ * not, and the split between the two is a deliberate line rather than whichever
+ * strings happened to get changed.
+ */
+describe('the arcade type treatment (11.3 AC3)', () => {
+  function callFor(word: string): readonly RecordedCall[] {
+    const ctx = createRecordingCanvas();
+    const state = stateWith({ meter: [DEFAULT_FIGHTER_CONFIG.maxMeter, 0] });
+    drawFrame(ctx, frameWith(state, state), {
+      config: DEFAULT_FIGHTER_CONFIG,
+      viewport: VIEWPORT,
+      banks: [{ remaining: 0, start: 25_000, filledBasisPoints: 0, exhausted: true }, null],
+    });
+    return ctx.calls().filter((call) => call.op === 'fillText' && String(call.args[0]).includes(word));
+  }
+
+  it('draws TICK, ULTIMATE READY and REFLEX in the arcade face, each with its hard shadow', () => {
+    // TICK is the one this suite would otherwise have missed entirely: it is
+    // neither a bar label nor a state word, so no other case selects it, and it
+    // is named in the AC alongside the two that are.
+    for (const word of ['TICK', 'ULTIMATE READY', 'REFLEX']) {
+      const calls = callFor(word);
+      expect(calls).toHaveLength(2);
+      for (const call of calls) {
+        expect(call.font).toBe(THEME.arcadeFont);
+      }
+      expect((calls[0].args[2] as number) - (calls[1].args[2] as number)).toBeGreaterThan(0);
+    }
+  });
+
+  it('leaves the numeric readouts on the mono face, because they are data and not callouts', () => {
+    // `docs/DESIGN.md` reserves Departure Mono for every number a visitor reads
+    // as data. `HP … MTR …` and `BANK …` are readouts; moving them to the
+    // arcade face would be the story quietly widening its own scope.
+    const ctx = createRecordingCanvas();
+    drawFrame(ctx, frameWith(stateWith(), stateWith()), {
+      config: DEFAULT_FIGHTER_CONFIG,
+      viewport: VIEWPORT,
+      banks: [{ remaining: 900, start: 25_000, filledBasisPoints: 360, exhausted: false }, null],
+    });
+
+    for (const call of ctx.calls()) {
+      if (call.op === 'fillText' && /^(HP|BANK) /.test(String(call.args[0]))) {
+        expect(call.font).toBe(THEME.monoFont);
+      }
     }
   });
 });
