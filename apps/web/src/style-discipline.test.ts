@@ -991,8 +991,15 @@ describe('the arena boundary is named, documented, and still swept for clocks', 
       'render/juice-draw.ts',
       'render/juice.ts',
       'render/renderer.ts',
+      // Story 11.4. The one place an `agentIndex` becomes a fighter, and it
+      // reads `ARENA_PALETTE.aura` to answer *whose* Ultimate this is -- a
+      // question about the game rather than about the site.
+      'render/roster.ts',
       'render/sprite-sheet.ts',
       'render/theme.ts',
+      // Story 11.4. The Ultimate's per-character art: arena by definition, on
+      // exactly `vfx-sheet.ts`'s terms.
+      'render/ult-sheet.ts',
       // Story 11.2. The impact FX sheet: arena by definition -- it exists only
       // to describe art the fight is drawn with -- and joining the list is the
       // deliberate, reviewable act this ratchet exists to require.

@@ -8,6 +8,13 @@ import { createSpriteArtist, type FighterArtist } from './render/artist';
 import { createBackdrop, validateBackdropLayout, type Backdrop } from './render/backdrop';
 import { createAudioBus, type AudioContextLike, type AudioFetchResponse } from './render/audio-bus';
 import { createSpriteSheet, validateSpriteSheetLayout } from './render/sprite-sheet';
+import { DEFAULT_ROSTER, spriteLayoutUrlFor } from './render/roster';
+import {
+  createUltSheet,
+  imageUrlsFor,
+  validateUltSheetLayout,
+  type UltSheet,
+} from './render/ult-sheet';
 import { createVfxSheet, validateVfxSheetLayout, type VfxSheet } from './render/vfx-sheet';
 import { mountSpectatePanel, type SpectateHost, type SpectatePanel } from './spectate/panel';
 import { mountLandingPanel, type LandingHost, type LandingPanel } from './landing/panel';
@@ -66,7 +73,7 @@ export const DEMO_REPLAY_URL = '/replays/demo.command-log.json';
  * fighters at once, so this names the default pair and the other two packs
  * ship ready for a future character-select story to point here instead.
  */
-const SPRITE_LAYOUT_URLS = ['/sprites/clawde/layout.json', '/sprites/chatty/layout.json'] as const;
+const SPRITE_LAYOUT_URLS = DEFAULT_ROSTER.map(spriteLayoutUrlFor);
 const BACKDROP_LAYOUT_URL = '/sprites/mountain-dusk/layout.json';
 /**
  * Story 11.2. The impact FX sheet's strip layout, authored in this repo beside
@@ -74,6 +81,12 @@ const BACKDROP_LAYOUT_URL = '/sprites/mountain-dusk/layout.json';
  * reason: the site must render identically offline.
  */
 const FX_LAYOUT_URL = '/fx/layout.json';
+/**
+ * Story 11.4. The Ultimate's per-character art, described beside the image it
+ * cuts cells out of. Same-origin like every other asset here, for INV-8's
+ * reason.
+ */
+const ULT_LAYOUT_URL = '/fx/ult-layout.json';
 
 interface LoadedImage {
   readonly width: number;
@@ -246,6 +259,34 @@ async function loadVfx(globals: BrowserGlobals): Promise<VfxSheet | undefined> {
     return createVfxSheet(await decodeAll(globals, urls), layout);
   } catch (error) {
     warn('Impact FX unavailable, hits will draw as plain sparks', error);
+    return undefined;
+  }
+}
+
+/**
+ * Loads the Ultimate's per-character art, or returns `undefined` (Story 11.4).
+ *
+ * `loadVfx`'s shape, with one difference worth stating: only the images the
+ * fighters *in play* need are fetched. The four portraits are ~200 KB each and
+ * a live Match shows two fighters, so `imageUrlsFor(layout, DEFAULT_ROSTER)`
+ * keeps most of a megabyte off a page whose whole first-frame budget is two
+ * seconds -- and when character select lands it passes a different pair and
+ * nothing else here changes.
+ *
+ * A failure costs the page nothing but the cutscene's art: `juice-draw.ts`
+ * still draws a procedural beam in the caster's aura, and without a roster it
+ * draws Story 10.4's banner-and-band. One warning, then `undefined`.
+ */
+async function loadUlt(globals: BrowserGlobals): Promise<UltSheet | undefined> {
+  try {
+    if (globals.Image === undefined) {
+      return undefined;
+    }
+    const layout = validateUltSheetLayout(await fetchJson(globals, ULT_LAYOUT_URL));
+    const urls = imageUrlsFor(layout, DEFAULT_ROSTER);
+    return createUltSheet(await decodeAll(globals, urls), layout);
+  } catch (error) {
+    warn('Ultimate FX unavailable, the cinematic will draw without per-character art', error);
     return undefined;
   }
 }
@@ -570,7 +611,9 @@ export async function startup(globals: BrowserGlobals): Promise<StartupResult | 
       backdrop: Backdrop | undefined;
       /** Story 11.2. The impact FX sheet, held here so a re-mount keeps it. */
       vfx: VfxSheet | undefined;
-    } = { artists: [undefined, undefined], backdrop: undefined, vfx: undefined };
+      /** Story 11.4. The Ultimate's per-character art, held for the same reason. */
+      ult: UltSheet | undefined;
+    } = { artists: [undefined, undefined], backdrop: undefined, vfx: undefined, ult: undefined };
     /**
      * The audio graph, built once and held outside any one mount (Story 9.6),
      * for exactly the reason the dressing above is: a BYOK or Arcade Match
@@ -618,6 +661,9 @@ export async function startup(globals: BrowserGlobals): Promise<StartupResult | 
       if (dressing.vfx !== undefined) {
         mounted.setVfx(dressing.vfx);
       }
+      if (dressing.ult !== undefined) {
+        mounted.setUlt(dressing.ult);
+      }
       player.mounted = mounted;
       return mounted;
     };
@@ -654,6 +700,11 @@ export async function startup(globals: BrowserGlobals): Promise<StartupResult | 
       dressing.vfx = vfx;
       player.mounted.setVfx(vfx);
     };
+    /** Story 11.4. The replay player only, for the reason `dressVfx` gives. */
+    const dressUlt = (ult: UltSheet): void => {
+      dressing.ult = ult;
+      player.mounted.setUlt(ult);
+    };
 
     const upgrades: Promise<void>[] = SPRITE_LAYOUT_URLS.map(async (url, index) => {
       const artist = await loadArtist(globals, url);
@@ -674,6 +725,14 @@ export async function startup(globals: BrowserGlobals): Promise<StartupResult | 
         const vfx = await loadVfx(globals);
         if (vfx !== undefined) {
           dressVfx(vfx);
+        }
+      })(),
+    );
+    upgrades.push(
+      (async (): Promise<void> => {
+        const ult = await loadUlt(globals);
+        if (ult !== undefined) {
+          dressUlt(ult);
         }
       })(),
     );

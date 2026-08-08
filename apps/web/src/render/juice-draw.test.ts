@@ -22,8 +22,11 @@ import {
   type JuiceImpact,
   type JuiceKind,
 } from './juice';
+import { ARENA_PALETTE } from './arena-palette';
 import { FLOOR_INSET } from './renderer';
+import { DEFAULT_ROSTER, ROSTER_NAMES, auraFor } from './roster';
 import { THEME } from './theme';
+import { createUltSheet, validateUltSheetLayout, type UltSheet } from './ult-sheet';
 import {
   createVfxSheet,
   validateVfxSheetLayout,
@@ -343,10 +346,23 @@ function cinematicWith(overrides: Partial<JuiceCinematic> = {}): JuiceCinematic 
     targetBasisPoints: 7_500,
     connected: true,
     age: 0,
-    frames: 91,
-    flash: false,
+    frames: 130,
+    act: 'build',
+    letterboxPx: 0,
+    vignetteBasisPoints: 0,
+    orbRadiusPx: 0,
+    bloomBasisPoints: 0,
+    portraitBasisPoints: 0,
+    portraitWidthPx: 170,
+    portraitHeightPx: 228,
+    slamTintBasisPoints: 4_000,
+    flashBasisPoints: 0,
     title: false,
     reachBasisPoints: 0,
+    beamThicknessPx: 36,
+    beamHeightPx: 108,
+    impactBasisPoints: 2_500,
+    impactCovers: false,
     bandPx: 16,
     heightPx: 108,
     streaks: [],
@@ -354,7 +370,74 @@ function cinematicWith(overrides: Partial<JuiceCinematic> = {}): JuiceCinematic 
   };
 }
 
-describe('the Ultimate cinematic composites in two halves (Story 10.4)', () => {
+/**
+ * An `UltSheet` bound to fake images, so the per-character path can be driven
+ * without a browser.
+ *
+ * Built through the real `validateUltSheetLayout` and `createUltSheet` rather
+ * than as a hand-written object literal: what is being tested is that the
+ * *drawing* asks the sheet the right questions, and a stub that answered
+ * whatever the drawing happened to ask would pass through a remap of every
+ * pose. `chatty`'s cells are deliberately different from `clawde`'s, which is
+ * what makes "two fighters produce two different cinematics" checkable.
+ */
+function ultSheetFor(fighters: readonly string[], options: { portraits?: boolean } = {}): UltSheet {
+  // The shipped layout's own cells: clawde is atlas cells 0-2 and chatty 3-5,
+  // and cell 5 wraps onto the next row -- which is exactly why they are written
+  // out rather than derived from a stride.
+  const cells: Record<string, readonly { x: number; y: number }[]> = {
+    clawde: [
+      { x: 0, y: 0 },
+      { x: 208, y: 0 },
+      { x: 416, y: 0 },
+    ],
+    chatty: [
+      { x: 624, y: 0 },
+      { x: 832, y: 0 },
+      { x: 0, y: 208 },
+    ],
+  };
+  const layout = validateUltSheetLayout({
+    cellWidth: 208,
+    cellHeight: 208,
+    fighters: Object.fromEntries(
+      fighters.map((id) => [
+        id,
+        {
+          portrait: `/portraits/${id}.png`,
+          parts: {
+            muzzle: { image: '/fx/fx_ult.png', ...cells[id][0] },
+            beam: { image: '/fx/fx_ult.png', ...cells[id][1] },
+            impact: { image: '/fx/fx_ult.png', ...cells[id][2] },
+          },
+        },
+      ]),
+    ),
+  });
+  const images = new Map<string, { width: number; height: number }>([
+    ['/fx/fx_ult.png', { width: 1_040, height: 1_040 }],
+  ]);
+  if (options.portraits !== false) {
+    for (const id of fighters) {
+      images.set(`/portraits/${id}.png`, { width: 512, height: 512 });
+    }
+  }
+  return createUltSheet(images, layout);
+}
+
+/** A frame deep in the release act, with the beam swept out over the target. */
+function releasing(overrides: Partial<JuiceCinematic> = {}): JuiceCinematic {
+  return cinematicWith({
+    act: 'release',
+    age: 120,
+    reachBasisPoints: 7_500,
+    impactBasisPoints: 7_500,
+    impactCovers: true,
+    ...overrides,
+  });
+}
+
+describe('the Ultimate cinematic composites in two halves (Story 10.4, 11.4)', () => {
   it('draws nothing at all when no cinematic owns the frame', () => {
     // The Baseline Bot promise, at the drawing layer: a Match with no Ultimate
     // must issue the exact call sequence it issued before this story.
@@ -366,10 +449,10 @@ describe('the Ultimate cinematic composites in two halves (Story 10.4)', () => {
   });
 
   it('paints the stage half inside the shake and the plate half at identity', () => {
-    // The split the whole file exists to get right. The impact mark is struck
-    // at a fighter's position and must travel with the camera; the plate is a
-    // full-viewport fill that must cover the *unshaken* viewport, or a 16px
-    // kick leaves a stale band along one edge.
+    // The split the whole file exists to get right. The beam is struck at a
+    // fighter's position and must travel with the camera; the letterbox and the
+    // slam are full-viewport fills that must cover the *unshaken* viewport, or
+    // a 16px kick leaves a stale band along one edge.
     const ctx = createRecordingCanvas();
     drawJuicedFrame(
       ctx,
@@ -377,7 +460,12 @@ describe('the Ultimate cinematic composites in two halves (Story 10.4)', () => {
       juiceFrame({
         shakeX: 9,
         shakeY: -9,
-        cinematic: cinematicWith({ flash: true, title: true, reachBasisPoints: 1_400, streaks: [{ offsetPx: 40, heightPx: 120, sizePx: 7 }] }),
+        cinematic: releasing({
+          flashBasisPoints: BASIS_POINTS_FULL,
+          title: true,
+          letterboxPx: 52,
+          streaks: [{ offsetPx: 40, heightPx: 120, sizePx: 7 }],
+        }),
       }),
       OPTIONS,
     );
@@ -385,17 +473,30 @@ describe('the Ultimate cinematic composites in two halves (Story 10.4)', () => {
     const restoreAt = ctx.calls.findIndex((call) => call.op === 'restore');
     expect(restoreAt).toBeGreaterThan(0);
 
-    // The mark and the streak are inside the transform...
+    // The beam and the streak are inside the transform...
     const markAt = ctx.calls.findIndex(
       (call) => call.op === 'fillRect' && call.fillStyle === THEME.accent,
     );
     expect(markAt).toBeGreaterThan(0);
     expect(markAt).toBeLessThan(restoreAt);
 
-    // ...and the plate is after the restore, covering the whole viewport.
+    // ...and the letterbox bar is after the restore, spanning the full width of
+    // the unshaken viewport.
+    const bar = ctx.calls
+      .slice(restoreAt)
+      .find((call) => call.op === 'fillRect' && call.fillStyle === ARENA_PALETTE.curtain);
+    expect(bar?.args).toStrictEqual([0, 0, VIEWPORT.width, 52]);
+
+    // As is the slam, covering the whole viewport.
     const plate = ctx.calls
       .slice(restoreAt)
-      .find((call) => call.op === 'fillRect' && call.fillStyle === THEME.ink);
+      .find(
+        (call) =>
+          call.op === 'fillRect' &&
+          call.args[2] === VIEWPORT.width &&
+          call.args[3] === VIEWPORT.height &&
+          call.fillStyle !== ARENA_PALETTE.curtain,
+      );
     expect(plate?.args).toStrictEqual([0, 0, VIEWPORT.width, VIEWPORT.height]);
 
     // As is the banner, in the warn-as-fill language the armed gauge uses.
@@ -404,14 +505,23 @@ describe('the Ultimate cinematic composites in two halves (Story 10.4)', () => {
     expect(word?.fillStyle).toBe(THEME.bg);
   });
 
-  it('draws no impact mark for a whiffed Ultimate', () => {
+  it('fires the beam on a whiff but marks no impact', () => {
     // Against the two halves directly, not through `drawJuicedFrame`: the
     // block artist paints agent 0's body in the same accent, so a sweep over
     // the whole composited frame would answer about the fighter rather than
-    // about the mark.
-    const stage = createRecordingCanvas();
-    drawCinematicStage(stage, cinematicWith({ connected: false, reachBasisPoints: 0 }), VIEWPORT, THEME);
-    expect(stage.calls).toStrictEqual([]);
+    // about the beam.
+    //
+    // Story 11.4 separates the beam from the mark. The beam is the Action and
+    // fires either way; the accent band is the *hit* mark and is still gated on
+    // `connected`, because the juice layer must never claim something the
+    // simulation did not do.
+    const whiff = createRecordingCanvas();
+    drawCinematicStage(whiff, releasing({ connected: false }), VIEWPORT, THEME);
+    expect(whiff.calls).toStrictEqual([]);
+
+    const hit = createRecordingCanvas();
+    drawCinematicStage(hit, releasing(), VIEWPORT, THEME);
+    expect(hit.calls.length).toBeGreaterThan(0);
 
     // The freeze still happened, and it still says so.
     const plate = createRecordingCanvas();
@@ -419,13 +529,32 @@ describe('the Ultimate cinematic composites in two halves (Story 10.4)', () => {
     expect(plate.calls.some((call) => call.args[0] === 'ULTIMATE')).toBe(true);
   });
 
+  it('draws no beam at all during the build act, whoever the caster is', () => {
+    // The whole point of the re-timing: for the first 80 frames there is a
+    // build and nothing else on the stage half. A beam on frame 0 would be the
+    // front-loaded cinematic this story replaced.
+    for (const caster of [undefined, 'clawde' as const]) {
+      const ctx = createRecordingCanvas();
+      drawCinematicStage(
+        ctx,
+        cinematicWith({ orbRadiusPx: 12 }),
+        VIEWPORT,
+        THEME,
+        ultSheetFor(['clawde']),
+        caster,
+      );
+      expect(ctx.calls).toStrictEqual([]);
+    }
+  });
+
   it('keeps every cinematic square and band inside the stage', () => {
     const ctx = createRecordingCanvas();
     drawCinematicStage(
       ctx,
-      cinematicWith({
+      releasing({
         casterBasisPoints: BASIS_POINTS_FULL,
         targetBasisPoints: BASIS_POINTS_FULL,
+        impactBasisPoints: BASIS_POINTS_FULL,
         reachBasisPoints: 9_000,
         heightPx: 9_000,
         streaks: [
@@ -455,15 +584,198 @@ describe('the Ultimate cinematic composites in two halves (Story 10.4)', () => {
       FRAME,
       juiceFrame({
         shakeX: 4,
-        cinematic: cinematicWith({ flash: true, title: true, reachBasisPoints: 1_200 }),
+        cinematic: releasing({ flashBasisPoints: 5_000, title: true, letterboxPx: 52 }),
       }),
-      OPTIONS,
+      { ...OPTIONS, ult: ultSheetFor(['clawde', 'chatty']), roster: DEFAULT_ROSTER },
     );
     const depth = ctx.calls.reduce(
       (open, call) => (call.op === 'save' ? open + 1 : call.op === 'restore' ? open - 1 : open),
       0,
     );
     expect(depth).toBe(0);
+  });
+});
+
+/**
+ * Story 11.4's fail-soft criterion is three states, not two, and each one is a
+ * different picture. These are the cases that tell them apart.
+ */
+describe('the cinematic degrades in three named steps (Story 11.4)', () => {
+  /** Every `drawImage` issued by the stage half. */
+  function stageImages(cinematic: JuiceCinematic, ult?: UltSheet, caster?: 'clawde' | 'chatty') {
+    const ctx = createRecordingCanvas();
+    drawCinematicStage(ctx, cinematic, VIEWPORT, THEME, ult, caster);
+    return ctx.calls.filter((call) => call.op === 'drawImage');
+  }
+
+  it('level 1: draws the caster own beam, muzzle and impact art', () => {
+    const calls = stageImages(releasing(), ultSheetFor(['clawde', 'chatty']), 'clawde');
+    expect(calls.length).toBeGreaterThan(0);
+    // Additive, and nearest-neighbour: an impact sheet drawn bilinear over a
+    // stage is the one thing in the arena that would not look like a sprite.
+    for (const call of calls) {
+      expect(call.globalCompositeOperation).toBe('lighter');
+      expect(call.imageSmoothingEnabled).toBe(false);
+    }
+  });
+
+  it('level 1: two fighters produce two different cinematics', () => {
+    // The Story 9.7 failure, guarded: four packs shipped and two wired, with
+    // nothing saying so. Per-character art is only per-character if the source
+    // rectangles actually differ.
+    const ult = ultSheetFor(['clawde', 'chatty']);
+    const clawde = ult.partFor('clawde', 'beam');
+    const chatty = ult.partFor('chatty', 'beam');
+    expect(clawde).toBeDefined();
+    expect(chatty).toBeDefined();
+    expect(clawde?.sx).not.toBe(chatty?.sx);
+
+    // And the aura they glow in differs too, which is the other half of whose.
+    expect(auraFor('clawde')).not.toBe(auraFor('chatty'));
+
+    // Through the real compositor, both fighters and both directions.
+    const first = createRecordingCanvas();
+    const second = createRecordingCanvas();
+    drawJuicedFrame(first, FRAME, juiceFrame({ cinematic: releasing({ agentIndex: 0 }) }), {
+      ...OPTIONS,
+      ult,
+      roster: DEFAULT_ROSTER,
+    });
+    drawJuicedFrame(second, FRAME, juiceFrame({ cinematic: releasing({ agentIndex: 1 }) }), {
+      ...OPTIONS,
+      ult,
+      roster: DEFAULT_ROSTER,
+    });
+    expect(first.calls).not.toStrictEqual(second.calls);
+  });
+
+  it('level 2: no sheet, but a known caster, draws a procedural beam in their aura', () => {
+    const ctx = createRecordingCanvas();
+    drawCinematicStage(ctx, releasing(), VIEWPORT, THEME, undefined, 'clawde');
+    const fills = ctx.calls.filter((call) => call.op === 'fillRect');
+    expect(fills.length).toBeGreaterThan(0);
+    expect(fills.some((call) => call.fillStyle === auraFor('clawde'))).toBe(true);
+    expect(fills.some((call) => call.fillStyle === ARENA_PALETTE.ultFlash)).toBe(true);
+    // And nothing in the site accent, which is the level-3 fallback's colour.
+    expect(fills.some((call) => call.fillStyle === THEME.accent)).toBe(false);
+    expect(ctx.calls.some((call) => call.op === 'drawImage')).toBe(false);
+  });
+
+  it('level 3: no roster at all falls all the way back to Story 10.4', () => {
+    const ctx = createRecordingCanvas();
+    drawCinematicStage(ctx, releasing(), VIEWPORT, THEME, ultSheetFor(['clawde']), undefined);
+    const fills = ctx.calls.filter((call) => call.op === 'fillRect');
+    expect(fills.length).toBeGreaterThan(0);
+    // The accent band and its cap, exactly as 10.4 drew them.
+    for (const call of fills) {
+      expect(call.fillStyle).toBe(THEME.accent);
+    }
+    expect(ctx.calls.some((call) => call.op === 'drawImage')).toBe(false);
+  });
+
+  it('draws the caster portrait and their name, and the banner without one', () => {
+    const withPortrait = createRecordingCanvas();
+    drawCinematicPlate(
+      withPortrait,
+      cinematicWith({ portraitBasisPoints: BASIS_POINTS_FULL, letterboxPx: 52, title: true }),
+      VIEWPORT,
+      THEME,
+      ultSheetFor(['clawde']),
+      'clawde',
+    );
+    expect(withPortrait.calls.some((call) => call.op === 'drawImage')).toBe(true);
+    const names = withPortrait.calls.filter((call) => call.op === 'fillText');
+    expect(names.map((call) => call.args[0])).toStrictEqual([
+      ROSTER_NAMES.clawde,
+      ROSTER_NAMES.clawde,
+    ]);
+    // Twice: the hard offset shadow, which is the treatment Story 11.3 settled
+    // on rather than a third typeface.
+    expect(names[0].args[1]).not.toBe(names[1].args[1]);
+    expect(withPortrait.font).toBe(THEME.arcadeFont);
+    // The banner is *not* drawn over a portrait -- a full-width warn plate
+    // through a letterboxed cutscene is the thing this replaced.
+    expect(names.some((call) => call.args[0] === 'ULTIMATE')).toBe(false);
+  });
+
+  it('stands the banner in when the portrait alone is missing', () => {
+    // A fighter whose beam decoded and whose portrait 404'd. The two are
+    // separate files, so they are dropped separately.
+    const sheet = ultSheetFor(['clawde'], { portraits: false });
+    expect(sheet.partFor('clawde', 'beam')).toBeDefined();
+    expect(sheet.portraitFor('clawde')).toBeUndefined();
+
+    const ctx = createRecordingCanvas();
+    drawCinematicPlate(
+      ctx,
+      cinematicWith({ portraitBasisPoints: BASIS_POINTS_FULL, letterboxPx: 52, title: true }),
+      VIEWPORT,
+      THEME,
+      sheet,
+      'clawde',
+    );
+    expect(ctx.calls.some((call) => call.op === 'drawImage')).toBe(false);
+    expect(ctx.calls.some((call) => call.args[0] === 'ULTIMATE')).toBe(true);
+  });
+
+  it('never throws on any combination of absent art and unknown caster', () => {
+    // The acceptance criterion as a sweep rather than as three cases: whatever
+    // is missing, the Ultimate is still thrown, without throwing.
+    for (const ult of [undefined, ultSheetFor(['clawde']), ultSheetFor(['clawde'], { portraits: false })]) {
+      for (const caster of [undefined, 'clawde' as const, 'chatty' as const]) {
+        for (const record of [cinematicWith({ orbRadiusPx: 20, letterboxPx: 52 }), releasing()]) {
+          expect(() => {
+            const ctx = createRecordingCanvas();
+            drawCinematicStage(ctx, record, VIEWPORT, THEME, ult, caster);
+            drawCinematicPlate(ctx, record, VIEWPORT, THEME, ult, caster);
+          }).not.toThrow();
+        }
+      }
+    }
+  });
+
+  it('restores both compositing modes after every additive layer', () => {
+    // `lighter` left set would additively blend the *next* frame's backdrop and
+    // fighters, which reads as the whole stage catching fire on the frame after
+    // an Ultimate. The same failure `paintImpacts` guards against, in a path
+    // that sets the mode a dozen times a frame rather than once.
+    const ctx = createRecordingCanvas();
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = 1;
+    drawCinematicStage(ctx, releasing(), VIEWPORT, THEME, ultSheetFor(['clawde']), 'clawde');
+    drawCinematicPlate(
+      ctx,
+      releasing({ flashBasisPoints: 4_000, letterboxPx: 52, portraitBasisPoints: BASIS_POINTS_FULL }),
+      VIEWPORT,
+      THEME,
+      ultSheetFor(['clawde']),
+      'clawde',
+    );
+    expect(ctx.globalCompositeOperation).toBe('source-over');
+    expect(ctx.globalAlpha).toBe(1);
+  });
+
+  it('tints the slam with the caster aura rather than painting flat white', () => {
+    const ctx = createRecordingCanvas();
+    drawCinematicPlate(
+      ctx,
+      releasing({ flashBasisPoints: BASIS_POINTS_FULL }),
+      VIEWPORT,
+      THEME,
+      undefined,
+      'clawde',
+    );
+    const plate = ctx.calls.find(
+      (call) => call.op === 'fillRect' && call.args[3] === VIEWPORT.height,
+    );
+    expect(plate).toBeDefined();
+    expect(plate?.fillStyle).not.toBe(ARENA_PALETTE.ultFlash);
+    expect(plate?.fillStyle).not.toBe(auraFor('clawde'));
+    // 40% of clawde's `#d97706` into `#ffffff`, worked out by hand rather than
+    // read back off the mixer: 255 - 0.4*(255-217) = 240 = `f0`,
+    // 255 - 0.4*(255-119) = 201 = `c9`, 255 - 0.4*(255-6) = 155 = `9b`.
+    expect(plate?.fillStyle).toMatch(/^#[0-9a-f]{6}$/);
+    expect(plate?.fillStyle).toBe('#f0c99b');
   });
 });
 

@@ -1,0 +1,38 @@
+{
+  "cellWidth": 208,
+  "cellHeight": 208,
+  "fighters": {
+    "clawde": {
+      "portrait": "/portraits/clawde.png",
+      "parts": {
+        "muzzle": { "image": "/fx/fx_ult.png", "x": 0, "y": 0 },
+        "beam": { "image": "/fx/fx_ult.png", "x": 208, "y": 0 },
+        "impact": { "image": "/fx/fx_ult.png", "x": 416, "y": 0 }
+      }
+    },
+    "chatty": {
+      "portrait": "/portraits/chatty.png",
+      "parts": {
+        "muzzle": { "image": "/fx/fx_ult.png", "x": 624, "y": 0 },
+        "beam": { "image": "/fx/fx_ult.png", "x": 832, "y": 0 },
+        "impact": { "image": "/fx/fx_ult.png", "x": 0, "y": 208 }
+      }
+    },
+    "gemini": {
+      "portrait": "/portraits/gemini.png",
+      "parts": {
+        "muzzle": { "image": "/fx/fx_ult.png", "x": 208, "y": 208 },
+        "beam": { "image": "/fx/fx_ult.png", "x": 416, "y": 208 },
+        "impact": { "image": "/fx/fx_ult.png", "x": 624, "y": 208 }
+      }
+    },
+    "grokk": {
+      "portrait": "/portraits/grokk.png",
+      "parts": {
+        "muzzle": { "image": "/fx/fx_ult.png", "x": 832, "y": 208 },
+        "beam": { "image": "/fx/fx_ult.png", "x": 0, "y": 416 },
+        "impact": { "image": "/fx/fx_ult.png", "x": 208, "y": 416 }
+      }
+    }
+  }
+}

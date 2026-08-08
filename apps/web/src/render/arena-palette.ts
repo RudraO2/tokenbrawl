@@ -145,6 +145,21 @@
  *   0.35 white, `hudBevel` the lit top edge, `hudFrame` the 0.2 outline.
  * - `<REF>/game_source/js/data.js:87,102,117,132` -- one `brandHex` per
  *   fighter, for the four in this project's roster.
+ * - `<REF>/game_source/js/screens.js:2819-2831` -- the Ultimate cinematic's
+ *   letterbox bars (`'#000'`) and its vignette (a radial ramp to
+ *   `rgba(0,0,0,0.65)`). Both arrive here as the single `curtain` entry, drawn
+ *   at two alphas by `juice-draw.ts`.
+ * - `<REF>/game_source/js/screens.js:1500` -- the tick-80 flash, which is white
+ *   with the caster's aura mixed 40% into it. `ultFlash` is the white end of
+ *   that mix; the mixed value is computed at the draw call, never typed.
+ *
+ * **Pixel extents from the reference are scaled by height, not copied.** The
+ * reference's stage is 1920x1080 and this one is 960x400, so Story 11.4's
+ * letterbox is 52px rather than 140 (`140/1080` of 400), its beam is 36px
+ * rather than 96, and its orb tops out at a 30px radius rather than 80. Those
+ * live in `juice.ts`'s tuning table, not here -- a palette holds colour -- but
+ * the conversion is recorded once, here, because this is the file a reader
+ * comes to when asking what else was changed on the way across.
  *
  * `hpMid` and `superMeterFull` being near-identical is the reason the
  * uniqueness assertion in `style-discipline.test.ts` is on *values* and not on
@@ -225,6 +240,31 @@ export interface ArenaPalette {
   readonly superMeterFull: ArenaGradient;
   /** The Token Bank meter -- the reference's third-resource violet, renamed for what it meters. */
   readonly bank: ArenaGradient;
+  /**
+   * The cutscene's black: the Ultimate's letterbox bars and its vignette (Story
+   * 11.4).
+   *
+   * One entry for both, because they are one colour drawn at two alphas -- the
+   * reference's bars are `'#000'` and its vignette is a radial ramp to
+   * `rgba(0,0,0,0.65)` of the same black. Two names for one exact value is a
+   * palette drifting, which is the rule `style-discipline.test.ts` states as
+   * "declares each colour once".
+   *
+   * Deliberately *not* `--tb-bg` (`#0a0a0a`). The ground is the stage's own
+   * dark; a letterbox bar has to read as **absence of stage**, and a bar the
+   * same colour as the backdrop behind it is not a bar.
+   */
+  readonly curtain: string;
+  /**
+   * The white-hot core: the Ultimate's slam flash and the centre of its orb and
+   * beam (Story 11.4).
+   *
+   * Full white rather than `--tb-ink` (`#f5f5f0`), because this is light rather
+   * than a surface. The slam is drawn as this mixed with the caster's aura, at
+   * the reference's own 40% tint (`screens.js:1500`), so the value here is the
+   * end of that mix and never the colour actually painted.
+   */
+  readonly ultFlash: string;
   /** Per-fighter aura, for glows and Ultimate FX that must read as *whose*. */
   readonly aura: ArenaAura;
 }
@@ -246,6 +286,8 @@ export const ARENA_PALETTE: ArenaPalette = Object.freeze({
   superMeter: Object.freeze({ from: '#7fefff', to: '#0e9fb8' }),
   superMeterFull: Object.freeze({ from: '#ffe58a', to: '#d9a21a' }),
   bank: Object.freeze({ from: '#b9a7ff', to: '#6e5bd8' }),
+  curtain: '#000000',
+  ultFlash: '#ffffff',
   aura: Object.freeze({
     clawde: '#d97706',
     chatty: '#10a37f',

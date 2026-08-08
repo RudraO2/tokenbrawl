@@ -151,14 +151,34 @@ export interface SparkBurst {
 }
 
 /**
- * Story 10.4. The Ultimate cinematic, entirely in frames and pixels.
+ * Story 10.4, re-timed into three acts by Story 11.4. The Ultimate cinematic,
+ * entirely in frames and pixels.
  *
- * Every field is a count of **clock** frames or a pixel extent. Nothing here
- * is a millisecond, a ratio of a second, or an easing curve with a duration
- * baked into it (INV-1, INV-3). Setting `freezeFrames` to `0` removes the
- * cinematic completely -- no hold, no record on any frame, no drawn call --
+ * Every field is a count of **clock** frames, a pixel extent, or basis points.
+ * Nothing here is a millisecond, a ratio of a second, or an easing curve with a
+ * duration baked into it (INV-1, INV-3). Setting `freezeFrames` to `0` removes
+ * the cinematic completely -- no hold, no record on any frame, no drawn call --
  * which is the configuration `cinematic-neutrality.test.ts` compares the
  * shipped one against.
+ *
+ * ## Why 11.4 re-timed rather than rewrote
+ *
+ * 10.4's cinematic was correct and **front-loaded**: the flash was the first
+ * thing that happened. The reference is back-loaded, and that is the whole
+ * reason its version reads as a payoff -- an orb builds at the caster's hand
+ * across ~78 ticks, blooms into a muzzle flash, the screen slams white at tick
+ * 80, and only *then* does a beam fire. So the freeze, the record, the streak
+ * field and the shake are all kept exactly as they were, and the counts below
+ * are re-laid-out into build / slam / release.
+ *
+ * ## Pixel extents are scaled, frame counts are not
+ *
+ * The reference's stage is 1920x1080 and this one is 960x400. Every pixel
+ * extent below is therefore its reference value scaled **by height** -- 140
+ * letterbox becomes 52, a 96px beam becomes 36, an 80px orb radius becomes 30 --
+ * while every *frame* count is copied unchanged, because a tick there and a
+ * clock frame here are both one animation frame and the feel of a curve is in
+ * its duration.
  */
 export interface CinematicTuning {
   /**
@@ -166,39 +186,105 @@ export interface CinematicTuning {
    *
    * The reference's `CINEMATIC_FREEZE`, moved from its simulation to this
    * renderer. `0` disables the cinematic outright.
+   *
+   * Note what this is **not**: the cinematic's length. The release act runs on
+   * past the freeze, over resumed playback, exactly as the reference nulls
+   * `state.cinematic` at tick 80 and lets its 50-tick `beamWindow` play over
+   * live gameplay. `JuiceCinematic.frames` is the total.
    */
   readonly freezeFrames: number;
   /**
-   * Opening frames that paint a full-stage plate.
+   * Frames the letterbox bars take to slide in, on `easeOutBack`, and their
+   * settled height in pixels.
    *
-   * One solid plate, deliberately **not** a strobe. An alternating flash is
-   * the obvious arcade idiom and it is also a photosensitivity trigger at the
-   * frequency it would run at here (a plate every other frame is 30Hz); a
-   * single 3-frame plate reads as the same impact and repeats nothing.
+   * The overshoot is the reference's and it is worth keeping: bars that
+   * overshoot and settle read as a camera framing a shot, where bars that ease
+   * flatly read as a UI panel opening.
    */
-  readonly flashFrames: number;
+  readonly letterboxFrames: number;
+  readonly letterboxHeightPx: number;
+  /**
+   * How dark the vignette's outer edge gets, in basis points of full opacity.
+   *
+   * The reference builds this with `createRadialGradient`, which the `Canvas2D`
+   * port does not have and which this story is not the one that widens it for.
+   * `juice-draw.ts` draws the same darkening as a stack of edge bands, so this
+   * is the strength of the outermost one.
+   */
+  readonly vignetteBasisPoints: number;
+  /** When the caster's portrait starts sliding in, and how long it takes. */
+  readonly portraitFromFrame: number;
+  readonly portraitFrames: number;
+  /** The portrait's drawn size in pixels, at the reference's aspect ratio. */
+  readonly portraitWidthPx: number;
+  readonly portraitHeightPx: number;
+  /**
+   * Frames the energy orb grows across, and the radii it grows between.
+   *
+   * The growth is `age²` rather than linear -- the reference's `growP * growP`
+   * -- which is what makes the build *accelerate* into the bloom instead of
+   * crawling toward it at a constant rate.
+   */
+  readonly orbFrames: number;
+  readonly orbMinPx: number;
+  readonly orbMaxPx: number;
+  /**
+   * When the orb blooms into a muzzle flash, over how many frames, and by how
+   * much.
+   *
+   * `bloomBasisPoints` is the *extra* scale at full bloom, so the reference's
+   * `finalR = orbR * (1 + boomP * 2.2)` is `22_000` here.
+   */
+  readonly bloomFromFrame: number;
+  readonly bloomFrames: number;
+  readonly bloomBasisPoints: number;
+  /**
+   * The slam: a full-viewport plate near the end of the freeze, tinted with the
+   * caster's aura.
+   *
+   * Still deliberately **not** a strobe -- one rise and one fall, no repeat.
+   * 10.4's docblock made that argument about a 3-frame plate at the *start*;
+   * the argument is unchanged and the plate now ramps its alpha down across
+   * `slamFrames` rather than sitting solid, which is a smaller luminance event
+   * than the one it replaces.
+   *
+   * `slamTintBasisPoints` is how much of the caster's aura is mixed into white
+   * (the reference's `mixHex(white, aura, 0.4)` at `screens.js:1500`).
+   */
+  readonly slamFromFrame: number;
+  readonly slamFrames: number;
+  readonly slamTintBasisPoints: number;
+  /**
+   * The release: when the beam fires, how long it is on screen, and how many
+   * frames it takes to sweep out to full extent on `easeOutCubic`.
+   *
+   * `releaseFromFrame` is the reference's tick 80 -- the same frame the slam
+   * lands on, because the flash is what covers the cut back to gameplay.
+   */
+  readonly releaseFromFrame: number;
+  readonly releaseFrames: number;
+  readonly beamSweepFrames: number;
+  /** The beam's thickness in pixels. The reference's 96 on a 1080-tall stage. */
+  readonly beamThicknessPx: number;
+  /**
+   * How much larger the impact art is drawn than the beam, in basis points.
+   *
+   * The reference draws it at 1.8x so an Ultimate's impact clearly out-scales
+   * an ordinary blast's.
+   */
+  readonly impactScaleBasisPoints: number;
   /** First frame the title banner appears on, and how long it stays. */
   readonly titleFromFrame: number;
   readonly titleFrames: number;
   /** Frames the impact mark takes to reach its full extent. It then holds. */
   readonly impactFrames: number;
   /**
-   * How far past the fighter it landed on the mark reaches, in basis points.
+   * The shortest the beam may ever be, in basis points.
    *
-   * Basis points across the arena, and derived from the *separation* rather
-   * than being a fixed length, because a fixed one cannot be right at both
-   * ends of the range. The first draft reached a flat 300px and the visual
-   * gate caught it immediately: these two fighters were `minSeparation` apart,
-   * so the mark drove straight through the opponent and ended in empty stage
-   * -- a laser that missed, drawn on the frame the Ultimate connected.
-   */
-  readonly impactOvershootBasisPoints: number;
-  /**
-   * The shortest the mark may ever be, in basis points.
-   *
-   * A point-blank Ultimate has almost no separation to derive a length from,
-   * and a two-pixel mark on the biggest Action in the game reads as nothing
-   * having happened.
+   * The reference's `Math.max(420, edgeLen)`: a caster standing at the arena
+   * edge they are facing has almost no distance to fire across, and a
+   * two-pixel beam on the biggest Action in the game reads as nothing having
+   * happened. `420/1920` of the stage is `2_187` basis points.
    */
   readonly impactMinBasisPoints: number;
   /** The impact mark's thickness, in pixels. */
@@ -331,17 +417,37 @@ export const DEFAULT_JUICE_TUNING: JuiceTuning = Object.freeze({
   damageNumberFrames: 24,
   damageNumberRisePx: 28,
   // 90 is the reference's own `CINEMATIC_FREEZE`, held by the renderer instead
-  // of by the simulation. The segments inside it are laid out so the hold is
-  // never a still picture: plate, then banner and expanding mark, then a
-  // streak field that outlives both and carries the stage to the resume.
+  // of by the simulation. Story 11.4 lays the three acts out inside and past
+  // it, on the reference's own tick numbers: letterbox in over 15, portrait
+  // from 10, orb growing to 78 and blooming from 66, slam at 80, beam from 80
+  // for 50 -- so the record runs 130 clock frames while the *freeze* stays 90.
   cinematic: Object.freeze({
     freezeFrames: 90,
-    flashFrames: 3,
-    titleFromFrame: 3,
-    titleFrames: 78,
+    letterboxFrames: 15,
+    letterboxHeightPx: 52,
+    vignetteBasisPoints: 6_500,
+    portraitFromFrame: 10,
+    portraitFrames: 30,
+    portraitWidthPx: 170,
+    portraitHeightPx: 228,
+    orbFrames: 78,
+    orbMinPx: 3,
+    orbMaxPx: 30,
+    bloomFromFrame: 66,
+    bloomFrames: 14,
+    bloomBasisPoints: 22_000,
+    slamFromFrame: 80,
+    slamFrames: 10,
+    slamTintBasisPoints: 4_000,
+    releaseFromFrame: 80,
+    releaseFrames: 50,
+    beamSweepFrames: 8,
+    beamThicknessPx: 36,
+    impactScaleBasisPoints: 18_000,
+    titleFromFrame: 10,
+    titleFrames: 70,
     impactFrames: 22,
-    impactOvershootBasisPoints: 1_000,
-    impactMinBasisPoints: 1_200,
+    impactMinBasisPoints: 2_187,
     impactBandPx: 16,
     impactHeightPx: 108,
     shakeMagnitude: 16,
@@ -499,6 +605,21 @@ export interface JuiceStreak {
   readonly sizePx: number;
 }
 
+/**
+ * Which of the three acts a cinematic frame belongs to (Story 11.4).
+ *
+ * Informational rather than a switch the drawing dispatches on -- every
+ * quantity below is already zero outside its own window, so nothing has to ask.
+ * It exists because "the Ultimate reads as three acts" is the story's first
+ * acceptance criterion, and a criterion phrased about structure deserves an
+ * assertion about structure rather than three about pixel counts.
+ *
+ * `slam` wins where it overlaps `release`: the beam fires on the same frame the
+ * screen flashes, because in the reference the flash is what covers the cut
+ * back to gameplay.
+ */
+export type CinematicAct = 'build' | 'slam' | 'release';
+
 /** Everything the cinematic needs on one clock frame, or `null` on every other frame. */
 export interface JuiceCinematic {
   readonly agentIndex: 0 | 1;
@@ -507,21 +628,90 @@ export interface JuiceCinematic {
   readonly connected: boolean;
   /** Clock frames since the freeze opened. `0` on the one live frame. */
   readonly age: number;
-  /** Total clock frames this cinematic occupies: the live frame plus every hold. */
+  /**
+   * Total clock frames this cinematic occupies.
+   *
+   * The freeze plus the live frame, **or** the release act's end, whichever is
+   * later. Under the shipped tuning that is 130 rather than 91: the beam plays
+   * over resumed playback for 50 frames after the slam.
+   */
   readonly frames: number;
-  /** This frame paints the full-stage plate. */
-  readonly flash: boolean;
-  /** This frame carries the title banner. */
+  /** Which act this frame belongs to. */
+  readonly act: CinematicAct;
+  /**
+   * The letterbox bars' height on this frame, in pixels.
+   *
+   * Eased in on `easeOutBack` over `letterboxFrames`, held, and eased back out
+   * from the slam -- so the bars are gone by the time the beam is sweeping and
+   * the frame is a fight again rather than a cutscene with a beam in it.
+   */
+  readonly letterboxPx: number;
+  /** The vignette's outer strength on this frame, in basis points of full opacity. */
+  readonly vignetteBasisPoints: number;
+  /** The energy orb's radius in pixels. `0` outside the build act. */
+  readonly orbRadiusPx: number;
+  /**
+   * Extra orb scale from the bloom, in basis points. `0` until `bloomFromFrame`.
+   *
+   * Carried separately from `orbRadiusPx` rather than folded into it because
+   * the two say different things to the drawing: the radius is the orb, and
+   * this is the muzzle flash it becomes. `juice-draw.ts` draws the white core
+   * only while this is rising.
+   */
+  readonly bloomBasisPoints: number;
+  /**
+   * How far the caster's portrait has slid in, in basis points, eased.
+   *
+   * `easeOutBack`, so it **exceeds** `BASIS_POINTS_FULL` mid-slide and settles
+   * back. `0` before `portraitFromFrame`, which is what "not on screen yet"
+   * means here.
+   */
+  readonly portraitBasisPoints: number;
+  /** The portrait's drawn size in pixels, carried so the drawing has no size of its own. */
+  readonly portraitWidthPx: number;
+  readonly portraitHeightPx: number;
+  /** How much of the caster's aura the slam plate mixes into white, in basis points. */
+  readonly slamTintBasisPoints: number;
+  /**
+   * The slam plate's opacity on this frame, in basis points. `0` on every frame
+   * outside the slam, which is what "no plate" means.
+   *
+   * Basis points rather than a boolean because the plate now falls off across
+   * `slamFrames` instead of being painted solid -- see `CinematicTuning`.
+   */
+  readonly flashBasisPoints: number;
+  /** This frame carries the title banner (the stand-in for an absent portrait). */
   readonly title: boolean;
   /**
-   * How far the impact mark reaches from the caster, in basis points across
-   * the arena. `0` draws nothing.
+   * How far the beam reaches from the caster, in basis points across the arena.
+   * `0` draws nothing.
    *
    * Basis points rather than pixels, for the reason the whole module gives:
    * `juice-draw.ts` owns the one multiplication that turns this into a screen
    * coordinate, because it is the only file that has a viewport.
+   *
+   * Story 10.4 grew this from age zero as an impact *mark*; 11.4 makes it the
+   * release act's sweep, so it is zero for the whole build and slam and then
+   * sweeps to the arena edge on `easeOutCubic`. The two renderings of it -- a
+   * sprite beam and 10.4's accent band -- read the same number.
    */
   readonly reachBasisPoints: number;
+  /** The beam's thickness in pixels, and the height above the floor it fires at. */
+  readonly beamThicknessPx: number;
+  readonly beamHeightPx: number;
+  /**
+   * Where the beam terminates, in basis points: the target if the sweep has
+   * reached them, otherwise the beam's leading edge.
+   */
+  readonly impactBasisPoints: number;
+  /**
+   * Whether the sweep currently covers the target.
+   *
+   * Distinct from `connected`, which is what the *simulation* did across the
+   * Decision Point. Impact art needs both: a whiff must never draw one, and a
+   * connecting Ultimate must not draw one before its beam has arrived.
+   */
+  readonly impactCovers: boolean;
   /** The impact mark's thickness in pixels, and the height it is struck at. */
   readonly bandPx: number;
   readonly heightPx: number;
@@ -1043,36 +1233,201 @@ function streaksFor(
 }
 
 /**
- * How far the impact mark reaches at full extension, in basis points.
+ * `1 - (1 - t)³`, in basis points (Story 11.4).
  *
- * The separation between the two fighters plus a fixed overshoot, floored so a
- * point-blank Ultimate still leaves a mark and capped at the arena so it can
- * never be drawn off-stage.
+ * The reference's `easeOutCubic`, which is what its beam sweeps out on. Written
+ * as integer arithmetic rather than as floats for the reason the whole module
+ * gives: every value on a `JuiceCinematic` is an integer, and the one division
+ * into a float happens at the canvas boundary in `juice-draw.ts`.
+ *
+ * `u³` peaks at `1e12`, comfortably inside `Number.MAX_SAFE_INTEGER`, so this
+ * one needs no staging.
+ */
+export function easeOutCubicBasisPoints(progress: number): number {
+  const t = Math.max(0, Math.min(BASIS_POINTS_FULL, Math.floor(progress)));
+  const u = BASIS_POINTS_FULL - t;
+  // `ceil` on the subtracted term, so the *result* floors. Flooring the
+  // subtrahend would round the curve upward, which puts the sweep one basis
+  // point ahead of the value it is meant to be truncating toward.
+  return BASIS_POINTS_FULL - Math.ceil((u * u * u) / 100_000_000);
+}
+
+/** `c1` and `c3` from the standard `easeOutBack`, in basis points: 1.70158 and 2.70158. */
+const BACK_C1_BASIS_POINTS = 17_016;
+const BACK_C3_BASIS_POINTS = 27_016;
+
+/**
+ * `1 + c3·(t-1)³ + c1·(t-1)²`, in basis points (Story 11.4).
+ *
+ * The overshooting ease the reference slides its letterbox bars and its
+ * portrait in on. **Returns more than `BASIS_POINTS_FULL` mid-curve** -- it
+ * peaks near `10_905` around `t = 0.66`, which is the overshoot and the whole
+ * reason this curve rather than a cubic. Callers must not clamp the *output*.
+ *
+ * The multiplications are staged through an intermediate floor because they
+ * would otherwise leave the safe-integer range: `c3 · u³` is `2.7e16` at the
+ * endpoint and `Number.MAX_SAFE_INTEGER` is `9.0e15`. Dividing `u³` down by
+ * `1e6` first keeps every intermediate under `2.7e10`, at a cost of a basis
+ * point or two of precision in a value that becomes a pixel offset.
+ */
+export function easeOutBackBasisPoints(progress: number): number {
+  const t = Math.max(0, Math.min(BASIS_POINTS_FULL, Math.floor(progress)));
+  const u = t - BASIS_POINTS_FULL;
+  const cubic = Math.floor((BACK_C3_BASIS_POINTS * Math.floor((u * u * u) / 1_000_000)) / 1_000_000);
+  const square = Math.floor((BACK_C1_BASIS_POINTS * (u * u)) / 100_000_000);
+  return BASIS_POINTS_FULL + cubic + square;
+}
+
+/** `numerator / denominator` as basis points, clamped to `0..BASIS_POINTS_FULL`. */
+function progressBasisPointsOf(numerator: number, denominator: number): number {
+  if (denominator <= 0) {
+    return BASIS_POINTS_FULL;
+  }
+  const raw = Math.floor((Math.max(0, numerator) * BASIS_POINTS_FULL) / denominator);
+  return Math.max(0, Math.min(BASIS_POINTS_FULL, raw));
+}
+
+/**
+ * How far the beam reaches at full extension, in basis points.
+ *
+ * The reference's `fullLen = Math.max(420, edgeLen)`: the distance from the
+ * caster to the arena edge they are facing, floored so a caster pinned against
+ * that edge still fires something. **Not** the separation between the fighters
+ * -- an Ultimate that stopped at the opponent would be a stick rather than a
+ * beam, and the reference explicitly draws past them and flares where the two
+ * meet.
+ *
+ * Story 10.4 derived this from the separation plus a fixed overshoot, because
+ * what it was sizing was an impact *mark* rather than a beam. Same field, new
+ * meaning; the overshoot tuning went with the old one.
  */
 function fullReachFor(event: CinematicEvent, tuning: JuiceTuning): number {
   const shape = tuning.cinematic;
-  const separation = Math.abs(event.targetBasisPoints - event.casterBasisPoints);
+  const toward = event.targetBasisPoints >= event.casterBasisPoints ? 1 : -1;
+  const toEdge =
+    toward > 0 ? BASIS_POINTS_FULL - event.casterBasisPoints : event.casterBasisPoints;
   return Math.min(
     BASIS_POINTS_FULL,
-    Math.max(
-      Math.max(0, shape.impactMinBasisPoints),
-      separation + Math.max(0, shape.impactOvershootBasisPoints),
-    ),
+    Math.max(Math.max(0, shape.impactMinBasisPoints), Math.max(0, toEdge)),
   );
 }
 
-/** The whole cinematic record for one event at one age. */
-function cinematicAt(event: CinematicEvent, age: number, tuning: JuiceTuning): JuiceCinematic {
+/** Total clock frames a cinematic occupies: the freeze, or the release act, whichever ends later. */
+function cinematicFramesFor(tuning: JuiceTuning): number {
   const shape = tuning.cinematic;
-  // Expands to full reach and then *stays* there: AC5 asks for an impact
-  // mark, and a mark that retracted would be a second flash.
-  const reachBasisPoints = event.connected
-    ? Math.floor(
-        (fullReachFor(event, tuning) *
-          Math.min(Math.max(0, age), Math.max(1, shape.impactFrames))) /
-          Math.max(1, shape.impactFrames),
-      )
+  return Math.max(
+    Math.max(0, shape.freezeFrames) + 1,
+    Math.max(0, shape.releaseFromFrame) + Math.max(0, shape.releaseFrames),
+  );
+}
+
+/**
+ * The whole cinematic record for one event at one age.
+ *
+ * `reducedMotion` is a parameter rather than a post-hoc rewrite of the finished
+ * record, which is what Story 10.4's `stilled` was. Three acts' worth of fields
+ * is too many for a patch function to stay honest about: every field 11.4 added
+ * would have had to be remembered in a second place, and the one forgotten
+ * would be a full-stage luminance change reaching a viewer who asked for less
+ * motion. Here each quantity states its own reduced value beside its moving
+ * one, so there is no second list to keep in step.
+ *
+ * What reduced motion switches off is the *motion*, never the beat: the track
+ * keeps its frame count and its acts, the flash and the streak field go
+ * entirely, and everything that would have moved is pinned at the value it
+ * settles on.
+ */
+function cinematicAt(
+  event: CinematicEvent,
+  age: number,
+  tuning: JuiceTuning,
+  reducedMotion: boolean,
+): JuiceCinematic {
+  const shape = tuning.cinematic;
+  const clampedAge = Math.max(0, age);
+
+  // --- Act 3, the release. Zero until the beam fires, then swept out and held.
+  const releaseAge = clampedAge - Math.max(0, shape.releaseFromFrame);
+  const releasing = releaseAge >= 0 && releaseAge < Math.max(0, shape.releaseFrames);
+  const sweep = releasing
+    ? reducedMotion
+      ? BASIS_POINTS_FULL
+      : easeOutCubicBasisPoints(progressBasisPointsOf(releaseAge, Math.max(1, shape.beamSweepFrames)))
     : 0;
+  const fullReach = fullReachFor(event, tuning);
+  const reachBasisPoints = Math.floor((fullReach * sweep) / BASIS_POINTS_FULL);
+
+  const toward = event.targetBasisPoints >= event.casterBasisPoints ? 1 : -1;
+  const leadingEdge = event.casterBasisPoints + toward * reachBasisPoints;
+  const separation = Math.abs(event.targetBasisPoints - event.casterBasisPoints);
+  const impactCovers = releasing && reachBasisPoints >= separation;
+  const impactBasisPoints = impactCovers ? event.targetBasisPoints : leadingEdge;
+
+  // --- Act 2, the slam. One rise and one fall across `slamFrames`, no repeat.
+  const slamAge = clampedAge - Math.max(0, shape.slamFromFrame);
+  const slamming = !reducedMotion && slamAge >= 0 && slamAge < Math.max(0, shape.slamFrames);
+  const flashBasisPoints = slamming
+    ? BASIS_POINTS_FULL -
+      progressBasisPointsOf(slamAge, Math.max(1, shape.slamFrames))
+    : 0;
+
+  // --- Act 1, the build. The orb grows on `age²` -- the reference's `growP *
+  // growP` -- which is what makes the build accelerate into the bloom rather
+  // than crawl toward it.
+  const building = clampedAge < Math.max(0, shape.slamFromFrame);
+  const growth = progressBasisPointsOf(clampedAge, Math.max(1, shape.orbFrames));
+  const accelerated = reducedMotion
+    ? BASIS_POINTS_FULL
+    : Math.floor((growth * growth) / BASIS_POINTS_FULL);
+  const orbSpanPx = Math.max(0, shape.orbMaxPx - shape.orbMinPx);
+  const orbRadiusPx = building
+    ? Math.max(0, shape.orbMinPx) + Math.floor((orbSpanPx * accelerated) / BASIS_POINTS_FULL)
+    : 0;
+  const bloomAge = clampedAge - Math.max(0, shape.bloomFromFrame);
+  const bloomBasisPoints =
+    building && bloomAge >= 0 && !reducedMotion
+      ? Math.floor(
+          (Math.max(0, shape.bloomBasisPoints) *
+            progressBasisPointsOf(bloomAge, Math.max(1, shape.bloomFrames))) /
+            BASIS_POINTS_FULL,
+        )
+      : 0;
+
+  // --- Framing. The bars slide in on `easeOutBack`, hold, and retract from the
+  // slam, so the beam plays over a stage rather than inside a cutscene.
+  const letterboxFrames = Math.max(1, shape.letterboxFrames);
+  const retractAge = clampedAge - Math.max(0, shape.slamFromFrame);
+  const framingBasisPoints = reducedMotion
+    ? retractAge >= letterboxFrames
+      ? 0
+      : BASIS_POINTS_FULL
+    : retractAge >= 0
+      ? BASIS_POINTS_FULL -
+        easeOutCubicBasisPoints(progressBasisPointsOf(retractAge, letterboxFrames))
+      : easeOutBackBasisPoints(progressBasisPointsOf(clampedAge, letterboxFrames));
+  const letterboxPx = Math.max(
+    0,
+    Math.floor((Math.max(0, shape.letterboxHeightPx) * framingBasisPoints) / BASIS_POINTS_FULL),
+  );
+  const vignetteBasisPoints = Math.max(
+    0,
+    Math.floor(
+      (Math.max(0, shape.vignetteBasisPoints) * Math.min(BASIS_POINTS_FULL, framingBasisPoints)) /
+        BASIS_POINTS_FULL,
+    ),
+  );
+
+  // --- The subject. Slides in from the caster's own side on `easeOutBack`,
+  // and leaves with the bars.
+  const portraitAge = clampedAge - Math.max(0, shape.portraitFromFrame);
+  const portraitBasisPoints =
+    portraitAge < 0 || letterboxPx === 0
+      ? 0
+      : reducedMotion
+        ? BASIS_POINTS_FULL
+        : easeOutBackBasisPoints(
+            progressBasisPointsOf(portraitAge, Math.max(1, shape.portraitFrames)),
+          );
 
   return Object.freeze({
     agentIndex: event.agentIndex,
@@ -1080,36 +1435,29 @@ function cinematicAt(event: CinematicEvent, age: number, tuning: JuiceTuning): J
     targetBasisPoints: event.targetBasisPoints,
     connected: event.connected,
     age,
-    frames: Math.max(0, shape.freezeFrames) + 1,
-    flash: age < shape.flashFrames,
+    frames: cinematicFramesFor(tuning),
+    act: building ? 'build' : slamAge < Math.max(0, shape.slamFrames) ? 'slam' : 'release',
+    letterboxPx,
+    vignetteBasisPoints,
+    orbRadiusPx,
+    bloomBasisPoints,
+    portraitBasisPoints,
+    portraitWidthPx: Math.max(0, shape.portraitWidthPx),
+    portraitHeightPx: Math.max(0, shape.portraitHeightPx),
+    slamTintBasisPoints: Math.max(
+      0,
+      Math.min(BASIS_POINTS_FULL, shape.slamTintBasisPoints),
+    ),
+    flashBasisPoints,
     title: age >= shape.titleFromFrame && age < shape.titleFromFrame + shape.titleFrames,
     reachBasisPoints,
+    beamThicknessPx: Math.max(0, shape.beamThicknessPx),
+    beamHeightPx: Math.max(0, shape.impactHeightPx),
+    impactBasisPoints,
+    impactCovers,
     bandPx: shape.impactBandPx,
     heightPx: shape.impactHeightPx,
-    streaks: streaksFor(event, age, tuning),
-  });
-}
-
-/**
- * The cinematic a reduced-motion viewer gets: the same beat, standing still.
- *
- * The freeze itself is kept -- the track's shape is never flattened, for the
- * reason `buildJuiceTrack`'s `reducedMotion` note gives -- but the plate, the
- * streak field and the mark's expansion all go. What is left is a still title
- * card with the mark already drawn at full reach, which says the same thing
- * without any of the three motions that made it worth switching off: a
- * full-stage luminance change, a moving particle field, and a camera shake.
- */
-function stilled(
-  cinematic: JuiceCinematic,
-  event: CinematicEvent,
-  tuning: JuiceTuning,
-): JuiceCinematic {
-  return Object.freeze({
-    ...cinematic,
-    flash: false,
-    reachBasisPoints: cinematic.connected ? fullReachFor(event, tuning) : 0,
-    streaks: Object.freeze([]),
+    streaks: reducedMotion ? Object.freeze([]) : streaksFor(event, age, tuning),
   });
 }
 
@@ -1262,13 +1610,20 @@ export function buildJuiceTrack(
   // Which cinematic, if any, owns each clock frame. Bucketed the same way the
   // hit events are, and for the same reason: `at(n)` must be an array read, so
   // that seeking to a frame and playing to it are the same operation.
+  //
+  // Story 11.4: the span is the *record's* length, which is no longer the
+  // freeze's. The release act plays on over resumed playback for 50 frames
+  // after the slam -- exactly as the reference nulls `state.cinematic` at tick
+  // 80 and lets its `beamWindow` run -- so bucketing on `freezeFrames + 1`
+  // would cut the beam off on the frame it fired.
+  const cinematicSpan = freezeFrames > 0 ? cinematicFramesFor(tuning) : 0;
   const cinematicByClock: (CinematicEvent | null)[] = filmIndexes.map(() => null);
   for (const cinematic of cinematicByFilmIndex.values()) {
     const start = cinematicStartedAt.get(cinematic);
     if (start === undefined) {
       continue;
     }
-    const end = Math.min(filmIndexes.length, start + freezeFrames + 1);
+    const end = Math.min(filmIndexes.length, start + cinematicSpan);
     for (let clockIndex = Math.max(0, start); clockIndex < end; clockIndex += 1) {
       cinematicByClock[clockIndex] = cinematic;
     }
@@ -1283,7 +1638,12 @@ export function buildJuiceTrack(
     const cinematic =
       owner === null
         ? null
-        : cinematicAt(owner, clockIndex - (cinematicStartedAt.get(owner) ?? 0), tuning);
+        : cinematicAt(
+            owner,
+            clockIndex - (cinematicStartedAt.get(owner) ?? 0),
+            tuning,
+            reducedMotion,
+          );
     // Two cases resolve to a still stage.
     //
     // Reduced motion: the viewer asked for it, and it must hold on a scrub as
@@ -1310,12 +1670,13 @@ export function buildJuiceTrack(
         damageNumbers: Object.freeze([]),
         // The final clock frame drops the cinematic entirely, for the same
         // reason it drops the shake: playback rests there indefinitely, and a
-        // title banner or a half-drawn impact mark left on screen forever
-        // reads as a broken layout rather than as a finished Match.
-        cinematic:
-          clockIndex === lastClockIndex || cinematic === null || owner === null
-            ? null
-            : stilled(cinematic, owner, tuning),
+        // title banner or a half-drawn beam left on screen forever reads as a
+        // broken layout rather than as a finished Match.
+        //
+        // Story 11.4: the reduced-motion record is built by `cinematicAt`
+        // itself rather than patched here afterwards, so there is no second
+        // list of fields to keep in step with the first.
+        cinematic: clockIndex === lastClockIndex ? null : cinematic,
       });
     }
 

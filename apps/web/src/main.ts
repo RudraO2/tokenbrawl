@@ -20,6 +20,8 @@ import type { Backdrop } from './render/backdrop';
 import { createIdentityArtist, deriveVisualIdentity } from './render/identity';
 import { DEFAULT_JUICE_TUNING, arenaFor, buildJuiceTrack } from './render/juice';
 import { drawJuicedFrame } from './render/juice-draw';
+import { DEFAULT_ROSTER } from './render/roster';
+import type { UltSheet } from './render/ult-sheet';
 import type { VfxSheet } from './render/vfx-sheet';
 import {
   DEFAULT_AUDIO_TUNING,
@@ -147,6 +149,12 @@ export interface MountedPlayer {
    * finished playback would otherwise never draw a frame that used it.
    */
   readonly setVfx: (vfx: VfxSheet) => void;
+  /**
+   * Story 11.4. The Ultimate's per-character art, on exactly `setVfx`'s terms:
+   * it decodes off the critical path, and a paused or scrubbed player repaints
+   * so the art appears without waiting for the next frame.
+   */
+  readonly setUlt: (ult: UltSheet) => void;
   readonly repaint: () => void;
   /** The Decision Point currently on screen. `0` before the first frame is drawn. */
   readonly decisionPoint: () => number;
@@ -234,8 +242,10 @@ export function mountPlayer(
     backdrop: Backdrop | undefined;
     /** Story 11.2. Absent until the sheet decodes, and absent forever if it never does. */
     vfx: VfxSheet | undefined;
+    /** Story 11.4. The Ultimate's per-character art, on the same terms as `vfx`. */
+    ult: UltSheet | undefined;
     frameIndex: number;
-  } = { artists: [], backdrop: undefined, vfx: undefined, frameIndex: 0 };
+  } = { artists: [], backdrop: undefined, vfx: undefined, ult: undefined, frameIndex: 0 };
   const blockArtist = createBlockArtist();
 
   /**
@@ -358,6 +368,12 @@ export function mountPlayer(
       // which is the whole fail-soft claim, exercised on every page load
       // before the sheet lands rather than only in a test.
       vfx: dressing.vfx,
+      // Story 11.4. The Ultimate's per-character art and the roster it is keyed
+      // by, both absent-tolerant: without the sheet the cinematic draws a
+      // procedural beam in the caster's aura, and without either it is Story
+      // 10.4's banner-and-band.
+      ult: dressing.ult,
+      roster: DEFAULT_ROSTER,
       // Story 11.3. The same read the clock and the juice track already make,
       // threaded in rather than taken again inside the renderer.
       reducedMotion: prefersReducedMotion(view),
@@ -408,6 +424,10 @@ export function mountPlayer(
     },
     setVfx: (vfx: VfxSheet): void => {
       dressing.vfx = vfx;
+      repaint();
+    },
+    setUlt: (ult: UltSheet): void => {
+      dressing.ult = ult;
       repaint();
     },
     repaint,
