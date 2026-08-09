@@ -9,8 +9,8 @@ opponent count and the full per-opponent breakdown are published with every row.
 
 - Environment: `fighter-1v1` v1.0.0
 - Frame-data config hash: `24f5f97e1c88a3f3a9b66405c569c076ba30994ac93dbc69429c3b8780bdc0f7`
-- Corpus: 8 committed Command Logs from `apps/web/public/replays`
-- Matches: 8 total, 0 rated, 8 excluded
+- Corpus: 9 committed Command Logs from `apps/web/public/replays`
+- Matches: 9 total, 0 rated, 9 excluded
 - Confidence interval: seeded percentile bootstrap, 2000 resamples, seed 20260802, 0.9500 coverage (AD-5)
 
 ## Main leaderboard
@@ -71,7 +71,7 @@ is provisional and contributes to no rating (Story 7-1, AC3).
 | bot:aggressive:2 vs bot:spacing:1 | 1 | 0 / 1 | 0 | provisional (insufficient-matches, insufficient-mirrored-seeds) |
 | bot:random:1 vs bot:spacing:2 | 1 | 1 / 0 | 0 | provisional (insufficient-matches, insufficient-mirrored-seeds) |
 | bot:random:2 vs bot:spacing:1 | 1 | 0 / 1 | 0 | provisional (insufficient-matches, insufficient-mirrored-seeds) |
-| cerebras-zai-glm-4.7 vs groq-llama-3.3-70b | 1 | 0 / 1 | 0 | provisional (insufficient-matches, insufficient-mirrored-seeds) |
+| cerebras-zai-glm-4.7 vs groq-llama-3.3-70b | 2 | 1 / 1 | 1 | provisional (insufficient-matches, insufficient-mirrored-seeds) |
 
 ## Excluded Matches
 
@@ -80,5 +80,5 @@ to the total above.
 
 | Reason | Matches |
 | --- | --- |
-| insufficient-matches | 8 |
-| insufficient-mirrored-seeds | 8 |
+| insufficient-matches | 9 |
+| insufficient-mirrored-seeds | 9 |

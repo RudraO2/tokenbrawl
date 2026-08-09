@@ -2,23 +2,23 @@
   "story": "7-3-behavioural-metrics",
   "title": "Tokenbrawl leaderboard",
   "generatedBy": "tokenbrawl leaderboard --config configs/tournament.config.json",
-  "corpus": "8 committed Command Logs from `apps/web/public/replays`",
+  "corpus": "9 committed Command Logs from `apps/web/public/replays`",
   "environment": {
     "id": "fighter-1v1",
     "version": "1.0.0"
   },
   "configHash": "24f5f97e1c88a3f3a9b66405c569c076ba30994ac93dbc69429c3b8780bdc0f7",
-  "matches": 8,
+  "matches": 9,
   "ratedMatches": 0,
-  "excludedMatches": 8,
+  "excludedMatches": 9,
   "exclusionTotals": [
     {
       "exclusion": "insufficient-matches",
-      "matches": 8
+      "matches": 9
     },
     {
       "exclusion": "insufficient-mirrored-seeds",
-      "matches": 8
+      "matches": 9
     }
   ],
   "bootstrap": {
@@ -216,12 +216,12 @@
         "cerebras-zai-glm-4.7",
         "groq-llama-3.3-70b"
       ],
-      "matches": 1,
+      "matches": 2,
       "matchesBySide": [
-        0,
+        1,
         1
       ],
-      "mirroredSeeds": 0,
+      "mirroredSeeds": 1,
       "provisional": true,
       "exclusions": [
         "insufficient-matches",
