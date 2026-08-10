@@ -78,6 +78,13 @@ const SURFACES = [
   { id: 'app', selector: '#app', route: '/replay', label: 'replay player' },
   { id: 'arcade', selector: '#arcade', route: '/play', label: 'play vs cpu' },
   { id: 'spectate', selector: '#spectate', route: '/watch', label: 'spectate stream' },
+  // Story 12.5. Not a rendering surface -- it holds no canvas -- but it is a
+  // screen a visitor spends time on, and the story that built it could not be
+  // judged from its own captures without one: `character-select-reachable`
+  // matches *text*, which is exactly the evidence two unreachable fighters
+  // already had for three epics. A portrait that decodes and lays out at zero
+  // height would pass every check in this file and show nothing.
+  { id: 'select', selector: '#select', route: '/select', label: 'character select' },
 ];
 
 /**
@@ -739,6 +746,51 @@ const hostArenaHashProbe = (hostSelector) => `(() => {
   return hash;
 })()`;
 
+/**
+ * The arena hashed in two halves, left and right, plus its sprite ink (Story
+ * 12.5).
+ *
+ * One hash over the whole arena answers "did the picture change" and nothing
+ * more, and that is not enough for a check about a *choice*: picking on the
+ * visitor's side and dressing the opponent changes the picture just as much as
+ * dressing the right fighter does. Two halves separate the two -- the side that
+ * was picked must move and the side that was not must not -- and both Matches
+ * are the same seed at the same Decision Point, so the untouched half is
+ * byte-identical when the wiring is right.
+ *
+ * `ink` is sprite ink (the `SPRITE_INK_MIN` threshold, above the backdrop's
+ * brightest pixel), not `CANVAS_PROBE`'s whole-canvas ratio: the mountain-dusk
+ * backdrop fills the frame and reports ~98% on an arena with no fighters drawn
+ * on it at all, so the whole-canvas floor cannot fail here and proves nothing.
+ */
+const arenaHalvesProbe = (hostSelector) => `(() => {
+  const host = document.querySelector(${JSON.stringify(hostSelector)});
+  if (!host) return null;
+  const canvas = [...host.querySelectorAll('canvas')].find((c) => {
+    const rect = c.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+  });
+  if (!canvas) return null;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return null;
+  const top = ${ARENA_TOP_PX};
+  const bottom = canvas.height - ${FLOOR_INSET_PX};
+  if (bottom <= top) return null;
+  const data = ctx.getImageData(0, top, canvas.width, bottom - top).data;
+  const middle = Math.floor(canvas.width / 2);
+  let left = 0, right = 0, ink = 0;
+  for (let y = 0; y < bottom - top; y += 1) {
+    for (let x = 0; x < canvas.width; x += 1) {
+      const i = (y * canvas.width + x) * 4;
+      const mixed = data[i] + data[i + 1] * 3 + data[i + 2] * 7;
+      if (x < middle) left = (left * 31 + mixed) | 0;
+      else right = (right * 31 + mixed) | 0;
+      if (data[i + 3] > 8 && Math.max(data[i], data[i + 1], data[i + 2]) >= ${SPRITE_INK_MIN}) ink += 1;
+    }
+  }
+  return { left, right, ink };
+})()`;
+
 // --------------------------------------------------------------------------
 // the run
 // --------------------------------------------------------------------------
@@ -1254,63 +1306,6 @@ async function main() {
           `showing #${select.screen ?? 'nothing'}, fighters named: ${select.found.join(', ') || 'none'}`,
         );
 
-        // --- C4d selected-fighter-is-drawn (Story 12.5) --------------------
-        //
-        // The check the story exists for. A roster that renders four cards and
-        // reaches nothing would pass `character-select-reachable` completely --
-        // that check reads text on a screen, and text on a screen is exactly
-        // what two unreachable fighters already had.
-        //
-        // So: play one Match as gemini and one as grokk, from a fresh page each
-        // time, and require the two arena pictures to differ while both clear
-        // the ink floor. Both Matches are the same seed at the same Decision
-        // Point (the arcade Match hangs waiting for the visitor), so the
-        // fighters stand in identical positions and the *only* thing that can
-        // move the hash is which sprites were drawn. Two identical pictures
-        // mean the selection reached nothing; a blank one means it reached the
-        // loader and the loader failed.
-        //
-        // Hashed below the HUD band for Story 12.2's reason: `TICK NNN` and the
-        // bars advance on their own, so a whole-canvas hash would differ
-        // between two runs of the *same* fighter and this check would pass on a
-        // selection that did nothing at all.
-        const asFighter = [];
-        for (const id of ['gemini', 'grokk']) {
-          await load(`${viewport.name}-as-${id}`, '/select');
-          // Same wait the captures take: the packs are upgrades to an already
-          // running page and a probe fired before they land measures the block
-          // artist, which is identical for both fighters.
-          await sleep(2500);
-          const picked = await cdp.evaluate(pickFighter(0, id));
-          // The pick starts the fetch; this is the decode.
-          await sleep(2000);
-          await goto('/play');
-          const started = await cdp.evaluate(clickIn('#arcade', '^play vs cpu$'));
-          await sleep(2000);
-          const canvas = (await cdp.evaluate(CANVAS_PROBE)).find(
-            (c) => c.host === 'arcade' && c.visible,
-          );
-          asFighter.push({
-            id,
-            picked: picked.ok === true,
-            started: started.ok === true,
-            hash: await cdp.evaluate(hostArenaHashProbe('#arcade')),
-            ink: canvas?.inkRatio ?? 0,
-          });
-        }
-        const [first, second] = asFighter;
-        record(
-          'selected-fighter-is-drawn',
-          asFighter.every((run) => run.picked && run.started && run.hash !== null) &&
-            asFighter.every((run) => run.ink >= MIN_INK_RATIO) &&
-            first.hash !== second.hash,
-          asFighter
-            .map(
-              (run) =>
-                `${run.id}: picked=${String(run.picked)} played=${String(run.started)} arena=${String(run.hash)} ink=${(run.ink * 100).toFixed(1)}%`,
-            )
-            .join(' | '),
-        );
       }
 
       // --- C5 screenshots-captured ------------------------------------------
@@ -1326,6 +1321,84 @@ async function main() {
         if (!present) {
           record(`surface-present-${surface.id}-${viewport.name}`, false, `${surface.selector} is not on the page`);
         }
+      }
+
+      // --- C7 selected-fighter-is-drawn (Story 12.5) ------------------------
+      //
+      // The check the story exists for, and it runs LAST in the viewport pass,
+      // after the captures. A roster that renders four cards and reaches
+      // nothing passes `character-select-reachable` completely -- that check
+      // reads text on a screen, and text on a screen is exactly what two
+      // unreachable fighters already had for three epics.
+      //
+      // So: play one Match as gemini and one as grokk, from a fresh page each
+      // time, and compare the two arenas. Both are the same seed at the same
+      // Decision Point -- the arcade Match hangs waiting for the visitor -- so
+      // the fighters stand in identical positions and the only thing that can
+      // move a pixel is which sprites were drawn.
+      //
+      // Three conditions, and the second and third are what an independent
+      // review of this story added:
+      //
+      //  1. The picked side's half of the arena differs between the two runs.
+      //  2. The *other* half does not. A pick on side 0 that dressed side 1
+      //     changes the picture just as much as correct wiring does, and one
+      //     whole-arena hash cannot tell the two apart.
+      //  3. Both runs carry real sprite ink. `CANVAS_PROBE`'s ratio cannot
+      //     fail here -- the backdrop fills the frame and reports ~98% with no
+      //     fighters drawn at all -- so the floor is counted in sprite ink.
+      //
+      // Sampled below the HUD band for Story 12.2's reason: the tick readout
+      // and the bars advance on their own, and a hash that included them would
+      // differ between two runs of the *same* fighter.
+      //
+      // Last in the pass, and not before the captures, because it leaves the
+      // page on a chosen fighter: run earlier, every committed screenshot would
+      // show grokk rather than what a first-time visitor meets.
+      if (!viewport.mobile) {
+        const asFighter = [];
+        for (const id of ['gemini', 'grokk']) {
+          await load(`${viewport.name}-as-${id}`, '/select');
+          // The same wait the captures take: the packs are upgrades to an
+          // already-running page, and a probe fired before they land measures
+          // the block artist, which is identical for both fighters.
+          await sleep(2500);
+          const picked = await cdp.evaluate(pickFighter(0, id));
+          // The pick starts the fetch; this is the decode.
+          await sleep(2000);
+          await goto('/play');
+          const started = await cdp.evaluate(clickIn('#arcade', '^play vs cpu$'));
+          await sleep(2000);
+          const arena = await cdp.evaluate(arenaHalvesProbe('#arcade'));
+          asFighter.push({
+            id,
+            // `aria-pressed` asserted, not merely reported: "a card exists and
+            // was clicked" is true of a card wired to nothing.
+            picked: picked.ok === true && picked.pressed === 'true',
+            started: started.ok === true,
+            arena,
+          });
+        }
+        const [first, second] = asFighter;
+        const measured = asFighter.every(
+          (run) => run.picked && run.started && run.arena !== null,
+        );
+        record(
+          'selected-fighter-is-drawn',
+          measured &&
+            asFighter.every((run) => run.arena.ink >= MIN_FIGHT_INK) &&
+            first.arena.left !== second.arena.left &&
+            first.arena.right === second.arena.right,
+          asFighter
+            .map(
+              (run) =>
+                `${run.id}: picked=${String(run.picked)} played=${String(run.started)} left=${String(run.arena?.left)} right=${String(run.arena?.right)} spriteInk=${String(run.arena?.ink)}`,
+            )
+            .join(' | ') +
+            (measured && first.arena.right !== second.arena.right
+              ? ' — the UNPICKED side moved too, so the pick did not reach the side that made it'
+              : ''),
+        );
       }
     }
 

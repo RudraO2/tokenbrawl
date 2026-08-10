@@ -2111,3 +2111,65 @@ describe('choosing a fighter changes what is drawn (Story 12.5)', () => {
     expect(result?.selection.pair()).toStrictEqual(DEFAULT_ROSTER);
   });
 });
+
+/**
+ * Story 12.5, after an independent review: the stream is not dressed by the
+ * visitor's choice.
+ *
+ * These are source assertions, and that is a deliberate, narrow choice rather
+ * than laziness. The defect is *which panel a decoded pack is handed to*, and
+ * no fake in this file can see it: `SpectatePanel` exposes no way to read the
+ * artist it is holding, and its canvas draws the same two fake packs whichever
+ * pair it was given. The property is real and it shipped once already -- the
+ * review found grokk's silhouette on a committed Spectate log with the
+ * cinematic underneath still saying CLAWDE -- so it is pinned where it can be
+ * pinned, with the reason written down, rather than left to a browser run.
+ */
+describe('the Spectate stream keeps its own art (Story 12.5)', () => {
+  const STARTUP_SOURCE = readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), 'startup.ts'),
+    'utf8',
+  );
+
+  /** One `const fn = ...` body, by name. Comments included -- they are not what is matched on. */
+  function body(name: string): string {
+    const at = STARTUP_SOURCE.indexOf(`const ${name} = `);
+    expect(at, `${name} is gone from startup.ts`).toBeGreaterThan(-1);
+    const end = STARTUP_SOURCE.indexOf('\n    };', at);
+    return STARTUP_SOURCE.slice(at, end);
+  }
+
+  it('hands a chosen pack to the player and the arena, and not to the stream', () => {
+    expect(body('dressArtist')).toContain('player.mounted.setArtist');
+    expect(body('dressArtist')).toContain('panels.arcade?.setArtist');
+    expect(body('dressArtist')).not.toContain('panels.spectate');
+  });
+
+  it("hands the chosen pair's Ultimate sheet nowhere near the stream", () => {
+    // This sheet holds two of four portraits by design, so giving it to
+    // Spectate takes the other two fighters' cut-ins away from every committed
+    // log that features them -- silently, with no console warning at all.
+    expect(body('dressUlt')).toContain('player.mounted.setUlt');
+    expect(body('dressUlt')).not.toContain('panels.spectate');
+  });
+
+  it('dresses the stream from its own pair, which is the default one', () => {
+    expect(body('dressStreamArtist')).toContain('panels.spectate?.setArtist');
+    expect(body('dressStreamUlt')).toContain('panels.spectate?.setUlt');
+    expect(body('loadStreamArt')).toContain('DEFAULT_ROSTER');
+    // And the warm-cache adoption path reads the same box, or a pack that
+    // resolved before the panel mounted would arrive from the wrong pair.
+    expect(STARTUP_SOURCE).toContain('streamDressing.artists[agentIndex]');
+    expect(STARTUP_SOURCE).toContain('spectatePanel.setUlt(streamDressing.ult)');
+  });
+
+  it('leaves the stream drawing DEFAULT_ROSTER in its own compositor call', () => {
+    // The other half: even correctly dressed, a `roster` option keyed to the
+    // selection would put the visitor's aura and name on the stream's Ultimate.
+    const spectateSource = readFileSync(
+      join(dirname(fileURLToPath(import.meta.url)), 'spectate', 'panel.ts'),
+      'utf8',
+    );
+    expect(spectateSource).toContain('roster: DEFAULT_ROSTER');
+  });
+});

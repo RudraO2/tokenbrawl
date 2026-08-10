@@ -172,11 +172,20 @@ Two of the twelve wrap onto the next row, which is exactly where a hand-copied
 grid goes wrong; `ult-sheet.test.ts` reads this file from disk and re-derives
 every cell from its atlas index.
 
-**Only the pair in `DEFAULT_ROSTER` is fetched.** `imageUrlsFor(layout, roster)`
+**Only the pair actually fighting is fetched.** `imageUrlsFor(layout, roster)`
 in `apps/web/src/render/ult-sheet.ts` returns the atlas plus the portraits of
 the two fighters a live Match shows — three files rather than five, and about
-400 KB rather than 800. A character-select story passes a different pair and
-nothing else changes.
+400 KB rather than 800.
+
+**Story 12.5 made that pair a choice, and gave the portraits a second draw
+path.** The same four PNGs are now also drawn as `<img>` on the character-select
+screen (`apps/web/src/shell/select.ts`, via `portraitUrlFor`), which is the first
+time any of them appears outside the cinematic — and the reason the story shipped
+no new art at all. Two pairs are in flight at once from that story on: the
+visitor's, which dresses the replay player and the Arcade live view, and
+`DEFAULT_ROSTER`, which dresses the Spectate stream because the fighters on a
+committed log are a property of that log. `startup.ts` memoises both loads per
+fighter and per pair, so the overlap costs one fetch, not two.
 
 Fail-soft in three named steps, and each is reachable:
 

@@ -1203,6 +1203,22 @@ body {
   max-width: 720px;
 }
 
+/*
+ * Two columns on a phone rather than four.
+ *
+ * Four columns at 390px leaves each card about 78px wide, and the name plate is
+ * 14px display type, uppercase, letter-spaced -- `GEMINI` does not fit in it.
+ * The gate would never say so: a `<button>`'s overflow is visible and does not
+ * move `scrollWidth`, so `no-horizontal-overflow` stays green over a plate whose
+ * text runs out of its own box. An independent review of Story 12.5 measured it;
+ * this is the fix, and the mobile capture is the evidence.
+ */
+@media (max-width: 560px) {
+  .tb-select-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 .tb-select-card {
   display: block;
   min-width: 0;

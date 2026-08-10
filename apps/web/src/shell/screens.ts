@@ -25,10 +25,10 @@ export interface ScreenSpec {
 /**
  * Every screen, in nav order.
  *
- * `/select` is registered here and its section exists in `index.html`, but the
- * roster is Story 12.5's work: the gate's `character-select-reachable` check
- * fails against the placeholder and is waived to that story. Registering the
- * route now is what gives 12.5 a place to land rather than a shell to
+ * `/select` was registered by Story 12.4 with nothing behind it and its
+ * `character-select-reachable` check waived; Story 12.5 filled it with the
+ * roster (`shell/select.ts`) and deleted the waiver. Registering the route a
+ * story early is what gave 12.5 a place to land rather than a shell to
  * renegotiate.
  */
 export const SCREENS: readonly ScreenSpec[] = Object.freeze([
@@ -44,7 +44,7 @@ export const SCREENS: readonly ScreenSpec[] = Object.freeze([
 export const ROUTE_HOME = '/';
 /** Play vs CPU. Where the landing CTA and a finished character select both go. */
 export const ROUTE_PLAY = '/play';
-/** Character select. Registered, not built -- Story 12.5. */
+/** Character select: four fighters, two picks, and the Fight button (Story 12.5). */
 export const ROUTE_SELECT = '/select';
 /** The Spectate stream. */
 export const ROUTE_WATCH = '/watch';

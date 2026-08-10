@@ -1,6 +1,6 @@
 {
   "label": "12-5-character-select-four-fighters",
-  "ranAt": "2026-08-10T13:02:21.201Z",
+  "ranAt": "2026-08-10T13:20:10.415Z",
   "checks": [
     {
       "id": "hidden-screens-are-idle-on-load-desktop",
@@ -35,32 +35,32 @@
     {
       "id": "arcade-input-moves-fighter",
       "ok": true,
-      "detail": "arena hash 74500624 -> 2059783500"
+      "detail": "arena hash 74500624 -> 1200621237"
     },
     {
       "id": "fighters-inside-frame-at-the-wall",
       "ok": true,
-      "detail": "arcade edge=0 span=435..596 of 960"
+      "detail": "arcade edge=0 span=292..596 of 960"
     },
     {
       "id": "canvas-not-blank-desktop",
       "ok": true,
-      "detail": "3 canvas(es), ink app:98.1% arcade:98.4% spectate:99.0%"
+      "detail": "3 canvas(es), ink app:98.1% arcade:98.4% spectate:98.7%"
     },
     {
       "id": "fighters-inside-frame-desktop",
       "ok": true,
-      "detail": "app edge=0 span=377..551 of 960 | arcade edge=0 span=454..596 of 960 | spectate edge=0 span=417..533 of 960"
+      "detail": "app edge=0 span=377..551 of 960 | arcade edge=0 span=435..596 of 960 | spectate edge=0 span=395..533 of 960"
     },
     {
       "id": "fight-is-centred-desktop",
       "ok": true,
-      "detail": "app ink centre 464 of 960 | arcade ink centre 525 of 960 | spectate ink centre 475 of 960"
+      "detail": "app ink centre 464 of 960 | arcade ink centre 516 of 960 | spectate ink centre 464 of 960"
     },
     {
       "id": "spectate-animates",
       "ok": true,
-      "detail": "hash 547616127 -> 1792973340"
+      "detail": "hash -382615241 -> -44982745"
     },
     {
       "id": "hidden-screens-are-idle-desktop",
@@ -75,7 +75,7 @@
     {
       "id": "selected-fighter-is-drawn",
       "ok": true,
-      "detail": "gemini: picked=true played=true arena=701353119 ink=97.9% | grokk: picked=true played=true arena=2022402046 ink=97.7%"
+      "detail": "gemini: picked=true played=true left=611532844 right=-822394502 spriteInk=1920 | grokk: picked=true played=true left=1037704431 right=-822394502 spriteInk=1715"
     },
     {
       "id": "hidden-screens-are-idle-on-load-mobile",
@@ -110,17 +110,17 @@
     {
       "id": "canvas-not-blank-mobile",
       "ok": true,
-      "detail": "3 canvas(es), ink app:98.1% arcade:97.9% spectate:98.7%"
+      "detail": "3 canvas(es), ink app:98.1% arcade:97.9% spectate:98.5%"
     },
     {
       "id": "fighters-inside-frame-mobile",
       "ok": true,
-      "detail": "app edge=0 span=377..551 of 960 | arcade edge=0 span=322..629 of 960 | spectate edge=0 span=400..533 of 960"
+      "detail": "app edge=0 span=377..551 of 960 | arcade edge=0 span=322..629 of 960 | spectate edge=0 span=383..549 of 960"
     },
     {
       "id": "fight-is-centred-mobile",
       "ok": true,
-      "detail": "app ink centre 464 of 960 | arcade ink centre 476 of 960 | spectate ink centre 467 of 960"
+      "detail": "app ink centre 464 of 960 | arcade ink centre 476 of 960 | spectate ink centre 466 of 960"
     },
     {
       "id": "hidden-screens-are-idle-mobile",

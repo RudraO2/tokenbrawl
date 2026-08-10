@@ -75,13 +75,38 @@ function fakeNode(): FakeNode {
   };
 }
 
-/** A host that hands out one node per selector and remembers them all. */
-function fakeHost(): { innerHTML: string; querySelector: (s: string) => FakeNode; nodes: Map<string, FakeNode> } {
+const cardSelectorFor = (side: RosterSide, id: RosterId): string =>
+  `[data-select-pick="${String(side)}:${id}"]`;
+
+/**
+ * A host that answers only for the selectors the screen's own markup declares,
+ * and `null` for everything else.
+ *
+ * The `null` matters more than it looks. A fake that manufactured a node for any
+ * string would answer a *typo'd* selector just as happily as a correct one, so
+ * every case in this file would pass over a panel whose click handlers were
+ * bound to elements that do not exist on the page -- which is the same class of
+ * defect as a roster wired to nothing, one layer down. `missing` drops a
+ * selector so the mount's own failure path can be driven.
+ */
+function fakeHost(missing: readonly string[] = []): {
+  innerHTML: string;
+  querySelector: (s: string) => FakeNode | null;
+  nodes: Map<string, FakeNode>;
+} {
+  const declared = [
+    ...[0, 1].flatMap((side) => ROSTER_IDS.map((id) => `[data-select-pick="${String(side)}:${id}"]`)),
+    '[data-select-fight]',
+    '[data-select-readout]',
+  ].filter((selector) => !missing.includes(selector));
   const nodes = new Map<string, FakeNode>();
   return {
     innerHTML: '',
     nodes,
-    querySelector: (selectors: string): FakeNode => {
+    querySelector: (selectors: string): FakeNode | null => {
+      if (!declared.includes(selectors)) {
+        return null;
+      }
       const existing = nodes.get(selectors);
       if (existing !== undefined) {
         return existing;
@@ -93,8 +118,20 @@ function fakeHost(): { innerHTML: string; querySelector: (s: string) => FakeNode
   };
 }
 
-const cardSelector = (side: RosterSide, id: RosterId): string =>
-  `[data-select-pick="${String(side)}:${id}"]`;
+/** The cards this suite drives are always present; the `null` arm is its own case below. */
+const card = (
+  host: ReturnType<typeof fakeHost>,
+  side: RosterSide,
+  id: RosterId,
+): FakeNode => {
+  const node = host.querySelector(cardSelectorFor(side, id));
+  if (node === null) {
+    throw new Error(`the fake host declares no card for ${String(side)}:${id}`);
+  }
+  return node;
+};
+
+
 
 describe('the character-select screen offers all four fighters', () => {
   it('names every fighter and shows every portrait', () => {
@@ -124,7 +161,7 @@ describe('the character-select screen offers all four fighters', () => {
 
     for (const side of [0, 1] as const) {
       for (const id of ROSTER_IDS) {
-        expect(host.querySelector(cardSelector(side, id)).attributes.get('aria-pressed')).toBe(
+        expect(card(host, side, id).attributes.get('aria-pressed')).toBe(
           selection.pair()[side] === id ? 'true' : 'false',
         );
       }
@@ -144,18 +181,18 @@ describe('the character-select screen offers all four fighters', () => {
       onFight: () => {},
     });
 
-    host.querySelector(cardSelector(0, 'gemini')).click();
-    host.querySelector(cardSelector(1, 'grokk')).click();
+    card(host, 0, 'gemini').click();
+    card(host, 1, 'grokk').click();
 
     expect(picks).toStrictEqual([
       [0, 'gemini'],
       [1, 'grokk'],
     ]);
     expect(selection.pair()).toStrictEqual(['gemini', 'grokk']);
-    expect(host.querySelector(cardSelector(0, 'gemini')).attributes.get('aria-pressed')).toBe(
+    expect(card(host, 0, 'gemini').attributes.get('aria-pressed')).toBe(
       'true',
     );
-    expect(host.querySelector(cardSelector(0, DEFAULT_ROSTER[0])).attributes.get('aria-pressed')).toBe(
+    expect(card(host, 0, DEFAULT_ROSTER[0]).attributes.get('aria-pressed')).toBe(
       'false',
     );
   });
@@ -182,26 +219,26 @@ describe('the character-select screen offers all four fighters', () => {
     const prevented = { value: false };
     // From the first card, three ArrowRights reach the fourth fighter: one
     // focus call each, and the last one is grokk's card.
-    host.querySelector(cardSelector(0, ROSTER_IDS[0])).press('ArrowRight', prevented);
-    expect(host.querySelector(cardSelector(0, ROSTER_IDS[1])).focused.count).toBe(1);
-    host.querySelector(cardSelector(0, ROSTER_IDS[1])).press('ArrowRight', prevented);
-    host.querySelector(cardSelector(0, ROSTER_IDS[2])).press('ArrowRight', prevented);
-    expect(host.querySelector(cardSelector(0, ROSTER_IDS[3])).focused.count).toBe(1);
+    card(host, 0, ROSTER_IDS[0]).press('ArrowRight', prevented);
+    expect(card(host, 0, ROSTER_IDS[1]).focused.count).toBe(1);
+    card(host, 0, ROSTER_IDS[1]).press('ArrowRight', prevented);
+    card(host, 0, ROSTER_IDS[2]).press('ArrowRight', prevented);
+    expect(card(host, 0, ROSTER_IDS[3]).focused.count).toBe(1);
     // And the page does not scroll out from under them while they do it.
     expect(prevented.value).toBe(true);
 
     // Down moves to the same column on the opponent's row.
-    host.querySelector(cardSelector(0, ROSTER_IDS[3])).press('ArrowDown', prevented);
-    expect(host.querySelector(cardSelector(1, ROSTER_IDS[3])).focused.count).toBe(1);
+    card(host, 0, ROSTER_IDS[3]).press('ArrowDown', prevented);
+    expect(card(host, 1, ROSTER_IDS[3]).focused.count).toBe(1);
 
     // Clamped, not wrapped, at both ends: no focus call beyond the edge.
-    const first = host.querySelector(cardSelector(0, ROSTER_IDS[0]));
+    const first = card(host, 0, ROSTER_IDS[0]);
     first.press('ArrowLeft', prevented);
     expect(first.focused.count).toBe(1);
 
     // Confirming is a click on the Fight button, which is what Enter on a
     // focused `<button>` dispatches.
-    host.querySelector('[data-select-fight]').click();
+    host.querySelector('[data-select-fight]')?.click();
     expect(fights.count).toBe(1);
   });
 
@@ -215,8 +252,34 @@ describe('the character-select screen offers all four fighters', () => {
       },
       onFight: () => {},
     });
-    host.querySelector(cardSelector(0, 'grokk')).click();
-    expect(host.querySelector('[data-select-readout]').innerHTML).toContain(ROSTER_NAMES.grokk);
+    card(host, 0, 'grokk').click();
+    expect(host.querySelector('[data-select-readout]')?.innerHTML).toContain(ROSTER_NAMES.grokk);
+  });
+
+  it('throws rather than mounting half a screen when the Fight button is missing', () => {
+    // `startup.ts` catches this and warns, exactly as it does for every other
+    // panel: the roster is an offer and the replay is the page's claim. What
+    // must not happen is a screen that mounts, marks cards, and can never start
+    // a Match -- a dead end with no error anywhere.
+    expect(() =>
+      mountSelectPanel(fakeHost(['[data-select-fight]']), {
+        pair: () => DEFAULT_ROSTER,
+        onPick: () => {},
+        onFight: () => {},
+      }),
+    ).toThrow(/did not mount/);
+  });
+
+  it('still mounts when the readout is missing, because it is narration', () => {
+    // The asymmetry is the point: a missing Fight button is a dead end, a
+    // missing readout is one sentence a sighted visitor can read off the cards.
+    expect(() =>
+      mountSelectPanel(fakeHost(['[data-select-readout]']), {
+        pair: () => DEFAULT_ROSTER,
+        onPick: () => {},
+        onFight: () => {},
+      }),
+    ).not.toThrow();
   });
 
   it('gives the cards the focus ring docs/DESIGN.md requires', () => {

@@ -10,6 +10,7 @@ import type { AudioSink } from './render/audio';
 import { createAudioBus, type AudioContextLike, type AudioFetchResponse } from './render/audio-bus';
 import { createSpriteSheet, validateSpriteSheetLayout } from './render/sprite-sheet';
 import {
+  DEFAULT_ROSTER,
   createRosterSelection,
   spriteLayoutUrlFor,
   type RosterId,
@@ -892,11 +893,21 @@ export async function startup(globals: BrowserGlobals): Promise<StartupResult | 
       arcade: null,
     };
 
-    /** Records a decoded pack on the page and pushes it to every live surface. */
+    /**
+     * Records a decoded pack on the page and pushes it to the surfaces the
+     * visitor's own choice governs: the replay player and the Arcade live view.
+     *
+     * **Not Spectate**, since Story 12.5. The stream walks committed Command
+     * Logs and the fighters drawn on it are a property of those logs, not of who
+     * the visitor happens to have picked -- an independent review of this story
+     * caught the packs reaching it and putting grokk's silhouette on a Match
+     * recorded as somebody else, with the cinematic underneath still saying
+     * CLAWDE. Spectate is dressed by `dressStream*` below, always from
+     * `DEFAULT_ROSTER`.
+     */
     const dressArtist = (agentIndex: 0 | 1, artist: FighterArtist): void => {
       dressing.artists[agentIndex] = artist;
       player.mounted.setArtist(agentIndex, artist);
-      panels.spectate?.setArtist(agentIndex, artist);
       // Story 12.2. The Arcade live view draws through the same compositor now,
       // so a pack that reached only the player would leave a live Match on the
       // block artist for the whole session.
@@ -921,12 +932,41 @@ export async function startup(globals: BrowserGlobals): Promise<StartupResult | 
       // Story 12.2. The Arcade live view too, for the reason above.
       panels.arcade?.setVfx(vfx);
     };
-    /** Story 11.4, widened by Story 11.6 for the reason `dressVfx` gives. */
+    /**
+     * Story 11.4, widened by Story 11.6 for the reason `dressVfx` gives, and
+     * narrowed again by Story 12.5 for `dressArtist`'s reason.
+     *
+     * This sheet holds only the *chosen* pair's portraits (`imageUrlsFor` fetches
+     * two of four, which is most of a megabyte saved), so handing it to Spectate
+     * would take clawde's and chatty's cut-ins away from the stream the moment a
+     * visitor picked anyone else -- a cinematic silently dropping to Story 10.4's
+     * banner with no warning anywhere. Spectate gets its own sheet below.
+     */
     const dressUlt = (ult: UltSheet): void => {
       dressing.ult = ult;
       player.mounted.setUlt(ult);
-      panels.spectate?.setUlt(ult);
       panels.arcade?.setUlt(ult);
+    };
+    /**
+     * Story 12.5. The stream's own art: the sprite packs and the Ultimate sheet
+     * for `DEFAULT_ROSTER`, and nobody else's.
+     *
+     * Held separately from `dressing` because the two answer different questions
+     * -- "who did the visitor pick" and "who is drawn on a committed log" -- and
+     * because the Spectate panel mounts after these loads start, so it has to be
+     * able to adopt whatever already landed.
+     */
+    const streamDressing: {
+      artists: (FighterArtist | undefined)[];
+      ult: UltSheet | undefined;
+    } = { artists: [undefined, undefined], ult: undefined };
+    const dressStreamArtist = (agentIndex: 0 | 1, artist: FighterArtist): void => {
+      streamDressing.artists[agentIndex] = artist;
+      panels.spectate?.setArtist(agentIndex, artist);
+    };
+    const dressStreamUlt = (ult: UltSheet): void => {
+      streamDressing.ult = ult;
+      panels.spectate?.setUlt(ult);
     };
     /**
      * Story 12.5. Who the two fighters are drawn as, pushed to the surfaces a
@@ -955,21 +995,74 @@ export async function startup(globals: BrowserGlobals): Promise<StartupResult | 
      * what it fetched, so re-picking is free.
      */
     const art: { generation: number } = { generation: 0 };
+    /**
+     * One load per fighter and one per pair, however many times they are asked
+     * for.
+     *
+     * Two pairs are in play at once now -- the visitor's and the stream's fixed
+     * `DEFAULT_ROSTER` -- and on a first load they are the same pair. Without
+     * memoising, every page load would fetch and decode both sprite packs twice,
+     * and a visitor picking back and forth would re-decode a pack they already
+     * had. Promises rather than results, so two callers arriving before the
+     * first resolves still share one fetch.
+     */
+    const artistCache = new Map<RosterId, Promise<FighterArtist | undefined>>();
+    const artistFor = (id: RosterId): Promise<FighterArtist | undefined> => {
+      const existing = artistCache.get(id);
+      if (existing !== undefined) {
+        return existing;
+      }
+      const loading = loadArtist(globals, spriteLayoutUrlFor(id));
+      artistCache.set(id, loading);
+      return loading;
+    };
+    const ultCache = new Map<string, Promise<UltSheet | undefined>>();
+    const ultFor = (pair: RosterPair): Promise<UltSheet | undefined> => {
+      const key = pair.join('+');
+      const existing = ultCache.get(key);
+      if (existing !== undefined) {
+        return existing;
+      }
+      const loading = loadUlt(globals, pair);
+      ultCache.set(key, loading);
+      return loading;
+    };
     const loadRosterArt = async (pair: RosterPair): Promise<void> => {
       art.generation += 1;
       const generation = art.generation;
       const current = (): boolean => art.generation === generation;
       await Promise.all([
         ...pair.map(async (id, index) => {
-          const artist = await loadArtist(globals, spriteLayoutUrlFor(id));
+          const artist = await artistFor(id);
           if (artist !== undefined && current()) {
             dressArtist(index as 0 | 1, artist);
           }
         }),
         (async (): Promise<void> => {
-          const ult = await loadUlt(globals, pair);
+          const ult = await ultFor(pair);
           if (ult !== undefined && current()) {
             dressUlt(ult);
+          }
+        })(),
+      ]);
+    };
+    /**
+     * The stream's art, loaded once and never reloaded: `DEFAULT_ROSTER` is what
+     * every committed log is drawn as, and no pick changes it. No generation
+     * counter, because there is only ever one of these.
+     */
+    const loadStreamArt = async (): Promise<void> => {
+      await Promise.all([
+        ...DEFAULT_ROSTER.map(async (id, index) => {
+          const artist = await artistFor(id);
+          if (artist !== undefined) {
+            dressStreamArtist(index as 0 | 1, artist);
+          }
+        }),
+        (async (): Promise<void> => {
+          const ult = await ultFor(DEFAULT_ROSTER);
+          if (ult !== undefined) {
+            dressStreamUlt(ult);
           }
         })(),
       ]);
@@ -984,7 +1077,7 @@ export async function startup(globals: BrowserGlobals): Promise<StartupResult | 
       void loadRosterArt(pair);
     };
 
-    const upgrades: Promise<void>[] = [loadRosterArt(selection.pair())];
+    const upgrades: Promise<void>[] = [loadRosterArt(selection.pair()), loadStreamArt()];
     upgrades.push(
       (async (): Promise<void> => {
         const backdrop = await loadBackdrop(globals);
@@ -1057,13 +1150,20 @@ export async function startup(globals: BrowserGlobals): Promise<StartupResult | 
     // in `dressing` and pushed to nobody -- Spectate would then play as blocks
     // for the whole session precisely when the assets loaded *fastest*.
     if (spectatePanel !== null) {
+      // Story 12.5: from `streamDressing`, not `dressing`. The packs and the
+      // Ultimate sheet this surface adopts are the ones its committed logs are
+      // drawn as, and adopting the visitor's choice here would be the same
+      // defect the split exists to prevent, arriving through the warm-cache
+      // path instead of the loading one.
       for (const agentIndex of [0, 1] as const) {
-        const artist = dressing.artists[agentIndex];
+        const artist = streamDressing.artists[agentIndex];
         if (artist !== undefined) {
           spectatePanel.setArtist(agentIndex, artist);
         }
       }
       if (dressing.backdrop !== undefined) {
+        // The scenery and the impact sheet are not keyed by a fighter, so both
+        // stay shared: there is one mountain-dusk backdrop and one FX sheet.
         spectatePanel.setBackdrop(dressing.backdrop);
       }
       // Story 11.6. The two sheets adopt on exactly the same terms the packs
@@ -1073,8 +1173,8 @@ export async function startup(globals: BrowserGlobals): Promise<StartupResult | 
       if (dressing.vfx !== undefined) {
         spectatePanel.setVfx(dressing.vfx);
       }
-      if (dressing.ult !== undefined) {
-        spectatePanel.setUlt(dressing.ult);
+      if (streamDressing.ult !== undefined) {
+        spectatePanel.setUlt(streamDressing.ult);
       }
     }
     const landingPanel = mountLanding(
