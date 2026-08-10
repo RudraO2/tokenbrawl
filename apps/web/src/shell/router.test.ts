@@ -167,17 +167,52 @@ describe('the screen router', () => {
 
   it('stops the clocks of every screen it is not showing, on the very first apply', () => {
     // The mounts have all run and started by the time the router is built, so
-    // this is where four of five clocks are stopped. Without it the page is
-    // still three canvases animating at once, whatever the layout says.
+    // this is where every clock but one is stopped. Without it the page is
+    // still three canvases animating at once, whatever the layout says -- and
+    // the first version of this router did exactly that, because it only hid
+    // the screen it had just left and on the first apply there is no such
+    // screen. An independent review caught it. The case that was here then was
+    // written against the behaviour rather than the claim in its own name, so
+    // it passed on the defect; this one fails on it.
     const h = harness();
     createScreenRouter({ view: fakeView('#/play'), screens: h.screens });
-    expect(h.log).toStrictEqual(['show /play']);
+    expect(h.log.filter((line) => line.startsWith('hide'))).toStrictEqual(['hide /', 'hide /watch']);
+    // And the shown screen is not re-started: it was already running.
+    expect(h.log).not.toContain('show /play');
 
     const later = harness();
     const router = createScreenRouter({ view: fakeView('#/play'), screens: later.screens });
     later.log.length = 0;
     router.go('/watch');
     expect(later.log).toStrictEqual(['hide /play', 'show /watch']);
+  });
+
+  it('hides every other screen on a load straight at the landing route', () => {
+    // The default entry point, and the one the broken version got wrong.
+    const h = harness();
+    createScreenRouter({ view: fakeView(''), screens: h.screens });
+    expect(h.log).toStrictEqual(['hide /play', 'hide /watch']);
+  });
+
+  it('stops a screen exactly once, however many times it is passed over', () => {
+    const h = harness();
+    const router = createScreenRouter({ view: fakeView(''), screens: h.screens });
+    h.log.length = 0;
+    router.go('/play');
+    router.go('/watch');
+    router.go('/play');
+    // Every entry is a real transition: no screen is stopped twice and none is
+    // started while it is already running. And every hide precedes its show,
+    // which is what stops the outgoing screen's teardown from silencing the
+    // shared audio graph the incoming screen has just claimed.
+    expect(h.log).toStrictEqual([
+      'hide /',
+      'show /play',
+      'hide /play',
+      'show /watch',
+      'hide /watch',
+      'show /play',
+    ]);
   });
 
   it('fires no callback for a navigation to the screen already showing', () => {
@@ -236,14 +271,25 @@ describe('the screen router', () => {
         route: '/play',
         label: 'Play',
         element: null,
+        onHide: (): void => {
+          log.push('hide /play');
+        },
         onShow: (): void => {
           log.push('show /play');
         },
       },
     ];
-    const router = createScreenRouter({ view: fakeView('#/play'), screens });
+    const view = fakeView('#/play');
+    const router = createScreenRouter({ view, screens });
     expect(router.current()).toBe('/play');
-    expect(log).toStrictEqual(['show /play']);
+    // Nothing to hide on the screen with no element, and nothing to show on
+    // the one that is already running -- but its callbacks still fire on a
+    // real transition, so a missing section costs the visitor nothing but the
+    // section.
+    expect(log).toStrictEqual([]);
+    router.go('/');
+    router.go('/play');
+    expect(log).toStrictEqual(['hide /play', 'show /play']);
   });
 
   it('refuses to build without a landing screen, because an unknown route would have nowhere to land', () => {
@@ -299,5 +345,37 @@ describe('the registry and the nav strip agree', () => {
     }
     // Anchors, not buttons: keyboard-reachable and linkable with no script.
     expect(markup).not.toContain('<button');
+  });
+});
+
+/**
+ * Story 12.4, from an independent review: the page has one audio graph, shared
+ * by every surface, so "stop making sound" is a screen touching a shared thing.
+ * Interleaved with the registry's own order, the outgoing screen's teardown
+ * would run *after* the incoming screen's setup and silence the surface that
+ * had just claimed the buses.
+ */
+describe('a screen is always stopped before the next one starts', () => {
+  it('runs every hide before any show, whatever order the registry is in', () => {
+    const log: string[] = [];
+    const make = (route: string): Screen => ({
+      route,
+      label: route,
+      element: fakeElement(),
+      onShow: (): void => {
+        log.push(`show ${route}`);
+      },
+      onHide: (): void => {
+        log.push(`hide ${route}`);
+      },
+    });
+    // `/watch` sits *before* `/replay` here, which is the real registry order
+    // and the order that produced the bug: showing Watch would have claimed
+    // the buses, and hiding Replay would then have stopped them.
+    const screens = [make('/'), make('/watch'), make('/replay')];
+    const router = createScreenRouter({ view: fakeView('#/replay'), screens });
+    log.length = 0;
+    router.go('/watch');
+    expect(log).toStrictEqual(['hide /replay', 'show /watch']);
   });
 });

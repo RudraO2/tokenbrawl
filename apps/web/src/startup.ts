@@ -27,7 +27,7 @@ import {
   type ScreenRouter,
   type ShellView,
 } from './shell/router';
-import { ROUTE_PLAY, ROUTE_REPLAY, ROUTE_WATCH, SCREENS } from './shell/screens';
+import { ROUTE_BYOK, ROUTE_PLAY, ROUTE_REPLAY, ROUTE_WATCH, SCREENS } from './shell/screens';
 
 /**
  * Story 4.2: the bootstrap, and the order it does things in.
@@ -760,7 +760,18 @@ export async function startup(globals: BrowserGlobals): Promise<StartupResult | 
       // router this was a re-mount into whatever section they happened to be
       // scrolled to; on a cabinet, a completed Match that re-mounts on a screen
       // nobody is on is a replay played to an empty room.
-      shell.router?.go(ROUTE_REPLAY);
+      //
+      // Only from the screen that started it. An arcade Match keeps running
+      // while its screen is hidden -- that is deliberate (`live.ts`: states
+      // keep arriving, only the pixels stop) -- so a visitor who wandered off
+      // to Spectate would otherwise be yanked onto the Replay screen mid-watch
+      // by a fight they had already left. An independent review of this story
+      // found it; it also made the gate order-dependent, since a Match
+      // completing mid-sweep would navigate out from under the running check.
+      const at = shell.router?.current();
+      if (at === ROUTE_PLAY || at === ROUTE_BYOK) {
+        shell.router?.go(ROUTE_REPLAY);
+      }
       return mounted;
     };
 
@@ -942,7 +953,25 @@ export async function startup(globals: BrowserGlobals): Promise<StartupResult | 
     // `router.ts` for the same reason the CTAs are two callbacks rather than a
     // panel import: this is the one file that already holds every handle, and
     // the router must not learn what a Spectate walk or a playback clock is.
-    const watch = { playing: spectatePanel?.isPlaying() ?? false };
+    const watch = {
+      playing: spectatePanel?.isPlaying() ?? false,
+      /**
+       * Whether Spectate was driving the page's audio when its screen was
+       * hidden (Story 12.4).
+       *
+       * The stream's music bed is a looping source: pausing the walk stops new
+       * cues from starting but leaves the bed running, so a visitor who turned
+       * sound on and navigated away kept hearing Spectate from a screen they
+       * could not see. An independent review of this story found it.
+       *
+       * `setAudioEnabled` is the fix rather than a bare `sink.stopAll()`,
+       * because the panel's own toggle already owns both edges of this: turning
+       * it off calls `stopAll`, turning it back on re-arms the director from
+       * frame zero (`spectate/panel.ts`). Reusing it means the returning
+       * visitor gets their bed back rather than silence.
+       */
+      audible: false,
+    };
     const screens: Screen[] = SCREENS.map((spec) => {
       const element = (globals.document?.querySelector(spec.selector) ??
         null) as unknown as ScreenElement | null;
@@ -963,12 +992,18 @@ export async function startup(globals: BrowserGlobals): Promise<StartupResult | 
           ...base,
           onShow: (): void => {
             spectatePanel?.setPlaying(watch.playing);
+            spectatePanel?.setAudioEnabled(watch.audible);
           },
           onHide: (): void => {
-            // Remembered, not assumed: a visitor who paused the stream and
-            // navigated away must not come back to it playing.
+            // Remembered, not assumed: a visitor who paused the stream or
+            // muted it and navigated away must not come back to it playing or
+            // to sound they had turned off.
             watch.playing = spectatePanel?.isPlaying() ?? watch.playing;
+            watch.audible = spectatePanel?.audioEnabled() ?? watch.audible;
             spectatePanel?.setPlaying(false);
+            // The looping bed outlives a paused walk; this is what actually
+            // makes "a hidden screen makes no sound" true.
+            spectatePanel?.setAudioEnabled(false);
           },
         };
       }
@@ -983,6 +1018,18 @@ export async function startup(globals: BrowserGlobals): Promise<StartupResult | 
           },
           onHide: (): void => {
             player.mounted.clock.stop();
+            // A stopped clock starts no new cue, but the music bed is a
+            // *looping* source begun at clock frame 0 (`render/audio.ts`) and
+            // outlives the clock that started it. Stopping the graph is what
+            // makes "a hidden screen makes no sound" true here. Safe against
+            // the incoming screen because every `onHide` runs before any
+            // `onShow` -- see `shell/router.ts`.
+            //
+            // The cost is that a visitor returning mid-film gets the fight
+            // back without its bed, because the bed's cue is at frame 0 and
+            // there is no verb for "re-arm the music". Deferred to `12-9`,
+            // which owns audio defaults and is where that verb belongs.
+            sink?.stopAll();
           },
         };
       }

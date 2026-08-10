@@ -858,6 +858,29 @@ async function main() {
       // proves nothing, so the wait is part of the measurement.
       await sleep(2500);
 
+      // --- C0a hidden-screens-are-idle, on the load path -------------------
+      // Sampled here, before a single navigation, because this is the state a
+      // visitor actually arrives in: every panel has mounted and started
+      // itself, and the router's *first* apply is what has to stop them. The
+      // later sample cannot see a failure here -- it only ever hashes screens
+      // the run has already left -- and the first version of this router was
+      // green there while painting two hidden canvases at 60fps on every load.
+      const idleOnLoadBefore = (await cdp.evaluate(CANVAS_PROBE)).filter((c) => !c.visible);
+      await sleep(ANIMATION_SAMPLE_MS);
+      const idleOnLoadAfter = (await cdp.evaluate(CANVAS_PROBE)).filter((c) => !c.visible);
+      const movedOnLoad = idleOnLoadBefore.filter(
+        (c, index) => idleOnLoadAfter[index]?.hash !== c.hash,
+      );
+      record(
+        `hidden-screens-are-idle-on-load-${viewport.name}`,
+        idleOnLoadBefore.length > 0 &&
+          idleOnLoadBefore.length === idleOnLoadAfter.length &&
+          movedOnLoad.length === 0,
+        idleOnLoadBefore.length === 0
+          ? 'no off-screen canvas found, so nothing was measured'
+          : `${idleOnLoadBefore.length} off-screen canvas(es) on the landing screen${movedOnLoad.length === 0 ? ', none repainted' : ` REPAINTED: ${movedOnLoad.map((c) => c.host ?? '?').join(', ')}`}`,
+      );
+
       // --- C0 the cabinet: one screen at a time, and it fits ----------------
       // Every screen is walked, not just the ones with a canvas: the overflow
       // criterion says "when the page loads *and when each screen is shown*",
@@ -876,10 +899,21 @@ async function main() {
       const wrongCount = screenReadings.filter(
         (reading) => reading.boxes.filter((box) => box.area > 0).length !== 1,
       );
+      // The drift guard the duplicated `SCREEN_ROUTES` above needs. Without it
+      // a screen added to `shell/screens.ts` and forgotten here is simply never
+      // visited, and the count of routes walked -- which is what this line used
+      // to report -- says nothing about that, because it counts this file's own
+      // list. Comparing against the DOM's `[data-screen]` count is the only
+      // reading that comes from the other side.
+      const declaredScreens = screenReadings[0]?.boxes.length ?? 0;
       record(
         `one-screen-at-a-time-${viewport.name}`,
-        screenReadings.length > 0 && wrongCount.length === 0,
-        wrongCount.length === 0
+        screenReadings.length > 0 &&
+          wrongCount.length === 0 &&
+          declaredScreens === SCREEN_ROUTES.length,
+        declaredScreens !== SCREEN_ROUTES.length
+          ? `the page declares ${declaredScreens} [data-screen] sections but this gate walks ${SCREEN_ROUTES.length} routes — SCREEN_ROUTES has drifted from shell/screens.ts`
+          : wrongCount.length === 0
           ? `${screenReadings.length} screens, exactly one visible on each`
           : wrongCount
               .map(
@@ -910,9 +944,55 @@ async function main() {
       await load(viewport.name, '/');
       await sleep(2500);
 
+      // --- C0c the back button ---------------------------------------------
+      // Driven through the browser's own history, not through the hash: the
+      // criterion is about the back button, and the unit tests can only model
+      // one. Two navigations, then back, then forward.
+      await goto('/play');
+      await goto('/watch');
+      await cdp.evaluate('(() => { history.back(); return true; })()');
+      await sleep(800);
+      const backTo = (await cdp.evaluate(SCREEN_BOXES_PROBE))
+        .filter((box) => box.area > 0)
+        .map((box) => box.id);
+      await cdp.evaluate('(() => { history.forward(); return true; })()');
+      await sleep(800);
+      const forwardTo = (await cdp.evaluate(SCREEN_BOXES_PROBE))
+        .filter((box) => box.area > 0)
+        .map((box) => box.id);
+      record(
+        `back-button-walks-the-screens-${viewport.name}`,
+        backTo.length === 1 && backTo[0] === 'arcade' && forwardTo.length === 1 && forwardTo[0] === 'spectate',
+        `after back: ${backTo.join('+') || 'nothing'}; after forward: ${forwardTo.join('+') || 'nothing'}`,
+      );
+
       // --- C2 no-horizontal-overflow ---------------------------------------
+      const overflowReadings = screenReadings.map((reading) => ({
+        route: reading.route,
+        overflow: reading.overflow,
+      }));
       if (viewport.mobile) {
-        const worst = screenReadings.reduce((a, b) =>
+        // The arcade stage is `display: none` until a Match is running, so the
+        // screen walk above never laid out its 960px canvas at 390px -- the one
+        // canvas a phone visitor actually meets in Play-vs-CPU was the only one
+        // this check could not see. Start a Match and measure it. The Match is
+        // left running, which also gives the mobile capture a live fight and
+        // gives `hidden-screens-are-idle` a second canvas that would move.
+        await goto('/play');
+        const startedOnPhone = await cdp.evaluate(clickIn('#arcade', '^play vs cpu$'));
+        await sleep(1500);
+        const phoneArcade = await cdp.evaluate(hostCanvasProbe('#arcade'));
+        record(
+          'arcade-live-canvas-mobile',
+          startedOnPhone.ok === true && phoneArcade.visible > 0,
+          `started=${String(startedOnPhone.ok)} canvases=${phoneArcade.canvases} visible=${phoneArcade.visible}`,
+        );
+        overflowReadings.push({
+          route: '/play (match running)',
+          overflow: await cdp.evaluate(OVERFLOW_PROBE),
+        });
+
+        const worst = overflowReadings.reduce((a, b) =>
           b.overflow.scrollWidth > a.overflow.scrollWidth ? b : a,
         );
         const offenders = worst.overflow.offenders
@@ -920,7 +1000,7 @@ async function main() {
           .join(', ');
         record(
           'no-horizontal-overflow',
-          screenReadings.every(
+          overflowReadings.every(
             (reading) => reading.overflow.scrollWidth <= reading.overflow.clientWidth + 1,
           ),
           `widest screen ${worst.route}: scrollWidth=${worst.overflow.scrollWidth} clientWidth=${worst.overflow.clientWidth}${offenders ? ` widest: ${offenders}` : ''}`,

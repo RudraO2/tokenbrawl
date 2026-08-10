@@ -126,8 +126,7 @@ export function parseRoute(hash: string, known: readonly string[]): string {
  *
  * The initial apply fires `onHide` for every screen that is not showing, which
  * is deliberate: the panels have all mounted and started by the time this runs,
- * so the first thing the router does is stop four of the five clocks the page
- * just started.
+ * so the first thing the router does is stop every clock but one.
  */
 export function createScreenRouter(deps: ScreenRouterDeps): ScreenRouter {
   const { view, screens } = deps;
@@ -142,28 +141,59 @@ export function createScreenRouter(deps: ScreenRouterDeps): ScreenRouter {
   // Closure state inside a factory rather than a module-level binding, which is
   // the house pattern and what `source-discipline.test.ts` enforces. `''` is
   // not a route, so the first apply always counts as a change.
+  //
+  // `shown` starts holding **every** route, and that is the load-bearing part.
+  // By the time this router is built the panels have all mounted and started
+  // themselves: the replay player autoplays (`main.ts`) and the Spectate stream
+  // starts at mount unless the visitor asked for less motion
+  // (`spectate/panel.ts`). So the page really is in the state "every screen is
+  // running", and the router's job on its first apply is to stop all but one.
+  //
+  // An earlier version fired `onHide` only for the screen just *left*, which
+  // meant a fresh load of `/` stopped nothing at all -- the landing screen
+  // showed while `#app` and `#spectate` painted at 60fps behind
+  // `display: none`, which is verbatim the defect this story exists to fix. An
+  // independent review of this story caught it; the unit test that was supposed
+  // to cover it had been written to match the behaviour rather than the claim
+  // in its own name, and the gate could not see it either -- its only sample
+  // was taken after the run had already left every screen once.
   const state = { route: '' };
+  const shown = new Set(routes);
 
   const apply = (route: string): void => {
     if (state.route === route) {
       return;
     }
-    const previous = state.route;
     state.route = route;
+
+    // Two passes, and the order matters: every `onHide` runs before any
+    // `onShow`. The page has one audio graph shared by every surface
+    // (`render/audio-bus.ts`), so a screen stopping its sound is stopping a
+    // *shared* thing -- interleaved with the registry's own order, the outgoing
+    // screen's teardown would run after the incoming screen's setup and silence
+    // the surface that had just claimed the buses.
     for (const screen of screens) {
-      const showing = screen.route === route;
-      if (showing) {
-        screen.element?.setAttribute(ACTIVE_ATTRIBUTE, '');
-      } else {
-        screen.element?.removeAttribute(ACTIVE_ATTRIBUTE);
+      if (screen.route === route) {
+        continue;
       }
-      // Only on a transition. Calling `onShow` on the screen that was already
-      // showing would restart a clock the visitor deliberately paused.
-      if (showing && screen.route !== previous) {
-        screen.onShow?.();
-      }
-      if (!showing && screen.route === previous) {
+      screen.element?.removeAttribute(ACTIVE_ATTRIBUTE);
+      // Only on a transition: hiding a screen that is already stopped would
+      // stop it twice.
+      if (shown.has(screen.route)) {
+        shown.delete(screen.route);
         screen.onHide?.();
+      }
+    }
+    for (const screen of screens) {
+      if (screen.route !== route) {
+        continue;
+      }
+      screen.element?.setAttribute(ACTIVE_ATTRIBUTE, '');
+      // Likewise: calling `onShow` on a screen that is already running would
+      // restart a clock the visitor deliberately paused.
+      if (!shown.has(screen.route)) {
+        shown.add(screen.route);
+        screen.onShow?.();
       }
     }
     deps.onRoute?.(route);
