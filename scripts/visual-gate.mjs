@@ -68,12 +68,31 @@ const VIEWPORTS = [
  * The three surfaces, by host element. Straight from `docs/VISUAL-CHECK.md`:
  * every one is captured every run even when a story names only one of them,
  * because the Spectate regression survived precisely by not being mentioned.
+ *
+ * Story 12.4 gave each one a `route`. The page is a cabinet now -- exactly one
+ * screen shows -- so a capture has to *navigate* before it scrolls, and a gate
+ * that stopped reaching a surface would have hidden the next Spectate
+ * regression rather than fixed a layout.
  */
 const SURFACES = [
-  { id: 'app', selector: '#app', label: 'replay player' },
-  { id: 'arcade', selector: '#arcade', label: 'play vs cpu' },
-  { id: 'spectate', selector: '#spectate', label: 'spectate stream' },
+  { id: 'app', selector: '#app', route: '/replay', label: 'replay player' },
+  { id: 'arcade', selector: '#arcade', route: '/play', label: 'play vs cpu' },
+  { id: 'spectate', selector: '#spectate', route: '/watch', label: 'spectate stream' },
 ];
+
+/**
+ * Every screen, in nav order. Mirrors `apps/web/src/shell/screens.ts`.
+ *
+ * Duplicated rather than imported: this script is dependency-free ESM run
+ * straight by Node, and importing a `.ts` module from the app would need a
+ * loader. The registry test in `shell/router.test.ts` pins the same list from
+ * the other side, so a screen added there and forgotten here shows up as a
+ * `one-screen-at-a-time` reading that does not mention it.
+ */
+const SCREEN_ROUTES = ['/', '/play', '/select', '/watch', '/replay', '/byok'];
+
+/** The screens that hold an arena canvas, and therefore the ones the framing checks sample. */
+const ARENA_ROUTES = ['/replay', '/play', '/watch'];
 
 /**
  * Console lines that are environmental rather than defects.
@@ -366,6 +385,43 @@ const hostCanvasProbe = (hostSelector) => `(() => {
     return rect.width > 0 && rect.height > 0;
   });
   return { hostPresent: true, canvases: canvases.length, visible: visible.length };
+})()`;
+
+/**
+ * Which screen sections have a non-zero bounding box (Story 12.4).
+ *
+ * The check is "exactly one", and it is deliberately measured off the *box*
+ * rather than off the attribute the router moves. An attribute sweep would pass
+ * on a stylesheet that never shipped the `display` rule, which is the one way
+ * this feature can be wired correctly in TypeScript and be completely absent to
+ * a visitor -- the failure mode this repo keeps shipping.
+ */
+const SCREEN_BOXES_PROBE = `(() => {
+  return [...document.querySelectorAll('[data-screen]')].map((el) => {
+    const rect = el.getBoundingClientRect();
+    return {
+      id: el.id,
+      active: el.hasAttribute('data-screen-active'),
+      area: Math.round(rect.width) * Math.round(rect.height),
+    };
+  });
+})()`;
+
+/**
+ * Whether a screen offering four fighters is reachable (Story 12.4, owed by 12.5).
+ *
+ * Reads the *shown* screen, so it cannot be satisfied by a roster sitting in a
+ * hidden section: reachable means a visitor got there. Four names rather than a
+ * count of buttons, because "four things to click" is satisfied by four copies
+ * of the same fighter.
+ */
+const CHARACTER_SELECT_PROBE = `(() => {
+  const shown = [...document.querySelectorAll('[data-screen]')]
+    .find((el) => el.getBoundingClientRect().height > 0);
+  if (!shown) return { reached: false, found: [] };
+  const text = (shown.textContent || '').toLowerCase();
+  const roster = ['clawde', 'chatty', 'gemini', 'grokk'];
+  return { reached: true, screen: shown.id, found: roster.filter((name) => text.includes(name)) };
 })()`;
 
 const scrollIntoView = (selector) => `(() => {
@@ -696,10 +752,13 @@ async function main() {
         '--no-first-run',
         '--no-default-browser-check',
         '--disable-extensions',
-        // Determinism, not cosmetics: a CI host with reduced motion enabled
-        // would put the player on its still-frame path and every animation
-        // check below would fail for a reason that has nothing to do with the
-        // change under test.
+        // Determinism, not cosmetics: a host with reduced motion enabled puts
+        // the player on its still-frame path, and every animation check below
+        // would then measure something other than the change under test.
+        //
+        // The flag is kept because it is harmless and self-documenting, but it
+        // does NOT do this on its own -- see `Emulation.setEmulatedMedia`
+        // below, which is what actually does it.
         '--force-prefers-reduced-motion=0',
         `--user-data-dir=${profileDir}`,
         `--remote-debugging-port=${debugPort}`,
@@ -735,6 +794,55 @@ async function main() {
     await cdp.send('Log.enable');
     await cdp.send('Page.enable');
 
+    // --- reduced motion, off ------------------------------------------------
+    //
+    // Measured on 2026-08-10, during Story 12.4: headless Chrome answers
+    // `matchMedia('(prefers-reduced-motion: reduce)').matches` with **true**,
+    // and `--force-prefers-reduced-motion=0` does not change that -- the switch
+    // is presence-only, so passing `=0` reads as passing it. Verified by
+    // `--dump-dom` against a page that prints the query, with the flag and
+    // without: `true` both times.
+    //
+    // So every run of this gate since Story 12.1 has measured the *reduced*
+    // product. That matters more than it sounds: `player/clock.ts` under the
+    // preference emits the final frame once and stops, `spectate/panel.ts`
+    // declines to start its stream, and `juice.ts` drops the shake and the
+    // particles. A check asserting that a hidden canvas does not repaint would
+    // have passed on a page with no router at all, because nothing was moving
+    // in the first place.
+    //
+    // `Emulation.setEmulatedMedia` is the lever that works. It is set on the
+    // page session and survives every navigation the run makes.
+    await cdp.send('Emulation.setEmulatedMedia', {
+      features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }],
+    });
+
+    /**
+     * Loads the page at `route` as a fresh document.
+     *
+     * The query parameter is not decoration. Two URLs differing only in their
+     * fragment are the *same document* to the browser, so `Page.navigate` from
+     * `/#/watch` to `/` is a same-document navigation that fires no load event
+     * and would leave the gate waiting fifteen seconds for one. A distinct
+     * query makes every one of these a real navigation, which is also what
+     * makes the reload check below a reload rather than a hash edit.
+     */
+    const load = async (tag, route) => {
+      const loaded = new Promise((res) => cdp.on('Page.loadEventFired', res));
+      await cdp.send('Page.navigate', {
+        url: `http://127.0.0.1:${sitePort}/?run=${encodeURIComponent(tag)}#${route}`,
+      });
+      await Promise.race([loaded, sleep(15_000)]);
+    };
+
+    /** Moves between screens the way a visitor's click does: by setting the hash. */
+    const goto = async (route) => {
+      await cdp.evaluate(`(() => { location.hash = ${JSON.stringify(`#${route}`)}; return location.hash; })()`);
+      // Long enough for the router's `hashchange` to run, the screen to lay
+      // out, and a resumed clock to paint at least one frame.
+      await sleep(500);
+    };
+
     for (const viewport of VIEWPORTS) {
       await cdp.send('Emulation.setDeviceMetricsOverride', {
         width: viewport.width,
@@ -742,12 +850,7 @@ async function main() {
         deviceScaleFactor: 1,
         mobile: viewport.mobile,
       });
-      // Navigate and wait for the load event rather than navigating and
-      // reloading: a `Page.reload` issued while the navigation it follows is
-      // still in flight detaches the session out from under the next call.
-      const loaded = new Promise((res) => cdp.on('Page.loadEventFired', res));
-      await cdp.send('Page.navigate', { url: `http://127.0.0.1:${sitePort}/` });
-      await Promise.race([loaded, sleep(15_000)]);
+      await load(viewport.name, '/');
 
       // The asset upgrades are deliberately off the critical path (see
       // `startup.ts`): sprites and the backdrop swap into an already-running
@@ -755,10 +858,82 @@ async function main() {
       // proves nothing, so the wait is part of the measurement.
       await sleep(2500);
 
+      // --- C0 the cabinet: one screen at a time, and it fits ----------------
+      // Every screen is walked, not just the ones with a canvas: the overflow
+      // criterion says "when the page loads *and when each screen is shown*",
+      // and the 992px canvas that caused it lives on a screen a visitor has to
+      // navigate to now.
+      const screenReadings = [];
+      for (const route of SCREEN_ROUTES) {
+        await goto(route);
+        screenReadings.push({
+          route,
+          boxes: await cdp.evaluate(SCREEN_BOXES_PROBE),
+          overflow: await cdp.evaluate(OVERFLOW_PROBE),
+        });
+      }
+
+      const wrongCount = screenReadings.filter(
+        (reading) => reading.boxes.filter((box) => box.area > 0).length !== 1,
+      );
+      record(
+        `one-screen-at-a-time-${viewport.name}`,
+        screenReadings.length > 0 && wrongCount.length === 0,
+        wrongCount.length === 0
+          ? `${screenReadings.length} screens, exactly one visible on each`
+          : wrongCount
+              .map(
+                (reading) =>
+                  `${reading.route}: ${reading.boxes
+                    .filter((box) => box.area > 0)
+                    .map((box) => `#${box.id}`)
+                    .join('+') || 'none'} visible`,
+              )
+              .join(' | '),
+      );
+
+      // --- C0b the route survives a reload ---------------------------------
+      // A route that does not survive a reload is a tab strip. This is a real
+      // cross-document load straight at `#/watch`, which is also what a
+      // visitor pasting the URL does.
+      await load(`${viewport.name}-reload`, '/watch');
+      await sleep(1200);
+      const afterReload = await cdp.evaluate(SCREEN_BOXES_PROBE);
+      const shownAfterReload = afterReload.filter((box) => box.area > 0).map((box) => box.id);
+      record(
+        `route-survives-reload-${viewport.name}`,
+        shownAfterReload.length === 1 && shownAfterReload[0] === 'spectate',
+        `loaded #/watch, showing ${shownAfterReload.join('+') || 'nothing'}`,
+      );
+      // Back to a fresh page for the rest of the run, so the arcade Match below
+      // starts from the same state it always did.
+      await load(viewport.name, '/');
+      await sleep(2500);
+
+      // --- C2 no-horizontal-overflow ---------------------------------------
+      if (viewport.mobile) {
+        const worst = screenReadings.reduce((a, b) =>
+          b.overflow.scrollWidth > a.overflow.scrollWidth ? b : a,
+        );
+        const offenders = worst.overflow.offenders
+          .map((o) => `${o.tag}.${o.cls || '-'}@${o.right}px`)
+          .join(', ');
+        record(
+          'no-horizontal-overflow',
+          screenReadings.every(
+            (reading) => reading.overflow.scrollWidth <= reading.overflow.clientWidth + 1,
+          ),
+          `widest screen ${worst.route}: scrollWidth=${worst.overflow.scrollWidth} clientWidth=${worst.overflow.clientWidth}${offenders ? ` widest: ${offenders}` : ''}`,
+        );
+      }
+
       // --- C1 arcade-live-canvas -------------------------------------------
       // The mode a visitor is most likely to try first. Today the Match runs
       // headlessly and there is no canvas in `#arcade` at all.
       if (!viewport.mobile) {
+        // Story 12.4: navigate first. The Play button is on a screen now, and
+        // the live arena does not paint while its screen is hidden.
+        await goto('/play');
         const started = await cdp.evaluate(clickIn('#arcade', '^play vs cpu$'));
         await sleep(1200);
         const arcade = await cdp.evaluate(hostCanvasProbe('#arcade'));
@@ -832,19 +1007,21 @@ async function main() {
         );
       }
 
-      // --- C2 no-horizontal-overflow ---------------------------------------
-      const overflow = await cdp.evaluate(OVERFLOW_PROBE);
-      if (viewport.mobile) {
-        const offenders = overflow.offenders.map((o) => `${o.tag}.${o.cls || '-'}@${o.right}px`).join(', ');
-        record(
-          'no-horizontal-overflow',
-          overflow.scrollWidth <= overflow.clientWidth + 1,
-          `scrollWidth=${overflow.scrollWidth} clientWidth=${overflow.clientWidth}${offenders ? ` widest: ${offenders}` : ''}`,
-        );
+      // --- C3 the arena sweeps, one screen at a time (Story 12.4) ----------
+      // Before the router these three checks read "every canvas on the page",
+      // which was one measurement because every surface was mounted at once.
+      // A cabinet shows one screen, so the sweep walks the three screens that
+      // hold an arena and aggregates -- same coverage, three visits. Dropping
+      // to whichever screen happened to be showing would have quietly narrowed
+      // the sweep to one surface, which is exactly the hole Story 12.3's review
+      // found in the first version of `fighters-inside-frame`.
+      const canvases = [];
+      const inkAcross = [];
+      for (const route of ARENA_ROUTES) {
+        await goto(route);
+        canvases.push(...(await cdp.evaluate(CANVAS_PROBE)).filter((c) => c.visible));
+        inkAcross.push(...(await cdp.evaluate(arenaInkProbe(null))));
       }
-
-      // --- C3 canvas-not-blank ----------------------------------------------
-      const canvases = await cdp.evaluate(CANVAS_PROBE);
       const blank = canvases.filter((c) => c.visible && c.readable && c.inkRatio < MIN_INK_RATIO);
       record(
         `canvas-not-blank-${viewport.name}`,
@@ -855,12 +1032,11 @@ async function main() {
       );
 
       // --- C3b fighters-inside-frame (Story 12.3) ---------------------------
-      // Every visible arena canvas on the page, not just the one this story
-      // was thinking about. The clipping was a property of the coordinate
-      // mapping, so it was identical on all three surfaces, and a check that
-      // swept one of them would have gone green on a camera wired into the
-      // player and forgotten in Spectate.
-      const inkAcross = await cdp.evaluate(arenaInkProbe(null));
+      // Every visible arena canvas across every arena screen, not just the one
+      // this story was thinking about. The clipping was a property of the
+      // coordinate mapping, so it was identical on all three surfaces, and a
+      // check that swept one of them would have gone green on a camera wired
+      // into the player and forgotten in Spectate.
       record(
         `fighters-inside-frame-${viewport.name}`,
         // `hasSpriteInk` is not decoration. Without it the check passes on a
@@ -892,6 +1068,7 @@ async function main() {
       // --- C4 spectate-animates ---------------------------------------------
       // The Story 11-6 defect exactly: a surface holding one still frame while
       // every unit test about it stayed green.
+      await goto('/watch');
       if (!viewport.mobile) {
         await cdp.evaluate(scrollIntoView('#spectate'));
         await cdp.evaluate(clickIn('#spectate', '^play$'));
@@ -909,8 +1086,64 @@ async function main() {
         );
       }
 
+      // --- C4b hidden-screens-are-idle (Story 12.4) -------------------------
+      // `spectate-animates` inverted, and both must hold at once: the shown
+      // surface animates, the hidden ones do not. Sampled here, on `#/watch`,
+      // because that is the moment the page is at its most loaded -- the
+      // replay player has a Match in it and (on desktop) the arcade Match is
+      // mid-fight, so both hidden canvases carry a picture that *would* move if
+      // nothing had stopped them.
+      //
+      // Whole-canvas hashes, deliberately, where the arcade movement check
+      // hashes below the HUD: here a moving clock readout is exactly the
+      // failure being looked for.
+      //
+      // The film is rewound first, and that is what makes the check bite. A
+      // mutation run with every `onHide` removed passed on desktop and failed
+      // only on mobile, because by the time the desktop path reached this point
+      // the demo film had played itself out -- the hidden canvas was static for
+      // a reason that had nothing to do with the router. Pressing Replay puts a
+      // running clock behind the hidden canvas, so "it did not repaint" is a
+      // statement about the screen being hidden rather than about the Match
+      // being over.
+      await goto('/replay');
+      await cdp.evaluate(clickIn('#app', '^replay$'));
+      await sleep(400);
+      await goto('/watch');
+      const hiddenBefore = (await cdp.evaluate(CANVAS_PROBE)).filter((c) => !c.visible);
+      await sleep(ANIMATION_SAMPLE_MS);
+      const hiddenAfter = (await cdp.evaluate(CANVAS_PROBE)).filter((c) => !c.visible);
+      const moved = hiddenBefore.filter((c, index) => hiddenAfter[index]?.hash !== c.hash);
+      record(
+        `hidden-screens-are-idle-${viewport.name}`,
+        // A run that found no hidden canvas measured nothing and must not
+        // report a pass: with the router there is always at least one.
+        hiddenBefore.length > 0 &&
+          hiddenBefore.length === hiddenAfter.length &&
+          moved.length === 0,
+        hiddenBefore.length === 0
+          ? 'no off-screen canvas found, so nothing was measured'
+          : `${hiddenBefore.length} off-screen canvas(es)${moved.length === 0 ? ', none repainted' : ` REPAINTED: ${moved.map((c) => c.host ?? '?').join(', ')}`}`,
+      );
+
+      // --- C4c character-select-reachable (Story 12.4, owed by 12.5) --------
+      // Waived here with its owner: the route is registered and the screen
+      // exists, but it offers no roster yet. Story 12.5 deletes the waiver.
+      if (!viewport.mobile) {
+        await goto('/select');
+        const select = await cdp.evaluate(CHARACTER_SELECT_PROBE);
+        record(
+          'character-select-reachable',
+          select.reached === true && select.found.length === 4,
+          `showing #${select.screen ?? 'nothing'}, fighters named: ${select.found.join(', ') || 'none'}`,
+        );
+      }
+
       // --- C5 screenshots-captured ------------------------------------------
+      // Navigate, then scroll: a surface lives on a screen now, and a capture
+      // that only scrolled would photograph whichever screen was showing.
       for (const surface of SURFACES) {
+        await goto(surface.route);
         const present = await cdp.evaluate(scrollIntoView(surface.selector));
         await sleep(250);
         const shot = await cdp.send('Page.captureScreenshot', { format: 'png' });

@@ -1,9 +1,9 @@
 {
   "_readme": "Waivers for scripts/visual-gate.mjs. A check named here may fail without failing the gate, because it describes a defect a later story owns. The ratchet turns one way only: when a waived check starts passing, the gate FAILS until its entry is deleted here. Adding an entry is how you record a known defect; deleting one is part of the story that fixes it. Never add an entry to get a run green.",
-  "no-horizontal-overflow": {
-    "story": "12-4-app-shell-and-screen-router",
+  "character-select-reachable": {
+    "story": "12-5-character-select-four-fighters",
     "recorded": "2026-08-10",
-    "what": "At 390px the document scrolls sideways: scrollWidth 992 against clientWidth 390. The 960px arena canvas does not scale, and .tb-tagline runs past the viewport at 409px.",
-    "clears_when": "document.documentElement.scrollWidth <= clientWidth at 390x844."
+    "what": "Story 12.4 registers the /select route and gives it a real screen, so a visitor reaches a page rather than a blank viewport -- but the screen is a placeholder that names no fighters. render/roster.ts still freezes DEFAULT_ROSTER to ['clawde','chatty']; gemini and grokk ship full sprite packs and portraits that nothing can select.",
+    "clears_when": "The screen shown at #/select names all four fighters (clawde, chatty, gemini, grokk) and a visitor can pick between them."
   }
 }
