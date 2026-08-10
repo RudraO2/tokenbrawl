@@ -494,6 +494,20 @@ function ultSheetFor(fighters: readonly string[], options: { portraits?: boolean
       { x: 832, y: 0 },
       { x: 0, y: 208 },
     ],
+    // Story 12.5. The other two, also straight from the shipped layout: with
+    // character select they are pairs a Match can actually be drawn with, and a
+    // fixture that stopped at the default pair could not tell a keyed cinematic
+    // from one hard-wired to clawde.
+    gemini: [
+      { x: 208, y: 208 },
+      { x: 416, y: 208 },
+      { x: 624, y: 208 },
+    ],
+    grokk: [
+      { x: 832, y: 208 },
+      { x: 0, y: 416 },
+      { x: 208, y: 416 },
+    ],
   };
   const layout = validateUltSheetLayout({
     cellWidth: 208,
@@ -809,6 +823,53 @@ describe('the cinematic degrades in three named steps (Story 11.4)', () => {
       roster: DEFAULT_ROSTER,
     });
     expect(first.calls).not.toStrictEqual(second.calls);
+  });
+
+  it('draws the *selected* fighter, not clawde, when a chosen pair casts', () => {
+    // Story 12.5. Story 11.4 built this keying and had only one key to prove it
+    // with: every surface passed `DEFAULT_ROSTER`, so a cinematic hard-wired to
+    // clawde would have been indistinguishable from a keyed one. With character
+    // select there is a second key, and this is the assertion that uses it.
+    const chosen = ['gemini', 'grokk'] as const;
+    const ult = ultSheetFor(chosen);
+    const ctx = createRecordingCanvas();
+    drawCinematicPlate(
+      ctx,
+      cinematicWith({ portraitBasisPoints: BASIS_POINTS_FULL, letterboxPx: 52, title: true }),
+      VIEWPORT,
+      THEME,
+      ult,
+      chosen[0],
+    );
+
+    // Their name under the portrait, and demonstrably not the default pair's.
+    const names = ctx.calls.filter((call) => call.op === 'fillText').map((call) => call.args[0]);
+    expect(names).toContain(ROSTER_NAMES.gemini);
+    expect(names).not.toContain(ROSTER_NAMES[DEFAULT_ROSTER[0]]);
+
+    // And their aura, on the level-2 path where the aura is what is painted --
+    // with a sheet the beam is drawn art, so the colour is in the pixels rather
+    // than in a `fillStyle` this fake can read.
+    // The `roster` option is what carries the choice through the compositor, so
+    // the same cinematic frame under two rosters must not be the same picture.
+    // Without this the assertions above would still pass on a `drawJuicedFrame`
+    // that ignored `roster` entirely and let its callers pass a key by hand.
+    const asDefault = createRecordingCanvas();
+    const asChosen = createRecordingCanvas();
+    const frame = juiceFrame({ cinematic: releasing({ agentIndex: 0 }) });
+    drawJuicedFrame(asDefault, FRAME, frame, {
+      ...OPTIONS,
+      ult: ultSheetFor(DEFAULT_ROSTER),
+      roster: DEFAULT_ROSTER,
+    });
+    drawJuicedFrame(asChosen, FRAME, frame, { ...OPTIONS, ult, roster: chosen });
+    expect(asChosen.calls).not.toStrictEqual(asDefault.calls);
+
+    const stage = createRecordingCanvas();
+    drawCinematicStage(stage, releasing(), VIEWPORT, THEME, undefined, 'gemini');
+    const fills = stage.calls.filter((call) => call.op === 'fillRect');
+    expect(fills.some((call) => call.fillStyle === auraFor('gemini'))).toBe(true);
+    expect(fills.some((call) => call.fillStyle === auraFor(DEFAULT_ROSTER[0]))).toBe(false);
   });
 
   it('level 2: no sheet, but a known caster, draws a procedural beam in their aura', () => {

@@ -425,6 +425,20 @@ const CHARACTER_SELECT_PROBE = `(() => {
 })()`;
 
 /**
+ * Clicks the character-select card for `id` on `side` (Story 12.5).
+ *
+ * By the card's own `data-select-pick` attribute rather than by its visible
+ * text, because the plate and the id differ in case and a text match would go
+ * green on the *opponent's* card just as happily as the visitor's.
+ */
+const pickFighter = (side, id) => `(() => {
+  const card = document.querySelector('[data-select-pick="' + ${JSON.stringify(String(side))} + ':' + ${JSON.stringify(id)} + '"]');
+  if (!card) return { ok: false, why: 'no card for ' + ${JSON.stringify(id)} };
+  card.click();
+  return { ok: true, pressed: card.getAttribute('aria-pressed') };
+})()`;
+
+/**
  * Scrolls a surface's *canvas* to the middle of the viewport, or the surface
  * itself when it has none.
  *
@@ -1228,9 +1242,9 @@ async function main() {
           : `${hiddenBefore.length} off-screen canvas(es)${moved.length === 0 ? ', none repainted' : ` REPAINTED: ${moved.map((c) => c.host ?? '?').join(', ')}`}`,
       );
 
-      // --- C4c character-select-reachable (Story 12.4, owed by 12.5) --------
-      // Waived here with its owner: the route is registered and the screen
-      // exists, but it offers no roster yet. Story 12.5 deletes the waiver.
+      // --- C4c character-select-reachable (Story 12.4, cleared by 12.5) -----
+      // Waived by 12.4 with 12.5 as its owner; 12.5 built the screen and
+      // deleted the waiver, so this check is load-bearing from here on.
       if (!viewport.mobile) {
         await goto('/select');
         const select = await cdp.evaluate(CHARACTER_SELECT_PROBE);
@@ -1238,6 +1252,64 @@ async function main() {
           'character-select-reachable',
           select.reached === true && select.found.length === 4,
           `showing #${select.screen ?? 'nothing'}, fighters named: ${select.found.join(', ') || 'none'}`,
+        );
+
+        // --- C4d selected-fighter-is-drawn (Story 12.5) --------------------
+        //
+        // The check the story exists for. A roster that renders four cards and
+        // reaches nothing would pass `character-select-reachable` completely --
+        // that check reads text on a screen, and text on a screen is exactly
+        // what two unreachable fighters already had.
+        //
+        // So: play one Match as gemini and one as grokk, from a fresh page each
+        // time, and require the two arena pictures to differ while both clear
+        // the ink floor. Both Matches are the same seed at the same Decision
+        // Point (the arcade Match hangs waiting for the visitor), so the
+        // fighters stand in identical positions and the *only* thing that can
+        // move the hash is which sprites were drawn. Two identical pictures
+        // mean the selection reached nothing; a blank one means it reached the
+        // loader and the loader failed.
+        //
+        // Hashed below the HUD band for Story 12.2's reason: `TICK NNN` and the
+        // bars advance on their own, so a whole-canvas hash would differ
+        // between two runs of the *same* fighter and this check would pass on a
+        // selection that did nothing at all.
+        const asFighter = [];
+        for (const id of ['gemini', 'grokk']) {
+          await load(`${viewport.name}-as-${id}`, '/select');
+          // Same wait the captures take: the packs are upgrades to an already
+          // running page and a probe fired before they land measures the block
+          // artist, which is identical for both fighters.
+          await sleep(2500);
+          const picked = await cdp.evaluate(pickFighter(0, id));
+          // The pick starts the fetch; this is the decode.
+          await sleep(2000);
+          await goto('/play');
+          const started = await cdp.evaluate(clickIn('#arcade', '^play vs cpu$'));
+          await sleep(2000);
+          const canvas = (await cdp.evaluate(CANVAS_PROBE)).find(
+            (c) => c.host === 'arcade' && c.visible,
+          );
+          asFighter.push({
+            id,
+            picked: picked.ok === true,
+            started: started.ok === true,
+            hash: await cdp.evaluate(hostArenaHashProbe('#arcade')),
+            ink: canvas?.inkRatio ?? 0,
+          });
+        }
+        const [first, second] = asFighter;
+        record(
+          'selected-fighter-is-drawn',
+          asFighter.every((run) => run.picked && run.started && run.hash !== null) &&
+            asFighter.every((run) => run.ink >= MIN_INK_RATIO) &&
+            first.hash !== second.hash,
+          asFighter
+            .map(
+              (run) =>
+                `${run.id}: picked=${String(run.picked)} played=${String(run.started)} arena=${String(run.hash)} ink=${(run.ink * 100).toFixed(1)}%`,
+            )
+            .join(' | '),
         );
       }
 

@@ -6,7 +6,7 @@ import type { CommandLog } from '@tokenbrawl/contracts';
 import { DEFAULT_FIGHTER_CONFIG } from '../../../packages/env-fighter/src/config';
 import type { Canvas2D } from './render/canvas2d';
 import type { MountPoint, MountPointChild } from './main';
-import { DEFAULT_ROSTER, ROSTER_IDS } from './render/roster';
+import { DEFAULT_ROSTER, ROSTER_IDS, ROSTER_NAMES, spriteLayoutUrlFor } from './render/roster';
 import { imageUrlsFor, validateUltSheetLayout } from './render/ult-sheet';
 import { DEMO_REPLAY_URL, resolveSidecarUrl, startup, type BrowserGlobals } from './startup';
 import { runByokMatch } from './byok/run';
@@ -2036,5 +2036,78 @@ describe('the Ultimate FX sheet loads off the critical path, or not at all (Stor
     // untouched by the Ultimate art's failure.
     expect(result?.mounted.clock.isRunning()).toBe(true);
     expect(warnings.filter((args) => String(args[0]).includes('Impact FX'))).toStrictEqual([]);
+  });
+});
+
+/**
+ * Story 12.5: a pick reaches the art, and the art reaches the fight.
+ *
+ * The unit under test is the wiring, not the screen -- `shell/select.test.ts`
+ * covers the markup and the keyboard. What can only be asserted here is that
+ * choosing a fighter causes *that fighter's* sprite pack to be fetched and
+ * causes every live surface to be told, because those two facts are what make
+ * "reachable" different from "listed".
+ */
+describe('choosing a fighter changes what is drawn (Story 12.5)', () => {
+  it('starts on the default pair when nothing has been chosen', async () => {
+    const { log } = await buildDemoBundle();
+    const harness = createHarness(log, { spritesResolve: true });
+    const result = await startup(harness.globals);
+
+    expect(result?.selection.pair()).toStrictEqual(DEFAULT_ROSTER);
+    for (const id of DEFAULT_ROSTER) {
+      expect(harness.requested()).toContain(spriteLayoutUrlFor(id));
+    }
+    // And the two nobody chose are not fetched, which is the other half of the
+    // reason `DEFAULT_ROSTER` did not simply become "all four".
+    for (const id of ROSTER_IDS.filter((other) => !DEFAULT_ROSTER.includes(other))) {
+      expect(harness.requested()).not.toContain(spriteLayoutUrlFor(id));
+    }
+  });
+
+  it("fetches the chosen fighter's pack the moment they are picked", async () => {
+    const { log } = await buildDemoBundle();
+    const harness = createHarness(log, { spritesResolve: true });
+    const result = await startup(harness.globals);
+
+    expect(harness.requested()).not.toContain(spriteLayoutUrlFor('gemini'));
+    result?.selection.select(0, 'gemini');
+    // The harness records a URL when the response's `json()` is read, which is
+    // a few microtasks after the pick. Drained rather than slept through: there
+    // is no timer anywhere on this path, so this settles or it never will.
+    await new Promise<void>((resolve) => {
+      setImmediate(resolve);
+    });
+    expect(harness.requested()).toContain(spriteLayoutUrlFor('gemini'));
+    // On the pick, not on the Fight button: the pack has a whole screen's worth
+    // of the visitor's attention to decode in, instead of swapping into a fight
+    // that has already started.
+    expect(result?.selection.pair()).toStrictEqual(['gemini', DEFAULT_ROSTER[1]]);
+  });
+
+  it('mounts the roster into #select, so the screen is reachable', async () => {
+    const { log } = await buildDemoBundle();
+    const harness = createHarness(log, { spritesResolve: true });
+    const result = await startup(harness.globals);
+
+    expect(result?.select).not.toBeNull();
+    for (const id of ROSTER_IDS) {
+      // All four named on the screen a visitor lands on -- which is exactly
+      // what the gate's `character-select-reachable` measures in a browser.
+      expect(harness.selectHost.innerHTML).toContain(ROSTER_NAMES[id]);
+      expect(harness.selectHost.innerHTML).toContain(`/portraits/${id}.png`);
+    }
+  });
+
+  it('still plays the replay on a page with no character-select screen', async () => {
+    // The same warn-not-throw degrade every other panel here takes: the roster
+    // is an offer, the replay is the page's claim.
+    const { log } = await buildDemoBundle();
+    const harness = createHarness(log, { spritesResolve: true, noSelectHost: true });
+    const result = await startup(harness.globals);
+
+    expect(result?.select).toBeNull();
+    expect(result?.mounted.clock.isRunning()).toBe(true);
+    expect(result?.selection.pair()).toStrictEqual(DEFAULT_ROSTER);
   });
 });
