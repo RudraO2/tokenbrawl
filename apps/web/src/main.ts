@@ -370,6 +370,14 @@ export function mountPlayer(
     // `filmIndexAt` rather than assuming the two are the same number.
     const filmIndex = track.filmIndexAt(index);
     const decisionPoint = film.frames[filmIndex]?.decisionPoint ?? 0;
+    // Story 12.7. A Match ending is an event on screen, not a canvas that stops.
+    // The final Decision Point is the last transition (`states.length - 2`), and
+    // across its frames -- a counted hold, no timer -- the overlay draws and the
+    // winner's pip fills. Every earlier frame passes neither, so the pips are
+    // empty and the arena is clean until the fight is actually over. Both are
+    // pure in the frame position, so a scrub to the tail shows the KO screen a
+    // play-through shows and a scrub away from it takes the screen back down.
+    const atMatchEnd = film.states.length >= 2 && decisionPoint >= film.states.length - 2;
     drawJuicedFrame(ctx, film.frames[filmIndex], track.at(index), {
       config: DEFAULT_FIGHTER_CONFIG,
       viewport,
@@ -405,6 +413,13 @@ export function mountPlayer(
       // Story 11.3. The same read the clock and the juice track already make,
       // threaded in rather than taken again inside the renderer.
       reducedMotion: prefersReducedMotion(view),
+      // Story 12.7. The winner's pip and the KO / TIME OVER overlay, both drawn
+      // only across the Match's final Decision Point and both read off the film's
+      // own `result` -- no round field, no frozen contract touched.
+      roundsWon: atMatchEnd ? roundPipsFor(film.result.outcome) : undefined,
+      matchEnd: atMatchEnd
+        ? { endReason: film.result.endReason, outcome: film.result.outcome }
+        : undefined,
     });
     // Last, and after the draw: the audio describes the frame that is now on
     // screen, and nothing in it may throw into the paint path -- every failure
@@ -485,6 +500,18 @@ export function hashChip(film: ReplayFilm): { readonly label: string; readonly m
 /** Decision-Point count for the readout: transitions, not states. */
 export function decisionPointCount(film: ReplayFilm): number {
   return Math.max(0, film.states.length - 1);
+}
+
+/**
+ * The round pips a single Match's winner earns (Story 12.7).
+ *
+ * A replay is one Match, so its winner has won exactly one round of a would-be
+ * set: `p1` fills the left side's first pip, `p2` the right's, and a draw fills
+ * neither. Pure and exported so the tail-of-the-film pip fill can be asserted
+ * without a canvas.
+ */
+export function roundPipsFor(outcome: 'p1' | 'p2' | 'draw'): readonly [number, number] {
+  return outcome === 'p1' ? [1, 0] : outcome === 'p2' ? [0, 1] : [0, 0];
 }
 
 /**

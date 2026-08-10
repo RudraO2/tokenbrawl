@@ -6,6 +6,7 @@ import {
   hashChip,
   mountPlayer,
   reasoningView,
+  roundPipsFor,
   type CanvasSurface,
 } from './main';
 import { buildDemoLog } from './testing/demo-log';
@@ -97,6 +98,15 @@ describe('the hash verdict shown on the page (AC5)', () => {
 
     expect(decisionPointCount(film)).toBe(film.states.length - 1);
     expect(decisionPointCount(film)).toBeGreaterThan(0);
+  });
+
+  it("fills the single winner's pip for a replayed Match (12.7)", () => {
+    // A replay is one round of a would-be set: the winner takes one pip on their
+    // own side, and a draw takes none. The tail of the film reads this off the
+    // log's `result` -- no round field, no frozen contract touched.
+    expect(roundPipsFor('p1')).toStrictEqual([1, 0]);
+    expect(roundPipsFor('p2')).toStrictEqual([0, 1]);
+    expect(roundPipsFor('draw')).toStrictEqual([0, 0]);
   });
 });
 

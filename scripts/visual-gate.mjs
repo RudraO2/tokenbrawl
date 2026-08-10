@@ -565,6 +565,23 @@ const HUD_GOLD_RGB = [0xff, 0xd2, 0x4a];
 const HUD_REGION_INK_MIN = 30;
 
 /**
+ * The match-end overlay band, copied from `apps/web/src/render/renderer.ts`
+ * (Story 12.7) -- the same standing reason `HUD_BAND` and `ARENA_TOP_PX` are
+ * copies: this file cannot import a `.ts` module. `renderer.test.ts` reads this
+ * literal off disk and pins it to `MATCH_END_OVERLAY_TOP`.
+ *
+ * `match-end-overlay` samples gold in this centre band. It sits below the HUD
+ * and below `ARENA_TOP_PX`, so at frame 0 the only thing behind it is the
+ * backdrop -- which paints no exact arcade gold -- and the ending word's gold is
+ * the ink that is absent at the start and present at the end.
+ */
+const MATCH_END_OVERLAY_TOP = 180;
+const MATCH_END_BAND_HEIGHT = 40;
+const MATCH_END_BAND_WIDTH = 300;
+/** Gold pixels the ending word must carry for the overlay to have drawn. */
+const MATCH_END_GOLD_MIN = 20;
+
+/**
  * The arena's lower bound, in backbuffer pixels from the bottom.
  *
  * `renderer.ts`'s `FLOOR_INSET` is 40: the floor rule is drawn at
@@ -970,6 +987,50 @@ const PORTRAIT_COLOURS_MIN = 8;
 
 /** Gold pixels the timer plate must carry for its digits to have drawn. */
 const TIMER_DIGIT_INK_MIN = 20;
+
+/**
+ * Gold pixels in the match-end overlay band of the one visible canvas under
+ * `host` (Story 12.7).
+ *
+ * `match-end-overlay` reads this at two scrub positions: frame 0, where the band
+ * is backdrop and carries no gold, and the film's tail, where the ending word is
+ * drawn in `ARENA_PALETTE.gold`. Requiring the count to *rise* -- absent at the
+ * start, present at the end -- is what makes the check a statement about the
+ * overlay rather than about whatever else is on the canvas. A canvas showing the
+ * Ultimate cinematic reports `cinematic`, on the same terms as `hudBandProbe`.
+ */
+const overlayBandProbe = (hostSelector) => `(() => {
+  const host = document.querySelector(${JSON.stringify(hostSelector)});
+  if (!host) return null;
+  const canvas = [...host.querySelectorAll('canvas')].find((c) => {
+    const rect = c.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+  });
+  if (!canvas) return null;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return null;
+
+  const lastRow = ctx.getImageData(0, canvas.height - 1, canvas.width, 1).data;
+  let black = 0;
+  for (let x = 0; x < canvas.width; x += 1) {
+    const i = x * 4;
+    if (lastRow[i] === 0 && lastRow[i + 1] === 0 && lastRow[i + 2] === 0) black += 1;
+  }
+  if (black >= Math.floor(canvas.width * 0.9)) return { cinematic: true, gold: -1 };
+
+  const gold = ${JSON.stringify(HUD_GOLD_RGB)};
+  const bandTop = ${MATCH_END_OVERLAY_TOP};
+  const bandHeight = ${MATCH_END_BAND_HEIGHT};
+  const bandWidth = ${MATCH_END_BAND_WIDTH};
+  const x0 = Math.round(canvas.width / 2) - Math.round(bandWidth / 2);
+  if (x0 < 0 || bandTop + bandHeight > canvas.height) return { cinematic: false, gold: -1 };
+  const data = ctx.getImageData(x0, bandTop, bandWidth, bandHeight).data;
+  let count = 0;
+  for (let i = 0; i < data.length; i += 4) {
+    if (data[i] === gold[0] && data[i + 1] === gold[1] && data[i + 2] === gold[2]) count += 1;
+  }
+  return { cinematic: false, gold: count };
+})()`;
 
 /**
  * Which HUD regions came back short of the ink that proves their element drew.
@@ -1616,11 +1677,12 @@ async function main() {
           }`,
         );
 
-        // --- hud-round-pips-advance (waived to 12-7) -------------------------
-        // The pips are drawn by this story and have nothing to count until the
-        // round system exists, so this check is written now and recorded as
-        // failing with 12-7 named as its owner. At the end of a Match somebody
-        // has won something; a pip that fills carries gold.
+        // --- hud-round-pips-advance (Story 12.7) ----------------------------
+        // Story 12.6 drew the pips empty and had nothing to count; this story is
+        // what they count. At the film's tail the winning side's pip fills gold,
+        // read off the log's own `result`. The waiver 12.6 recorded is deleted in
+        // the same change, so a run that is green only because the waiver survived
+        // is a failed story rather than a passed one.
         await cdp.evaluate(scrubTo(100));
         await sleep(500);
         const atEnd = await cdp.evaluate(hudBandProbe('#app'));
@@ -1633,6 +1695,29 @@ async function main() {
           atEnd === null
             ? 'no visible canvas under #app'
             : `${pipGold} gold pixels across both pip groups at the end of the Match`,
+        );
+
+        // --- match-end-overlay (Story 12.7) ---------------------------------
+        // A Match finishing is an event, not a canvas that stops moving. The gate
+        // scrubs to the film's tail and requires gold in the centre overlay band
+        // -- the KO / TIME OVER word -- that frame 0 has none of. Both scrubs are
+        // pure in the frame, so the screen goes down when the visitor scrubs away
+        // from the end, which is what says it is drawn rather than latched.
+        const overlayAtEnd = await cdp.evaluate(overlayBandProbe('#app'));
+        await cdp.evaluate(scrubTo(0));
+        await sleep(500);
+        const overlayAtStart = await cdp.evaluate(overlayBandProbe('#app'));
+        record(
+          'match-end-overlay',
+          overlayAtStart !== null &&
+            overlayAtEnd !== null &&
+            overlayAtStart.cinematic !== true &&
+            overlayAtEnd.cinematic !== true &&
+            overlayAtStart.gold === 0 &&
+            overlayAtEnd.gold >= MATCH_END_GOLD_MIN,
+          overlayAtEnd === null || overlayAtStart === null
+            ? 'no visible canvas under #app'
+            : `overlay gold frame 0: ${String(overlayAtStart.gold)} -> tail: ${String(overlayAtEnd.gold)}`,
         );
       }
 

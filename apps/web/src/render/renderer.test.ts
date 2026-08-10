@@ -21,10 +21,12 @@ import {
   FLOOR_INSET,
   HUD_BOTTOM,
   HUD_ROW_SPANS,
+  MATCH_END_OVERLAY_TOP,
   ROUND_PIPS_PER_SIDE,
   cameraForFrame,
   drawFrame,
   hudRegions,
+  matchEndLabels,
   type DrawFrameOptions,
 } from './renderer';
 import {
@@ -1310,6 +1312,15 @@ describe('the HUD band (12.6)', () => {
     expect(arenaTop).not.toBeNull();
     expect(Number(arenaTop?.[1])).toBeGreaterThanOrEqual(HUD_BOTTOM);
 
+    // The gate's `match-end-overlay` copy of the overlay top, pinned the same way
+    // (Story 12.7). It must match the drawn constant, and it must sit below
+    // `ARENA_TOP_PX` -- above it the band would read HUD pixels, which advance on
+    // their own, rather than the arena the overlay is drawn into.
+    const overlayTop = /const MATCH_END_OVERLAY_TOP = (\d+);/.exec(gate);
+    expect(overlayTop).not.toBeNull();
+    expect(Number(overlayTop?.[1])).toBe(MATCH_END_OVERLAY_TOP);
+    expect(MATCH_END_OVERLAY_TOP).toBeGreaterThanOrEqual(Number(arenaTop?.[1]));
+
     // And the criterion the gate computes off that copy holds: no two row spans
     // in this band intersect. Asserted here as well as there, because the gate
     // needs a browser and this does not.
@@ -1318,5 +1329,82 @@ describe('the HUD band (12.6)', () => {
         expect(row.top < other.bottom && other.top < row.bottom).toBe(false);
       }
     }
+  });
+});
+
+/**
+ * Story 12.7: the overlay that turns a Match ending into an event on screen.
+ *
+ * The gate proves the pixels; these cases prove the calls -- the word drawn, the
+ * winner named, the gold ground, and above all that none of it is drawn on any
+ * frame the caller did not mark as the Match's last.
+ */
+describe('the match-end overlay (12.7)', () => {
+  const CONFIG = DEFAULT_FIGHTER_CONFIG;
+
+  function overlayCalls(options: Partial<DrawFrameOptions> = {}): RecordingCanvas {
+    const ctx = createRecordingCanvas();
+    drawFrame(ctx, frameWith(stateWith(), stateWith()), {
+      config: CONFIG,
+      viewport: VIEWPORT,
+      roster: ['clawde', 'chatty'],
+      ...options,
+    });
+    return ctx;
+  }
+
+  const textsOf = (ctx: RecordingCanvas): readonly string[] =>
+    ctx.calls().filter((call) => call.op === 'fillText').map((call) => String(call.args[0]));
+
+  it('draws nothing when the caller has not marked the frame as the last', () => {
+    const texts = textsOf(overlayCalls());
+    expect(texts).not.toContain('TIME OVER');
+    expect(texts).not.toContain('K.O.');
+    expect(texts).not.toContain('P2 WINS');
+  });
+
+  it('names a timeout centre-stage with the side that is ahead', () => {
+    const texts = textsOf(overlayCalls({ matchEnd: { endReason: 'timeout', outcome: 'p2' } }));
+    expect(texts).toContain('TIME OVER');
+    expect(texts).toContain('P2 WINS');
+    expect(texts).not.toContain('K.O.');
+  });
+
+  it('draws K.O. over the losing fighter for a knockout', () => {
+    const texts = textsOf(overlayCalls({ matchEnd: { endReason: 'ko', outcome: 'p1' } }));
+    expect(texts).toContain('K.O.');
+    expect(texts).toContain('P1 WINS');
+  });
+
+  it('gives the ending word a gold fill on a hudPlate ground, for the text floor', () => {
+    // The overlay is canvas text a visitor reads, so it answers to the 4.5:1
+    // floor: gold on hudPlate is 13.73:1, ink on hudPlate 17.87:1. The gate reads
+    // the gold; this pins the ground it is measured against was actually drawn.
+    const calls = overlayCalls({ matchEnd: { endReason: 'timeout', outcome: 'p1' } }).calls();
+    // `arcadeText` draws the word twice -- a hudPlate hard shadow, then the
+    // legible fill -- so the gold one is what the gate reads.
+    const wordFills = calls
+      .filter((call) => call.op === 'fillText' && String(call.args[0]) === 'TIME OVER')
+      .map((call) => call.fillStyle);
+    expect(wordFills).toContain(ARENA_PALETTE.gold);
+    // A plate drawn at the overlay's own top row, under the word.
+    const plate = calls.find(
+      (call) =>
+        call.op === 'fillRect' &&
+        call.args[1] === MATCH_END_OVERLAY_TOP &&
+        call.fillStyle === ARENA_PALETTE.hudPlate,
+    );
+    expect(plate).toBeDefined();
+  });
+
+  it('reads the words purely off the result, with no canvas', () => {
+    expect(matchEndLabels({ endReason: 'ko', outcome: 'p1' })).toStrictEqual({
+      primary: 'K.O.',
+      secondary: 'P1 WINS',
+    });
+    expect(matchEndLabels({ endReason: 'timeout', outcome: 'draw' })).toStrictEqual({
+      primary: 'TIME OVER',
+      secondary: 'DRAW',
+    });
   });
 });

@@ -122,6 +122,32 @@ export interface DrawFrameOptions {
    * does not relay the HUD when it arrives.
    */
   readonly roundsWon?: readonly [number, number];
+  /**
+   * Story 12.7. The end of a Match, drawn as an overlay when the caller says the
+   * frame on screen is the final one.
+   *
+   * Absent for every frame that is not a Match's last -- which is the whole
+   * timeline except its tail -- so the overlay is a pure function of the frame
+   * position the caller passes and never a piece of state this renderer keeps.
+   * `main.ts` passes it only across the final Decision Point (a counted hold, no
+   * timer); the arcade session passes it the same way. `endReason` decides the
+   * word and `outcome` decides whose side wins, both read off the Command Log's
+   * existing `result` (INV-1: nothing here is a clock).
+   */
+  readonly matchEnd?: MatchEndOverlay;
+}
+
+/**
+ * What a Match ended as, read straight off `TerminalResult` (Story 12.7).
+ *
+ * A narrow copy rather than the contract type, because the renderer wants only
+ * the two fields the overlay draws with -- the word and the winner -- and a
+ * structural shape keeps `render/` free of a `@tokenbrawl/contracts` import the
+ * way every other options field here is.
+ */
+export interface MatchEndOverlay {
+  readonly endReason: 'ko' | 'timeout';
+  readonly outcome: 'p1' | 'p2' | 'draw';
 }
 
 /**
@@ -278,6 +304,34 @@ const PIP_GAP = 6;
 const PIP_INSET = 8;
 const PIP_GROUP_WIDTH = ROUND_PIPS_PER_SIDE * PIP_SIZE + (ROUND_PIPS_PER_SIDE - 1) * PIP_GAP;
 const PIP_TOP = TIMER_TOP + Math.floor((TIMER_HEIGHT - PIP_SIZE) / 2);
+
+/**
+ * ## The match-end overlay, laid out (Story 12.7)
+ *
+ * Two stacked blocks in the upper-middle of the arena, drawn only on a Match's
+ * final frames: the ending word above (`K.O.` or `TIME OVER`) and the winner
+ * line below (`P1 WINS` / `P2 WINS` / `DRAW`). Both sit on a `hudPlate` ground
+ * for the same reason the HUD type does -- an overlay a visitor reads answers to
+ * `docs/DESIGN.md`'s 4.5:1 text floor even where the arena's fills are released
+ * from it, and gold on `hudPlate` is 13.73:1, ink on `hudPlate` 17.87:1.
+ *
+ * `MATCH_END_OVERLAY_TOP` is published for `scripts/visual-gate.mjs`, which
+ * cannot import this module and so samples a copy of it; `renderer.test.ts` pins
+ * the two together. It sits strictly below the gate's `ARENA_TOP_PX` (152) so the
+ * band is arena rather than HUD, and well above the fighters, who stand on the
+ * floor -- which is what lets `match-end-overlay` find gold there that frame 0
+ * has none of.
+ */
+export const MATCH_END_OVERLAY_TOP = 180;
+const MATCH_END_PRIMARY_PLATE_WIDTH = 300;
+const MATCH_END_PRIMARY_PLATE_HEIGHT = 40;
+const MATCH_END_PRIMARY_BASELINE = MATCH_END_OVERLAY_TOP + 28;
+const MATCH_END_SECONDARY_TOP = MATCH_END_OVERLAY_TOP + MATCH_END_PRIMARY_PLATE_HEIGHT + 8;
+const MATCH_END_SECONDARY_PLATE_WIDTH = 220;
+const MATCH_END_SECONDARY_PLATE_HEIGHT = 26;
+const MATCH_END_SECONDARY_BASELINE = MATCH_END_SECONDARY_TOP + 19;
+/** Where `K.O.` sits over the losing fighter's half, as basis points across the frame. */
+const MATCH_END_SIDE_BASIS_POINTS: readonly [number, number] = [2_800, 7_200];
 
 /**
  * ## The band, published for the gate (Story 12.6)
@@ -956,6 +1010,92 @@ export function drawFrame(ctx: Canvas2D, frame: RenderFrame, options: DrawFrameO
   }
 
   drawCentreColumn(ctx, theme, frame, options);
+
+  // Story 12.7. Last of all, over everything else in screen space: a Match that
+  // ends is an event, not a canvas that stops moving. Drawn only when the caller
+  // says this frame is the Match's last -- the whole timeline except its tail
+  // passes `matchEnd` undefined and this is a no-op.
+  if (options.matchEnd !== undefined) {
+    drawMatchEndOverlay(ctx, theme, viewport, options.matchEnd);
+  }
+}
+
+/**
+ * The two words for a Match's end (Story 12.7).
+ *
+ * Pure, and exported so `renderer.test.ts` can pin the strings the overlay draws
+ * without a canvas. The ending is read off the log's own `result`: `endReason`
+ * is the word, `outcome` is the winner -- both already populated on every Command
+ * Log in the repository, which is what lets a round system draw a KO screen with
+ * no new state field and no frozen contract touched.
+ */
+export function matchEndLabels(matchEnd: MatchEndOverlay): {
+  readonly primary: string;
+  readonly secondary: string;
+} {
+  return {
+    primary: matchEnd.endReason === 'ko' ? 'K.O.' : 'TIME OVER',
+    secondary:
+      matchEnd.outcome === 'draw'
+        ? 'DRAW'
+        : matchEnd.outcome === 'p1'
+          ? 'P1 WINS'
+          : 'P2 WINS',
+  };
+}
+
+/**
+ * Draws the match-end overlay (Story 12.7).
+ *
+ * Screen space, in the arena's upper-middle, in the same arcade vocabulary the
+ * HUD uses: a `hudPlate` ground under each line so the type clears the text
+ * floor, the ending word in gold and the winner line in ink. `K.O.` sits over
+ * the losing fighter's own half -- the reference draws it that way, and it says
+ * *who* went down without a second line -- while `TIME OVER` stays centred,
+ * because a timeout is not a fact about one side of the stage.
+ *
+ * No timer, no accumulator: every coordinate is a constant and the words are a
+ * pure function of the `result` the caller passed. A reduced-motion visitor sees
+ * exactly this -- the overlay does not animate in, and its counted hold is the
+ * caller's to keep (INV-1, AC8).
+ */
+function drawMatchEndOverlay(
+  ctx: Canvas2D,
+  theme: Theme,
+  viewport: Viewport,
+  matchEnd: MatchEndOverlay,
+): void {
+  const { primary, secondary } = matchEndLabels(matchEnd);
+  const centre = Math.round(viewport.width / 2);
+
+  // `K.O.` sits over the losing fighter's own half; a draw and every timeout keep
+  // the word centred. `p1` winning means the *right* fighter (side 1) went down.
+  const sideX = (side: 0 | 1): number =>
+    Math.round((MATCH_END_SIDE_BASIS_POINTS[side] * viewport.width) / BASIS_POINTS_FULL);
+  const primaryX =
+    matchEnd.endReason === 'ko' && matchEnd.outcome === 'p1'
+      ? sideX(1)
+      : matchEnd.endReason === 'ko' && matchEnd.outcome === 'p2'
+        ? sideX(0)
+        : centre;
+
+  drawArcadePlate(ctx, {
+    x: primaryX - Math.round(MATCH_END_PRIMARY_PLATE_WIDTH / 2),
+    y: MATCH_END_OVERLAY_TOP,
+    width: MATCH_END_PRIMARY_PLATE_WIDTH,
+    height: MATCH_END_PRIMARY_PLATE_HEIGHT,
+    fill: ARENA_PALETTE.hudPlate,
+  });
+  arcadeText(ctx, theme, primary, primaryX, MATCH_END_PRIMARY_BASELINE, 'center', ARENA_PALETTE.gold);
+
+  drawArcadePlate(ctx, {
+    x: centre - Math.round(MATCH_END_SECONDARY_PLATE_WIDTH / 2),
+    y: MATCH_END_SECONDARY_TOP,
+    width: MATCH_END_SECONDARY_PLATE_WIDTH,
+    height: MATCH_END_SECONDARY_PLATE_HEIGHT,
+    fill: ARENA_PALETTE.hudPlate,
+  });
+  arcadeText(ctx, theme, secondary, centre, MATCH_END_SECONDARY_BASELINE, 'center', theme.ink);
 }
 
 /**
