@@ -11,6 +11,7 @@ import {
   type JuiceTrack,
 } from '../render/juice';
 import { drawJuicedFrame } from '../render/juice-draw';
+import type { MatchEndOverlay } from '../render/renderer';
 import { DEFAULT_ROSTER, type RosterPair } from '../render/roster';
 import type { UltSheet } from '../render/ult-sheet';
 import type { VfxSheet } from '../render/vfx-sheet';
@@ -104,7 +105,22 @@ export interface LiveArena {
    * rest of the session.
    */
   readonly setRoster: (roster: RosterPair) => void;
-  /** Halts the clock. Called by the panel when the Match ends and the replay re-mounts. */
+  /**
+   * Story 12.7. The set score, drawn as the round pips. Retained across a round
+   * so the pips a visitor earned stay filled into the next Match, and repainted
+   * at once so a win shows the instant it is tallied.
+   */
+  readonly setRoundsWon: (roundsWon: readonly [number, number]) => void;
+  /**
+   * Story 12.7. The KO / TIME OVER overlay, or `null` to take it back down.
+   *
+   * Drawn over the held final frame of a round; the panel holds it for a counted
+   * number of animation frames and then clears it before the next round begins.
+   * A pure repaint of the current frame -- the overlay is a function of the
+   * result, not a timer.
+   */
+  readonly showMatchEnd: (matchEnd: MatchEndOverlay | null) => void;
+  /** Halts the clock. Called by the panel when the set ends. */
   readonly stop: () => void;
   /**
    * Story 12.4. Suspends and resumes painting without ending the Match.
@@ -192,6 +208,17 @@ export function createLiveArena(deps: LiveArenaDeps): LiveArena {
   } = { states: [], frames: [], track: null };
 
   /**
+   * The set-level HUD state (Story 12.7): the pips a visitor has earned and the
+   * match-end overlay, if one is showing. Separate from `sim` because both
+   * outlive a single round's states -- the pips carry into the next Match and
+   * the overlay is drawn over a round's held final frame.
+   */
+  const hud: { roundsWon: readonly [number, number]; matchEnd: MatchEndOverlay | null } = {
+    roundsWon: [0, 0],
+    matchEnd: null,
+  };
+
+  /**
    * `active` spans one Match (Play to end); `running` is whether the rAF loop is
    * scheduled; `paused` is Story 12.4's "this screen is not showing", which
    * suspends painting without ending the Match.
@@ -234,6 +261,10 @@ export function createLiveArena(deps: LiveArenaDeps): LiveArena {
       // and portrait resolve here the same way they do on the player.
       roster: dressing.roster,
       reducedMotion,
+      // Story 12.7. The set score and, on a round's final held frame, the KO /
+      // TIME OVER overlay -- both read the same way the replay player reads them.
+      roundsWon: hud.roundsWon,
+      matchEnd: hud.matchEnd ?? undefined,
     });
   };
 
@@ -312,6 +343,9 @@ export function createLiveArena(deps: LiveArenaDeps): LiveArena {
     clock.active = true;
     clock.running = false;
     clock.index = -1;
+    // The overlay belongs to the round that just ended; a fresh round clears it.
+    // The pips do not -- the set score carries across rounds (AC: pips retained).
+    hud.matchEnd = null;
   };
 
   const pushState = (state: FighterState): void => {
@@ -386,6 +420,14 @@ export function createLiveArena(deps: LiveArenaDeps): LiveArena {
     },
     setRoster: (roster: RosterPair): void => {
       dressing.roster = roster;
+      repaint();
+    },
+    setRoundsWon: (roundsWon: readonly [number, number]): void => {
+      hud.roundsWon = [roundsWon[0], roundsWon[1]];
+      repaint();
+    },
+    showMatchEnd: (matchEnd: MatchEndOverlay | null): void => {
+      hud.matchEnd = matchEnd;
       repaint();
     },
     stop,
