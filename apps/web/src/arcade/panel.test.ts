@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Action, CommandLogV2 } from '@tokenbrawl/contracts';
+import type { HostView } from '../main';
 import { runArcadeMatch } from './run';
 import {
   arcadeMarkup,
@@ -552,5 +553,134 @@ describe('a second play click while one is in flight is ignored', () => {
 
     await driveByKeyboard(host, logs);
     expect(logs).toHaveLength(1);
+  });
+});
+
+/**
+ * Story 12.2: the live canvas is on screen, drawing, while the Match is played.
+ *
+ * The load-bearing property is timing: the fighters must be painted *before* the
+ * first Decision Point resolves, because the first Decision Point does not
+ * resolve until the visitor presses a key and a blank canvas until then is the
+ * defect this story exists to remove. A recording canvas proves it with no DOM.
+ */
+/** A host whose `canvas` selector returns a recording 2D surface, and that records the stage's class. */
+function createLiveHost(): FakePanelHost & {
+  readonly canvasOps: () => readonly string[];
+  readonly stageClass: () => string;
+} {
+  const base = createHost();
+  const ops: string[] = [];
+  const record =
+    (op: string) =>
+    (...args: unknown[]): void => {
+      void args;
+      ops.push(op);
+    };
+  const context = new Proxy(
+    {
+      fillRect: record('fillRect'),
+      strokeRect: record('strokeRect'),
+      fillText: record('fillText'),
+      clearRect: record('clearRect'),
+      drawImage: record('drawImage'),
+      save: record('save'),
+      restore: record('restore'),
+      translate: record('translate'),
+      scale: record('scale'),
+    } as Record<string, unknown>,
+    {
+      get: (target, key: string) => (key in target ? target[key] : ''),
+      set: () => true,
+    },
+  );
+
+  const stage = { className: '' };
+
+  return {
+    ...base,
+    querySelector: (selector: string): ArcadeNode | null => {
+      const node = base.node(selector);
+      if (selector === 'canvas') {
+        return { ...node, width: 0, height: 0, getContext: () => context } as unknown as ArcadeNode;
+      }
+      if (selector === '[data-arcade-stage]') {
+        return {
+          ...node,
+          setAttribute: (_name: string, value: string): void => {
+            stage.className = value;
+          },
+        } as unknown as ArcadeNode;
+      }
+      return node;
+    },
+    canvasOps: (): readonly string[] => ops,
+    stageClass: (): string => stage.className,
+  };
+}
+
+/** A view whose animation-frame queue this test does not pump: the first paint is synchronous. */
+function createStubView(): HostView {
+  return {
+    requestAnimationFrame: (): number => 1,
+    cancelAnimationFrame: (): void => undefined,
+  };
+}
+
+describe('the live canvas draws the fight while it is played (Story 12.2)', () => {
+  it('paints the fighters the instant Play runs, before the first key', () => {
+    const host = createLiveHost();
+    mountArcadePanel(host, {
+      onLog: (): void => undefined,
+      view: createStubView(),
+      seed: 4_601,
+    });
+
+    // Nothing is drawn while the panel sits idle, and the stage is hidden.
+    expect(host.canvasOps()).toHaveLength(0);
+    expect(host.stageClass()).toBe('tb-arcade-stage');
+
+    host.fire('[data-arcade-play]', 'click');
+
+    // The reset state is reported synchronously by `runArcadeMatch` (env.reset
+    // runs before the loop's first await), so by the time the click handler
+    // returns the fighters are on the canvas -- no key pressed, no Decision
+    // Point resolved. The stage is now revealed.
+    expect(host.canvasOps()).toContain('clearRect');
+    expect(host.canvasOps()).toContain('fillRect');
+    expect(host.stageClass()).toBe('tb-arcade-stage tb-arcade-stage--live');
+  });
+
+  it('hides the live canvas again when the Match ends and the replay re-mounts', async () => {
+    const host = createLiveHost();
+    const logs: CommandLogV2[] = [];
+    mountArcadePanel(host, {
+      onLog: (log) => logs.push(log),
+      view: createStubView(),
+      seed: 4_601,
+    });
+
+    host.fire('[data-arcade-play]', 'click');
+    expect(host.stageClass()).toBe('tb-arcade-stage tb-arcade-stage--live');
+
+    await driveByKeyboard(host, logs);
+
+    // The Match resolved; the live canvas gives way to the replay rather than
+    // both being on screen at once.
+    expect(logs).toHaveLength(1);
+    expect(host.stageClass()).toBe('tb-arcade-stage');
+  });
+
+  it('keeps its pre-12.2 behaviour when there is no view to drive a clock', () => {
+    const host = createLiveHost();
+    // No `view`: the live arena cannot mount, and the panel must still run.
+    expect(() =>
+      mountArcadePanel(host, { onLog: (): void => undefined, seed: 4_601 }),
+    ).not.toThrow();
+    host.fire('[data-arcade-play]', 'click');
+    // No live canvas, so nothing is drawn and the stage stays hidden -- exactly
+    // as the panel behaved before this story.
+    expect(host.canvasOps()).toHaveLength(0);
+    expect(host.stageClass()).toBe('tb-arcade-stage');
   });
 });

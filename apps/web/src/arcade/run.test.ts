@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { ACTIONS, type Action } from '@tokenbrawl/contracts';
 import { validateCommandLogV2 } from '../../../../packages/core/src/command-log-v2';
+import { createFighterEnvironment } from '../../../../packages/env-fighter/src/environment';
+import type { FighterState } from '../../../../packages/env-fighter/src/state';
+import { buildReplayFilm } from '../replay/film';
 import { defaultKeyMap, runArcadeMatch, type ArcadeMatchHandle } from './run';
 
 /**
@@ -128,6 +131,79 @@ describe('a whole Match runs against a scripted human, headless', () => {
     for (const entry of log.decisions) {
       expect(grammar.has(entry.action)).toBe(true);
     }
+  });
+});
+
+/**
+ * Story 12.2: the live-frame tee is a read, and a read cannot move the Match.
+ *
+ * `onState` observes every `FighterState` the Match passes through so the panel
+ * can draw the fight while it is played. The whole safety argument is that
+ * wrapping `env.reset`/`env.step` forwards each call's own return value
+ * untouched -- so the Command Log and its Final-State Hash must be byte-identical
+ * to a headless run, and the states it reports must be exactly the sequence
+ * `buildReplayFilm` rebuilds from the finished log.
+ */
+describe('the live-frame tee', () => {
+  it('reports the exact state sequence buildReplayFilm rebuilds, and agrees on the final hash', async () => {
+    const collected: FighterState[] = [];
+    const handle = runArcadeMatch({
+      seed: 4_601,
+      humanSide: 0,
+      mapInput: defaultKeyMap,
+      onState: (state) => collected.push(state),
+    });
+    await driveToTerminal(handle);
+    const log = await handle.log;
+
+    const env = createFighterEnvironment();
+    const film = buildReplayFilm(log, env);
+
+    // The tee saw the reset state plus one state per step -- exactly the film's
+    // `states`, state for state.
+    expect(collected.length).toBe(film.states.length);
+    const hasher = createFighterEnvironment();
+    expect(collected.map((state) => hasher.hash(state))).toEqual(
+      film.states.map((state) => hasher.hash(state)),
+    );
+    // And the last state the tee saw is the one the log commits to.
+    expect(hasher.hash(collected[collected.length - 1])).toBe(log.finalStateHash);
+  });
+
+  it('produces a byte-identical Command Log whether or not the live view is watching', async () => {
+    const headless = runArcadeMatch({ seed: 4_601, humanSide: 0, mapInput: defaultKeyMap });
+    await driveToTerminal(headless);
+    const headlessLog = await headless.log;
+
+    const watched = runArcadeMatch({
+      seed: 4_601,
+      humanSide: 0,
+      mapInput: defaultKeyMap,
+      onState: () => undefined,
+    });
+    await driveToTerminal(watched);
+    const watchedLog = await watched.log;
+
+    expect(JSON.stringify(watchedLog)).toBe(JSON.stringify(headlessLog));
+    expect(watchedLog.finalStateHash).toBe(headlessLog.finalStateHash);
+  });
+
+  it('contains a throw from the listener rather than failing the Match', async () => {
+    const handle = runArcadeMatch({
+      seed: 4_601,
+      humanSide: 0,
+      mapInput: defaultKeyMap,
+      onState: () => {
+        throw new Error('a UI callback blew up');
+      },
+    });
+    await driveToTerminal(handle);
+    const log = await handle.log;
+
+    // The Match still reached a terminal state despite every state report
+    // throwing -- the tee swallowed each one exactly as the onLegalActions tee
+    // does.
+    expect(['p1', 'p2', 'draw']).toContain(log.result.outcome);
   });
 });
 
