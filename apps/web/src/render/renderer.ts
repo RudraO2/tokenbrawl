@@ -5,6 +5,7 @@ import { BASIS_POINTS_FULL, type RenderFrame } from '../replay/film';
 import type { BankReading } from '../replay/token-bank';
 import { animationFor, isFree } from './animation';
 import type { Backdrop } from './backdrop';
+import { applyCamera, cameraFor, worldXFor, type Camera } from './camera';
 import type { Canvas2D } from './canvas2d';
 import { createBlockArtist, type DrawnFighter, type FighterArtist } from './artist';
 import {
@@ -145,7 +146,8 @@ const BANK_TOP = HUD_LABEL_BASELINE + METER_GAP;
 export const HUD_BOTTOM = BANK_TOP + BANK_HEIGHT;
 
 /**
- * Interpolates one fighter's arena position between two simulated states.
+ * Interpolates one fighter's arena position between two simulated states, in
+ * arena units.
  *
  * This is the only float in the player, and it goes no further than the pixel
  * handed to the canvas. `progressBasisPoints` is an integer 0..9999 and the
@@ -155,7 +157,22 @@ export const HUD_BOTTOM = BANK_TOP + BANK_HEIGHT;
  * Position is the only field interpolated. Health, meter and phase step, which
  * is both correct -- damage is applied at a Decision Point, not spread across
  * it -- and consistent with the house style's stepped motion.
+ *
+ * Story 12.3 split this in two. It used to return a pixel; the camera needs the
+ * *unit*, because the arena-to-pixel mapping is now `camera.ts`'s and lives in
+ * exactly one place. The composition below is the old function, unchanged.
  */
+function interpolatedUnits(
+  from: FighterState,
+  to: FighterState,
+  agentIndex: 0 | 1,
+  progressBasisPoints: number,
+): number {
+  const fromUnits = from.position[agentIndex];
+  const toUnits = to.position[agentIndex];
+  return fromUnits + ((toUnits - fromUnits) * progressBasisPoints) / BASIS_POINTS_FULL;
+}
+
 function interpolatedX(
   from: FighterState,
   to: FighterState,
@@ -164,19 +181,41 @@ function interpolatedX(
   config: FighterConfig,
   viewport: Viewport,
 ): number {
-  const fromUnits = from.position[agentIndex];
-  const toUnits = to.position[agentIndex];
-  const units = fromUnits + ((toUnits - fromUnits) * progressBasisPoints) / BASIS_POINTS_FULL;
+  return worldXFor(
+    interpolatedUnits(from, to, agentIndex, progressBasisPoints),
+    config,
+    viewport,
+  );
+}
 
-  const span = config.arenaMax - config.arenaMin;
-  // A degenerate arena (min === max) would divide by zero and put both
-  // fighters at NaN, which paints nothing and looks like a blank canvas bug.
-  // Centre them instead; `assertIntegerConfig` already rejects such a config
-  // upstream, so this is belt-and-braces for a hand-built one.
-  if (span <= 0) {
-    return viewport.width / 2;
-  }
-  return ((units - config.arenaMin) / span) * viewport.width;
+/**
+ * The camera for one film frame (Story 12.3).
+ *
+ * Exported because two files draw into the arena and both must agree: this
+ * module draws the fighters, and `juice-draw.ts` draws the sparks, the impact
+ * art and the Ultimate's stage on top of them. A second, separately-derived
+ * camera in the compositor is how an impact ends up landing where the fighter
+ * *used to be* drawn, so both call this.
+ *
+ * Pure over the frame, exactly like `liveWindow` and `ticksIntoDecision` above
+ * it: a scrub to frame 90 gets the camera a play-through reaching frame 90 gets.
+ */
+export function cameraForFrame(
+  frame: RenderFrame,
+  config: FighterConfig,
+  viewport: Viewport,
+): Camera {
+  return cameraFor(
+    interpolatedUnits(frame.from, frame.to, 0, frame.progressBasisPoints),
+    interpolatedUnits(frame.from, frame.to, 1, frame.progressBasisPoints),
+    viewport,
+    config,
+  );
+}
+
+/** Screen y of the arena floor. The camera's anchor, and the HUD's lower bound. */
+export function groundYFor(viewport: Viewport): number {
+  return viewport.height - FLOOR_INSET;
 }
 
 /** The Commitment Window a fighter is inside partway through a Decision Point. */
@@ -429,6 +468,16 @@ function drawSuperGauge(
  * bar, and the two fighters are drawn in agent-index order so overlapping
  * bodies stack predictably rather than by whoever happens to be in front.
  *
+ * ## Two spaces, one function (Story 12.3)
+ *
+ * The fighters are drawn inside a camera transform and everything else is not.
+ * The ground, the backdrop and the floor rule are screen space because they
+ * span the frame whatever the camera is looking at; the HUD is screen space
+ * because a health bar that slid with the fight would be unreadable. Only the
+ * fighters' coordinates mean arena positions, so only they are transformed --
+ * which is also why every coordinate assertion below still describes the same
+ * numbers: the camera moves the *surface*, not the arithmetic.
+ *
  * ## Why the live bars read `frame.to` (Story 11.3)
  *
  * The film samples the simulation at Decision Point boundaries, so `from` is
@@ -457,7 +506,7 @@ export function drawFrame(ctx: Canvas2D, frame: RenderFrame, options: DrawFrameO
   const artistFor = (agentIndex: 0 | 1): FighterArtist =>
     options.artists?.[agentIndex] ?? options.artists?.[0] ?? fallbackArtist;
   const { config, viewport } = options;
-  const groundY = viewport.height - FLOOR_INSET;
+  const groundY = groundYFor(viewport);
 
   ctx.clearRect(0, 0, viewport.width, viewport.height);
   ctx.fillStyle = theme.bg;
@@ -483,6 +532,15 @@ export function drawFrame(ctx: Canvas2D, frame: RenderFrame, options: DrawFrameO
   );
 
   const ticksElapsed = ticksIntoDecision(frame, config);
+
+  // Story 12.3. Everything above this line is screen space -- the ground fill,
+  // the backdrop and the floor rule all span the frame however the camera is
+  // pointed -- and everything below the matching `restore` is screen space
+  // again, which is what keeps the HUD's coordinates untouched by any camera
+  // value. Only the fighters live in world space, because they are the only
+  // thing on this surface whose position means an arena position.
+  ctx.save();
+  applyCamera(ctx, cameraForFrame(frame, config, viewport), viewport, groundY);
 
   for (const agentIndex of [0, 1] as const) {
     const window = liveWindow(frame, agentIndex, config, ticksElapsed);
@@ -515,6 +573,8 @@ export function drawFrame(ctx: Canvas2D, frame: RenderFrame, options: DrawFrameO
     };
     artistFor(agentIndex).draw(ctx, fighter, theme);
   }
+
+  ctx.restore();
 
   for (const agentIndex of [0, 1] as const) {
     const x =

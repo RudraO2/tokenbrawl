@@ -114,6 +114,13 @@ describe('shipped player source discipline', () => {
         'replay/film.ts',
         'replay/sidecar.ts',
         'render/renderer.ts',
+        // Story 12.3. Named here for the same reason `render/juice.ts` is: a
+        // camera is the third thing in this app with an obvious reason to
+        // schedule -- "ease toward the midpoint over 300ms" is how every other
+        // codebase writes one, and it is what the reference project does out of
+        // a mutable module-level accumulator. The sweep must be shown to reach
+        // this file rather than merely happening to walk it.
+        'render/camera.ts',
         'player/clock.ts',
         // Story 4.6. The BYOK path is the one place in this app that holds a
         // credential and makes a cross-origin request, so it is the last place

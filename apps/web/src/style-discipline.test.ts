@@ -982,6 +982,11 @@ describe('the arena boundary is named, documented, and still swept for clocks', 
       'render/audio-bus.ts',
       'render/audio.ts',
       'render/backdrop.ts',
+      // Story 12.3. Arithmetic only -- the camera writes no colour and draws
+      // nothing -- but it joins the arena rather than sitting outside it
+      // because it is what decides where an arena coordinate lands, and a file
+      // that answers that question for `render/` belongs inside `render/`.
+      'render/camera.ts',
       'render/canvas2d.ts',
       // Story 11.3. The arcade HUD's drawing: bevels, banded ramps and a
       // damage-lag ghost, none of which are brand colours and all of which the

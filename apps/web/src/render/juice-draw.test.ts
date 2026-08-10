@@ -480,7 +480,23 @@ describe('the Ultimate cinematic composites in two halves (Story 10.4, 11.4)', (
       OPTIONS,
     );
 
-    const restoreAt = ctx.calls.findIndex((call) => call.op === 'restore');
+    // The *outer* restore -- the one that closes the shake -- found by tracking
+    // nesting depth rather than by taking the first `restore` in the log. Story
+    // 12.3 put a camera transform inside `drawFrame` and a second one around
+    // the stage half, so there are now nested save/restore pairs before the
+    // shake closes, and "the first restore" stopped meaning "the end of the
+    // shaken half" the moment the arena got a camera.
+    const restoreAt = (() => {
+      let depth = 0;
+      for (const [index, call] of ctx.calls.entries()) {
+        if (call.op === 'save') depth += 1;
+        if (call.op === 'restore') {
+          depth -= 1;
+          if (depth === 0) return index;
+        }
+      }
+      return -1;
+    })();
     expect(restoreAt).toBeGreaterThan(0);
 
     // The beam and the streak are inside the transform...

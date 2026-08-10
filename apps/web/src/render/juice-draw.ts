@@ -2,10 +2,13 @@ import { BASIS_POINTS_FULL, type RenderFrame } from '../replay/film';
 import { ARENA_PALETTE } from './arena-palette';
 import type { Canvas2D } from './canvas2d';
 import type { JuiceCinematic, JuiceFrame, JuiceKind } from './juice';
+import { applyCamera } from './camera';
 import {
   FLOOR_INSET,
   HUD_BOTTOM,
+  cameraForFrame,
   drawFrame,
+  groundYFor,
   type DrawFrameOptions,
   type Viewport,
 } from './renderer';
@@ -916,10 +919,27 @@ export function drawJuicedFrame(
   ctx.save();
   ctx.translate(juiceFrame.shakeX, juiceFrame.shakeY);
   drawFrame(ctx, frame, options);
+
+  // Story 12.3. Both of these place things by arena position -- a spark at the
+  // point of impact, a beam reaching from the caster -- so both have to be in
+  // the same space the camera just drew the fighters in. Drawn at identity they
+  // would land where the fighters used to be before there was a camera, which
+  // is a defect no unit test can see: the call sequence would be unchanged and
+  // every coordinate would still be the "right" number.
+  //
+  // Derived from the same `cameraForFrame` `drawFrame` uses rather than passed
+  // down from it, because the alternative -- returning the camera out of
+  // `drawFrame` -- would make the compositor depend on a value the renderer
+  // happened to compute rather than on the frame. Two calls, one pure function,
+  // provably the same answer.
+  ctx.save();
+  applyCamera(ctx, cameraForFrame(frame, options.config, viewport), viewport, groundYFor(viewport));
   if (juiceFrame.cinematic !== null) {
     drawCinematicStage(ctx, juiceFrame.cinematic, viewport, theme, options.ult, caster);
   }
   drawJuiceOverlay(ctx, juiceFrame, viewport, theme, options.vfx);
+  ctx.restore();
+
   ctx.restore();
 
   // At identity, and after the restore. The plate must cover the whole

@@ -6,9 +6,22 @@ import type { Theme } from './theme';
  * Story 4.1: the arena backdrop.
  *
  * A stack of pixel-art layers drawn behind the fighters. Static, not
- * parallaxed: the arena is a single fixed horizontal axis with no camera, so
- * there is nothing for parallax to be relative to, and inventing a scroll would
- * be motion that does not correspond to anything in the simulation.
+ * parallaxed -- but no longer for the reason this docblock gave for eleven
+ * stories.
+ *
+ * It used to say *"the arena is a single fixed horizontal axis with no camera,
+ * so there is nothing for parallax to be relative to"*. That was accurate and
+ * it was the defect: with no camera the simulation's units mapped 1:1 onto
+ * device pixels and a fighter on either wall was drawn half outside the frame.
+ * Story 12.3 gave the arena a camera (`render/camera.ts`), so there is now
+ * something for parallax to be relative to, and this stack is deliberately not
+ * yet using it -- Story 12.10 owns depth, and it names 12.3 as its prerequisite.
+ *
+ * Until then the layers are drawn in **screen space**, outside the camera
+ * transform, which is what a horizon at infinity looks like: the fighters
+ * travel across it and it does not travel with them. That is a correct picture
+ * rather than a placeholder, and it is why `drawFrame` clears, fills and draws
+ * this stack before it enters world space.
  *
  * Layers are anchored to the **bottom**. Scaled to span the arena's width they
  * are taller than it is, and the half worth showing is the lower half -- the

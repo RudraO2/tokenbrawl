@@ -76,6 +76,14 @@ function createRecordingCanvas(): RecordingCanvas {
   surface.clearRect = (x, y, w, h) => record('clearRect', [x, y, w, h]);
   surface.save = () => record('save', []);
   surface.restore = () => record('restore', []);
+  // Story 12.3. Recorded, not applied -- which is the point. Every coordinate
+  // assertion in this file is about the arithmetic `drawFrame` performs, and
+  // the camera deliberately does not touch that arithmetic: it moves the
+  // surface underneath it. So these two are here to be *seen* in the sequence
+  // (the camera-wiring cases below read them) rather than to change any number
+  // recorded around them. The transform's own behaviour is `camera.test.ts`'s.
+  surface.translate = (x, y) => record('translate', [x, y]);
+  surface.scale = (x, y) => record('scale', [x, y]);
 
   return surface;
 }

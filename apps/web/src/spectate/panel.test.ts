@@ -94,6 +94,31 @@ function createRecordingContext(): { readonly ctx: Canvas2D; readonly calls: str
   return { ctx, calls };
 }
 
+/**
+ * Every non-zero shake translate in a recorded call log.
+ *
+ * `drawJuicedFrame` opens each frame with `save()` and then translates by the
+ * shake, so the shake is exactly the call that follows a `save` taking nesting
+ * depth from zero to one. Anything deeper is a transform some other part of the
+ * drawing owns -- the sprite artist's facing flip, and since Story 12.3 the
+ * arena camera -- and none of those is vestibular motion.
+ */
+function shakeTranslates(calls: readonly string[]): readonly string[] {
+  const shakes: string[] = [];
+  let depth = 0;
+  for (const [index, call] of calls.entries()) {
+    if (call === 'restore()') depth -= 1;
+    if (call !== 'save()') continue;
+    depth += 1;
+    if (depth !== 1) continue;
+    const next = calls[index + 1];
+    if (next !== undefined && next.startsWith('translate(') && next !== 'translate(0,0)') {
+      shakes.push(next);
+    }
+  }
+  return shakes;
+}
+
 function createHost(): FakeHost {
   const nodes = new Map<string, SpectateNode>();
   const listeners = new Map<string, (() => void)[]>();
@@ -709,9 +734,15 @@ describe('the Spectate panel (Story 9.3)', () => {
       // The picture is still reduced: no camera shake anywhere in what it drew,
       // which is the canonical vestibular trigger and the thing the preference
       // most has to switch off.
-      expect(
-        host.calls().filter((call) => call.startsWith('translate(') && call !== 'translate(0,0)'),
-      ).toStrictEqual([]);
+      //
+      // The shake is the translate `drawJuicedFrame` issues immediately after
+      // the outer `save`, so that is what this reads. It used to read *every*
+      // translate, which was the same assertion right up until Story 12.3 gave
+      // the arena a camera: a camera transform is a translate too, it is drawn
+      // on every frame reduced or not, and it is not motion the viewer sees --
+      // it is where the fight is framed. Sweeping the whole log would now fail
+      // on the framing while saying "shake".
+      expect(shakeTranslates(host.calls())).toStrictEqual([]);
     });
 
     it('under reduced motion, picking a Match plays it instead of swapping one frozen frame for another', async () => {
