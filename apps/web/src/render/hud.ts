@@ -606,8 +606,13 @@ export function timerReading(tick: number, maxTicks: number): number {
   if (!Number.isFinite(tick) || !Number.isFinite(maxTicks) || maxTicks <= 0) {
     return 0;
   }
-  const elapsed = Math.max(0, Math.min(Math.floor(maxTicks), Math.floor(Math.max(0, tick))));
-  return Math.floor(((Math.floor(maxTicks) - elapsed) * TIMER_MAX_READING) / Math.floor(maxTicks));
+  // `ticksIn`, deliberately not the obvious word for it: `source-discipline.test.ts`
+  // bans every timing-field name from shipped player source, and it is right to
+  // -- the whole risk this function carries is that somebody later reads it as a
+  // duration and reaches for a real one.
+  const total = Math.floor(maxTicks);
+  const ticksIn = Math.max(0, Math.min(total, Math.floor(Math.max(0, tick))));
+  return Math.floor(((total - ticksIn) * TIMER_MAX_READING) / total);
 }
 
 /** The reading as the two digits the plate shows. */

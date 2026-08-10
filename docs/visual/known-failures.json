@@ -1,4 +1,7 @@
 {
   "_readme": "Waivers for scripts/visual-gate.mjs. A check named here may fail without failing the gate, because it describes a defect a later story owns. The ratchet turns one way only: when a waived check starts passing, the gate FAILS until its entry is deleted here. Adding an entry is how you record a known defect; deleting one is part of the story that fixes it. Never add an entry to get a run green.",
-  "_empty": "No waivers stand today. Story 12.5 deleted the last one (`character-select-reachable`) by building the screen it described; 12.1's two were cleared by 12.2 and 12.4. An empty file is the state this ratchet aims at, and it is the state the gate is in as of 2026-08-10."
+  "hud-round-pips-advance": {
+    "story": "12-7-rounds-best-of-three-and-ko-overlay",
+    "why": "Story 12.6 draws the round pips and settles the HUD's layout in one story, so that 12.7 fills an element that is already there rather than relaying a finished HUD around a new one. There is nothing for a pip to count until the round system exists: no Match in this build has more than one round, and no state field records a round won. The check is written now, fails now, and 12.7 deletes this entry when a pip fills."
+  }
 }

@@ -280,6 +280,143 @@ const PIP_GROUP_WIDTH = ROUND_PIPS_PER_SIDE * PIP_SIZE + (ROUND_PIPS_PER_SIDE - 
 const PIP_TOP = TIMER_TOP + Math.floor((TIMER_HEIGHT - PIP_SIZE) / 2);
 
 /**
+ * ## The band, published for the gate (Story 12.6)
+ *
+ * `scripts/visual-gate.mjs` samples ink in the boxes below and asserts the row
+ * spans below are disjoint, and it cannot import a `.ts` module -- it is
+ * dependency-free ESM run straight by Node, the same reason it duplicates
+ * `SCREEN_ROUTES` and `ARENA_TOP_PX`. So the numbers are published here and
+ * copied there, and `renderer.test.ts` reads the gate's copy off disk and pins
+ * the two together. A layout edit that moved a bar and left the gate sampling
+ * empty rows would otherwise report a HUD element as missing, or -- worse --
+ * report a moved one as present.
+ *
+ * A text row span is the baseline's band, not the glyph's exact extent: a
+ * `fillText` reports no metrics through this port and the whole point of these
+ * numbers is that two elements cannot claim the same rows. Sixteen above the
+ * baseline and four below is the arcade face's box at 16px; fourteen and four
+ * is the mono face's at 14px. Both are generous in the direction that matters.
+ */
+export interface HudRowSpan {
+  readonly id: string;
+  readonly top: number;
+  readonly bottom: number;
+}
+
+/** Rows above the baseline an `arcadeFont` string can claim, and rows below it. */
+const ARCADE_ASCENT = 16;
+const ARCADE_DESCENT = 4;
+/** The same, for `monoFont` readouts. */
+const MONO_ASCENT = 14;
+const MONO_DESCENT = 4;
+
+export const HUD_ROW_SPANS: readonly HudRowSpan[] = Object.freeze([
+  Object.freeze({
+    id: 'name',
+    top: HUD_NAME_BASELINE - ARCADE_ASCENT,
+    bottom: HUD_NAME_BASELINE + ARCADE_DESCENT,
+  }),
+  Object.freeze({ id: 'health', top: HUD_TOP, bottom: HUD_TOP + HUD_BAR_HEIGHT }),
+  Object.freeze({ id: 'gauge', top: METER_TOP, bottom: METER_TOP + METER_HEIGHT }),
+  Object.freeze({
+    id: 'callout',
+    top: HUD_CALLOUT_BASELINE - ARCADE_ASCENT,
+    bottom: HUD_CALLOUT_BASELINE + ARCADE_DESCENT,
+  }),
+  Object.freeze({
+    id: 'readout',
+    top: HUD_LABEL_BASELINE - MONO_ASCENT,
+    bottom: HUD_LABEL_BASELINE + MONO_DESCENT,
+  }),
+  Object.freeze({ id: 'bank', top: BANK_TOP, bottom: BANK_TOP + BANK_HEIGHT }),
+]);
+
+/** One sampling box in the HUD band, in backbuffer pixels. */
+export interface HudRegion {
+  readonly id: string;
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+}
+
+/**
+ * The boxes `hud-has-all-five` samples: the four per-side elements and the two
+ * at centre.
+ *
+ * Derived from the same constants the drawing uses, never written twice. A name
+ * box is deliberately shorter than the bar it sits over -- the longest plate is
+ * `ULTIMATE` at six characters and the box only has to contain *some* of it for
+ * an ink sample to be non-empty, while a box the full width of the bar would
+ * find the bar's own frame and report ink for a name that never drew.
+ */
+export function hudRegions(viewport: Viewport): readonly HudRegion[] {
+  const centre = Math.round(viewport.width / 2);
+  const timerLeft = centre - Math.floor(TIMER_WIDTH / 2);
+  const nameWidth = 160;
+
+  const perSide: readonly HudRegion[] = [0, 1].flatMap((agentIndex): readonly HudRegion[] => {
+      const mirror = agentIndex === 1;
+      const columnLeft = mirror ? viewport.width - HUD_SIDE_INSET - HUD_BAR_WIDTH : HUD_SIDE_INSET;
+      const side = `p${String(agentIndex + 1)}`;
+      return [
+        Object.freeze({
+          id: `${side}-portrait`,
+          x: mirror ? viewport.width - HUD_PORTRAIT_INSET - HUD_PORTRAIT_SIZE : HUD_PORTRAIT_INSET,
+          y: HUD_PORTRAIT_TOP,
+          width: HUD_PORTRAIT_SIZE,
+          height: HUD_PORTRAIT_SIZE,
+        }),
+        Object.freeze({
+          id: `${side}-name`,
+          x: mirror ? columnLeft + HUD_BAR_WIDTH - nameWidth : columnLeft,
+          y: HUD_NAME_BASELINE - ARCADE_ASCENT,
+          width: nameWidth,
+          height: ARCADE_ASCENT + ARCADE_DESCENT,
+        }),
+        Object.freeze({
+          id: `${side}-health`,
+          x: columnLeft,
+          y: HUD_TOP,
+          width: HUD_BAR_WIDTH,
+          height: HUD_BAR_HEIGHT,
+        }),
+        Object.freeze({
+          id: `${side}-meter`,
+          x: columnLeft,
+          y: METER_TOP,
+          width: HUD_BAR_WIDTH,
+          height: METER_HEIGHT,
+        }),
+        // One box per side rather than one spanning the timer. A single box
+        // across the middle would find the timer plate's frame and report ink
+        // for pips that never drew, which is the shape of a check that cannot
+        // fail -- and "an element is present" is precisely what this samples.
+        Object.freeze({
+          id: `${side}-pips`,
+          x: mirror
+            ? timerLeft + TIMER_WIDTH + PIP_INSET
+            : timerLeft - PIP_INSET - PIP_GROUP_WIDTH,
+          y: PIP_TOP,
+          width: PIP_GROUP_WIDTH,
+          height: PIP_SIZE,
+        }),
+      ];
+  });
+
+  return Object.freeze([
+    ...perSide,
+    Object.freeze({
+      id: 'timer',
+      x: timerLeft,
+      y: TIMER_TOP,
+      width: TIMER_WIDTH,
+      height: TIMER_HEIGHT,
+    }),
+  ]);
+}
+
+/**
  * Interpolates one fighter's arena position between two simulated states, in
  * arena units.
  *

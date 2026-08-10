@@ -491,15 +491,78 @@ const dispatchKeydown = (selector, key) => `(() => {
 /**
  * Height of the HUD band at the top of the arena, in backbuffer pixels.
  *
- * `renderer.ts`'s `HUD_BOTTOM` is 118; 130 leaves margin under it. The
- * fighter-movement check below hashes *below* this line and nothing above it,
+ * `renderer.ts`'s `HUD_BOTTOM` is 144 since Story 12.6 gave the armed callout
+ * and the `HP … MTR …` readout rows of their own; 152 leaves margin under it.
+ * The fighter-movement check below hashes *below* this line and nothing above it,
  * which is the difference between a check that measures the fight and one that
  * measures the clock: `TICK NNN` and the health/meter bars change every Decision
  * Point on their own, so a whole-canvas hash goes green on a canvas whose
  * fighters are frozen, drawn as blocks, or drawn off-stage. Excluding the band
  * makes the check fail if the *fighters* stop moving, which is what it is for.
  */
-const ARENA_TOP_PX = 130;
+const ARENA_TOP_PX = 152;
+
+/**
+ * The HUD band, copied from `apps/web/src/render/renderer.ts` (Story 12.6).
+ *
+ * Duplicated for this file's standing reason -- it is dependency-free ESM run
+ * straight by Node and cannot import a `.ts` module, the same reason
+ * `SCREEN_ROUTES` and `ARENA_TOP_PX` are copies. What makes the copy safe is
+ * that `renderer.test.ts` reads *this literal* off disk and compares it against
+ * `HUD_ROW_SPANS` and `hudRegions(960 x 400)`, so a layout edit that moved a bar
+ * and left the gate sampling empty rows fails the suite in the same change.
+ *
+ * Written as JSON in a template literal rather than as an object literal so
+ * that comparison can be a `JSON.parse` on both sides rather than a regex per
+ * number.
+ *
+ * `rows` are the row spans that must not intersect. `regions` are the boxes
+ * `hud-has-all-five` samples, each with the exact colour that proves its element
+ * drew: every plate and bar closes with a `hudFrame` outline, and the name has
+ * no frame at all, so it is proven by its own ink instead.
+ */
+const HUD_BAND = JSON.parse(`{
+  "rows": [
+    { "id": "name",    "top": 16,  "bottom": 36  },
+    { "id": "health",  "top": 40,  "bottom": 58  },
+    { "id": "gauge",   "top": 62,  "bottom": 78  },
+    { "id": "callout", "top": 80,  "bottom": 100 },
+    { "id": "readout", "top": 104, "bottom": 122 },
+    { "id": "bank",    "top": 126, "bottom": 144 }
+  ],
+  "regions": [
+    { "id": "p1-portrait", "x": 24,  "y": 12, "width": 44,  "height": 44 },
+    { "id": "p1-name",     "x": 76,  "y": 16, "width": 160, "height": 20 },
+    { "id": "p1-health",   "x": 76,  "y": 40, "width": 328, "height": 18 },
+    { "id": "p1-meter",    "x": 76,  "y": 62, "width": 328, "height": 16 },
+    { "id": "p1-pips",     "x": 412, "y": 28, "width": 30,  "height": 12 },
+    { "id": "p2-portrait", "x": 892, "y": 12, "width": 44,  "height": 44 },
+    { "id": "p2-name",     "x": 724, "y": 16, "width": 160, "height": 20 },
+    { "id": "p2-health",   "x": 556, "y": 40, "width": 328, "height": 18 },
+    { "id": "p2-meter",    "x": 556, "y": 62, "width": 328, "height": 16 },
+    { "id": "p2-pips",     "x": 518, "y": 28, "width": 30,  "height": 12 },
+    { "id": "timer",       "x": 450, "y": 12, "width": 60,  "height": 44 }
+  ]
+}`);
+
+/**
+ * The exact colours the HUD paints, and nothing else on the canvas does.
+ *
+ * Exact `#rrggbb` matches rather than a brightness threshold, because the
+ * backdrop is drawn full-frame *behind* the HUD: the dusk sky is bright at the
+ * top of the arena, so "this box has bright pixels in it" is true of every box
+ * whether or not a HUD element drew there. A box that contains its own element's
+ * declared colour is a statement about the element.
+ *
+ * `hudFrame` closes every bar and every plate. The name has no frame, so it is
+ * proven by `--tb-ink`, and `gold` is what a won round's pip fills with.
+ */
+const HUD_FRAME_RGB = [0x5a, 0x64, 0x80];
+const HUD_NAME_RGB = [0xf5, 0xf5, 0xf0];
+const HUD_GOLD_RGB = [0xff, 0xd2, 0x4a];
+
+/** Pixels of the proving colour below which a region counts as empty. */
+const HUD_REGION_INK_MIN = 30;
 
 /**
  * The arena's lower bound, in backbuffer pixels from the bottom.
@@ -790,6 +853,116 @@ const arenaHalvesProbe = (hostSelector) => `(() => {
   }
   return { left, right, ink };
 })()`;
+
+/**
+ * The HUD band of the one visible canvas under `host`, measured (Story 12.6).
+ *
+ * Returns, per named region, how many pixels carry each of the three proving
+ * colours, plus a hash of the region -- one probe rather than three, so
+ * `hud-has-all-five`, `hud-timer-counts-down` and `hud-round-pips-advance` all
+ * describe the same frame. Splitting them would sample three frames of a
+ * running fight and let one check's evidence contradict another's.
+ *
+ * `readoutBarInk` is the pixel half of `hud-no-overlap`: the count of bar-frame
+ * pixels inside the readout's own rows, across the whole width. The defect
+ * Story 12.1 recorded -- `HP 69` sharing rows with the bar under it -- is
+ * exactly a non-zero reading here.
+ *
+ * A canvas showing the Ultimate cinematic reports `cinematic` and nothing else:
+ * the plate covers the whole viewport by design, so every region would read as
+ * the letterbox rather than as the HUD.
+ */
+const hudBandProbe = (hostSelector) => `(() => {
+  const host = document.querySelector(${JSON.stringify(hostSelector)});
+  if (!host) return null;
+  const canvas = [...host.querySelectorAll('canvas')].find((c) => {
+    const rect = c.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+  });
+  if (!canvas) return null;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return null;
+
+  const lastRow = ctx.getImageData(0, canvas.height - 1, canvas.width, 1).data;
+  let black = 0;
+  for (let x = 0; x < canvas.width; x += 1) {
+    const i = x * 4;
+    if (lastRow[i] === 0 && lastRow[i + 1] === 0 && lastRow[i + 2] === 0) black += 1;
+  }
+  if (black >= Math.floor(canvas.width * 0.9)) return { cinematic: true };
+
+  const band = ${JSON.stringify(HUD_BAND)};
+  const frame = ${JSON.stringify(HUD_FRAME_RGB)};
+  const nameInk = ${JSON.stringify(HUD_NAME_RGB)};
+  const gold = ${JSON.stringify(HUD_GOLD_RGB)};
+  const is = (data, i, rgb) => data[i] === rgb[0] && data[i + 1] === rgb[1] && data[i + 2] === rgb[2];
+
+  const regions = band.regions.map((region) => {
+    const out = { id: region.id, frame: 0, ink: 0, gold: 0, hash: 0 };
+    if (region.x < 0 || region.y < 0) return out;
+    if (region.x + region.width > canvas.width || region.y + region.height > canvas.height) return out;
+    const data = ctx.getImageData(region.x, region.y, region.width, region.height).data;
+    for (let i = 0; i < data.length; i += 4) {
+      if (is(data, i, frame)) out.frame += 1;
+      if (is(data, i, nameInk)) out.ink += 1;
+      if (is(data, i, gold)) out.gold += 1;
+      out.hash = (out.hash * 31 + data[i] + data[i + 1] * 3 + data[i + 2] * 7) | 0;
+    }
+    return out;
+  });
+
+  const readout = band.rows.find((row) => row.id === 'readout');
+  let readoutBarInk = 0;
+  if (readout && readout.bottom <= canvas.height) {
+    const rows = ctx.getImageData(0, readout.top, canvas.width, readout.bottom - readout.top).data;
+    for (let i = 0; i < rows.length; i += 4) {
+      if (is(rows, i, frame)) readoutBarInk += 1;
+    }
+  }
+
+  return { cinematic: false, regions, readoutBarInk };
+})()`;
+
+/**
+ * Drives the replay player's timeline to a percentage of its own length.
+ *
+ * The range input a visitor drags, dispatching the same `input` event their
+ * drag does, so the check exercises Story 4.5's seek rather than reaching into
+ * the clock. Returns the frame it landed on, which is what makes "two different
+ * scrub positions" a claim the failure message can back up.
+ */
+const scrubTo = (percent) => `(() => {
+  const input = document.querySelector('#app [data-timeline]');
+  if (!input) return null;
+  const max = Number.parseInt(input.getAttribute('max') ?? '0', 10);
+  const value = Math.floor((max * ${percent}) / 100);
+  input.value = String(value);
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  return { max, value };
+})()`;
+
+/** Which HUD regions came back with less than the floor of their proving colour. */
+const emptyRegions = (regions) =>
+  regions
+    .filter((region) =>
+      region.id.endsWith('-name')
+        ? region.ink < HUD_REGION_INK_MIN
+        : region.frame < HUD_REGION_INK_MIN,
+    )
+    .map((region) => region.id);
+
+/** Row spans that intersect. Empty is the passing state. */
+const overlappingRows = (rows) => {
+  const clashes = [];
+  for (const [index, row] of rows.entries()) {
+    for (const other of rows.slice(index + 1)) {
+      if (row.top < other.bottom && other.top < row.bottom) {
+        clashes.push(`${row.id}(${row.top}..${row.bottom}) x ${other.id}(${other.top}..${other.bottom})`);
+      }
+    }
+  }
+  return clashes;
+};
 
 // --------------------------------------------------------------------------
 // the run
@@ -1293,6 +1466,104 @@ async function main() {
           ? 'no off-screen canvas found, so nothing was measured'
           : `${hiddenBefore.length} off-screen canvas(es)${moved.length === 0 ? ', none repainted' : ` REPAINTED: ${moved.map((c) => c.host ?? '?').join(', ')}`}`,
       );
+
+      // --- C4d the HUD band (Story 12.6) ------------------------------------
+      //
+      // On the replay player, because it is the one surface whose playback
+      // position this gate can *set*: the timer and the pips are read off a
+      // scrub, and a check that waited for an autoplaying stream to reach an
+      // interesting frame would pass or fail by luck.
+      //
+      // The three checks share one probe of one frame. `hud-has-all-five` reads
+      // the region ink, `hud-no-overlap` reads the readout rows, and the timer
+      // and pip checks scrub and re-read. Sampling separately would let one
+      // check's evidence describe a frame another check never saw.
+      if (!viewport.mobile) {
+        await goto('/replay');
+        const atStart = await cdp.evaluate(scrubTo(0));
+        await sleep(500);
+        const band = await cdp.evaluate(hudBandProbe('#app'));
+
+        const missing = band === null || band.cinematic === true ? null : emptyRegions(band.regions);
+        record(
+          'hud-has-all-five',
+          missing !== null && missing.length === 0,
+          band === null
+            ? 'no visible canvas under #app to read the HUD from'
+            : band.cinematic === true
+            ? 'the Ultimate cinematic was on screen, so no HUD region could be measured'
+            : missing.length === 0
+            ? `${band.regions.length} regions, all inked: ${band.regions.map((r) => `${r.id}:${r.frame + r.ink}`).join(' ')}`
+            : `EMPTY: ${missing.join(', ')}`,
+        );
+
+        // Two halves, and both must hold. The declared row spans do not
+        // intersect -- which is the criterion, and which `renderer.test.ts`
+        // pins to the shipped constants -- and the readout's own rows carry no
+        // bar-frame ink, which is the pixel reading of the `HP 69 overlaps the
+        // bar` defect Story 12.1 recorded.
+        const clashes = overlappingRows(HUD_BAND.rows);
+        record(
+          'hud-no-overlap',
+          clashes.length === 0 &&
+            band !== null &&
+            band.cinematic !== true &&
+            band.readoutBarInk === 0,
+          clashes.length > 0
+            ? `row spans intersect: ${clashes.join(' | ')}`
+            : band === null || band.cinematic === true
+            ? 'no HUD frame to measure the readout rows on'
+            : `6 row spans disjoint; ${band.readoutBarInk} bar pixels in the readout's rows`,
+        );
+
+        // --- hud-timer-counts-down ------------------------------------------
+        // Two scrub positions and then back to the first. The timer must read
+        // differently at a later Decision Point *and* return to its first
+        // reading when the visitor scrubs back -- which is what says it is a
+        // function of the frame rather than of anything that has been counting
+        // since the page loaded.
+        const timerAt = (probe) => probe?.regions?.find((r) => r.id === 'timer')?.hash ?? null;
+        const startHash = timerAt(band);
+        await cdp.evaluate(scrubTo(60));
+        await sleep(500);
+        const midway = await cdp.evaluate(hudBandProbe('#app'));
+        await cdp.evaluate(scrubTo(0));
+        await sleep(500);
+        const backAgain = await cdp.evaluate(hudBandProbe('#app'));
+        const midHash = timerAt(midway);
+        const backHash = timerAt(backAgain);
+        record(
+          'hud-timer-counts-down',
+          startHash !== null &&
+            midHash !== null &&
+            startHash !== midHash &&
+            startHash === backHash,
+          `frame 0..${String(atStart?.max)}: timer ${String(startHash)} -> ${String(midHash)} -> ${String(backHash)}${
+            startHash !== null && startHash === midHash ? ' — the timer did not change across the Match' : ''
+          }${
+            startHash !== null && startHash !== backHash ? ' — scrubbing back did not restore it' : ''
+          }`,
+        );
+
+        // --- hud-round-pips-advance (waived to 12-7) -------------------------
+        // The pips are drawn by this story and have nothing to count until the
+        // round system exists, so this check is written now and recorded as
+        // failing with 12-7 named as its owner. At the end of a Match somebody
+        // has won something; a pip that fills carries gold.
+        await cdp.evaluate(scrubTo(100));
+        await sleep(500);
+        const atEnd = await cdp.evaluate(hudBandProbe('#app'));
+        const pipGold = (atEnd?.regions ?? [])
+          .filter((region) => region.id.endsWith('-pips'))
+          .reduce((total, region) => total + region.gold, 0);
+        record(
+          'hud-round-pips-advance',
+          atEnd !== null && atEnd.cinematic !== true && pipGold > 0,
+          atEnd === null
+            ? 'no visible canvas under #app'
+            : `${pipGold} gold pixels across both pip groups at the end of the Match`,
+        );
+      }
 
       // --- C4c character-select-reachable (Story 12.4, cleared by 12.5) -----
       // Waived by 12.4 with 12.5 as its owner; 12.5 built the screen and

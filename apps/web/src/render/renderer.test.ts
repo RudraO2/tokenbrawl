@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_FIGHTER_CONFIG } from '../../../../packages/env-fighter/src/config';
 import {
@@ -16,13 +17,24 @@ import type { BankReading } from '../replay/token-bank';
 import { BASIS_POINTS_FULL } from '../replay/film';
 import type { Canvas2D } from './canvas2d';
 import { createBlockArtist } from './artist';
-import { FLOOR_INSET, cameraForFrame, drawFrame } from './renderer';
+import {
+  FLOOR_INSET,
+  HUD_ROW_SPANS,
+  ROUND_PIPS_PER_SIDE,
+  cameraForFrame,
+  drawFrame,
+  hudRegions,
+  type DrawFrameOptions,
+} from './renderer';
 import {
   ARCADE_HUD_COLOURS,
   ARMED_PULSE_HOLD_FRAMES,
   FRAME_THICKNESS,
   SUPER_METER_BANDS,
+  timerLabel,
+  timerReading,
 } from './hud';
+import { auraFor } from './roster';
 import { ARENA_PALETTE } from './arena-palette';
 import { THEME, phaseFill } from './theme';
 
@@ -84,6 +96,12 @@ function createRecordingCanvas(): RecordingCanvas {
   // recorded around them. The transform's own behaviour is `camera.test.ts`'s.
   surface.translate = (x, y) => record('translate', [x, y]);
   surface.scale = (x, y) => record('scale', [x, y]);
+  // Story 12.6. The HUD portrait is the first thing `drawFrame` itself draws
+  // through this call -- the sprite artists take their own surface -- so the
+  // fake had to grow it. The image is recorded as its first argument, which is
+  // how the portrait cases tell one fighter's face from the other's.
+  surface.drawImage = (image, sx, sy, sw, sh, dx, dy, dw, dh) =>
+    record('drawImage', [String(image), sx, sy, sw, sh, dx, dy, dw, dh]);
 
   return surface;
 }
@@ -1109,5 +1127,183 @@ describe('seeking equals playing through (4.5 AC1, AC3)', () => {
 
     expect(clips).toContain('attack-startup');
     expect(clips).toContain('attack-active');
+  });
+});
+
+/**
+ * Story 12.6: the band a viewer reads across the top of the screen.
+ *
+ * Two kinds of assertion here, and the split is deliberate. The first kind is
+ * about *what was drawn* -- a portrait plate, a name, a timer, two pips a side
+ * -- which the recording fake answers exactly. The second kind is about the
+ * numbers `scripts/visual-gate.mjs` samples with, which no fake can answer: the
+ * gate cannot import a `.ts` module, so it carries a copy of the layout, and a
+ * copy nothing compares is a copy that goes quietly stale. The last case in
+ * this block reads the gate's own literal off disk.
+ */
+describe('the HUD band (12.6)', () => {
+  const CONFIG = DEFAULT_FIGHTER_CONFIG;
+  const PAIR = ['gemini', 'grokk'] as const;
+
+  function drawBand(options: Partial<DrawFrameOptions> = {}): RecordingCanvas {
+    const ctx = createRecordingCanvas();
+    drawFrame(ctx, frameWith(stateWith(), stateWith()), {
+      config: CONFIG,
+      viewport: VIEWPORT,
+      roster: PAIR,
+      ...options,
+    });
+    return ctx;
+  }
+
+  const textsOf = (ctx: RecordingCanvas): readonly string[] =>
+    ctx.calls().filter((call) => call.op === 'fillText').map((call) => String(call.args[0]));
+
+  it('names both fighters from the roster it was handed, not from a constant', () => {
+    expect(textsOf(drawBand())).toContain('GEMINI');
+    expect(textsOf(drawBand())).toContain('GROKK');
+    expect(textsOf(drawBand({ roster: ['clawde', 'chatty'] }))).toContain('CLAWDE');
+  });
+
+  it('leaves the plates unnamed rather than guessing when nobody said who is fighting', () => {
+    const unnamed = textsOf(drawBand({ roster: undefined }));
+    for (const name of ['CLAWDE', 'CHATTY', 'GEMINI', 'GROKK']) {
+      expect(unnamed).not.toContain(name);
+    }
+  });
+
+  it("fills each portrait plate with that fighter's own aura", () => {
+    // The plate is what says *whose side this is* on a surface whose portrait
+    // never decoded -- and on the hero raster, where `drawImage` throws, it is
+    // the whole plate. Two fighters glowing in one colour would be Story 11.4's
+    // keying silently unwired, which is the defect 12.5 found in the cinematic.
+    const fills = new Set(drawBand().calls().map((call) => call.fillStyle));
+    expect(fills).toContain(auraFor('gemini'));
+    expect(fills).toContain(auraFor('grokk'));
+  });
+
+  it('draws the portrait itself only when a sheet supplied one, and never throws without', () => {
+    expect(drawBand().calls().some((call) => call.op === 'drawImage')).toBe(false);
+
+    const portrait = { image: 'PORTRAIT', sx: 0, sy: 0, sw: 208, sh: 208 };
+    const sheet = {
+      fighters: PAIR,
+      imageUrls: [],
+      partFor: (): undefined => undefined,
+      portraitFor: (id: string) => (id === 'gemini' ? portrait : undefined),
+    };
+    const drawn = drawBand({ ult: sheet as never })
+      .calls()
+      .filter((call) => call.op === 'drawImage');
+    // One fighter's portrait resolved and the other's did not, and the plate is
+    // still drawn for both: the degrade is per fighter, not per surface.
+    expect(drawn).toHaveLength(1);
+    expect(drawn[0].args[0]).toBe('PORTRAIT');
+  });
+
+  it('draws both pip groups empty when no round has been won (AC5)', () => {
+    // A pip that appeared only once it was earned would be a HUD element that
+    // moves under the viewer mid-set, and a viewer would have no way to know
+    // how many rounds the set is.
+    const pips = (rounds?: readonly [number, number]): readonly RecordedCall[] =>
+      drawBand({ roundsWon: rounds })
+        .calls()
+        .filter((call) => call.op === 'fillRect' && call.args[2] === 12 && call.args[3] === 12);
+
+    expect(pips()).toHaveLength(ROUND_PIPS_PER_SIDE * 2);
+    expect(pips().every((call) => call.fillStyle === ARENA_PALETTE.hudPlate)).toBe(true);
+    // And a won round fills one, which is what 12.7 will make reachable.
+    expect(pips([1, 0]).filter((call) => call.fillStyle === ARENA_PALETTE.gold)).toHaveLength(1);
+    expect(pips([2, 2]).filter((call) => call.fillStyle === ARENA_PALETTE.gold)).toHaveLength(4);
+  });
+
+  it('shows a timer that is a function of the tick and of nothing else (INV-1, INV-3)', () => {
+    const drawnAt = (tick: number): readonly string[] => {
+      const ctx = createRecordingCanvas();
+      const state = stateWith({ tick });
+      drawFrame(ctx, frameWith(state, state), {
+        config: CONFIG,
+        viewport: VIEWPORT,
+        roster: PAIR,
+      });
+      return textsOf(ctx);
+    };
+
+    expect(drawnAt(0)).toContain('99');
+    expect(drawnAt(600)).toContain('49');
+    expect(drawnAt(CONFIG.maxTicks)).toContain('00');
+
+    // A thousand reads of the same index give the same string. The point is not
+    // that the function is deterministic in the abstract -- it is that nothing
+    // in it has been counting since the page loaded, which is the one way a
+    // timer could leak how long a Deployment thought.
+    const repeated = new Set(Array.from({ length: 1_000 }, () => timerLabel(437, CONFIG.maxTicks)));
+    expect([...repeated]).toStrictEqual([timerLabel(437, CONFIG.maxTicks)]);
+    expect(timerReading(437, CONFIG.maxTicks)).toBe(62);
+  });
+
+  it('keeps the callout clear of the gauge at every pulse level', () => {
+    // The defect, stated as the property that would have caught it. Every armed
+    // frame, not just the one the pulse happens to be on when a test runs: the
+    // callout's baseline sits below the gauge's last row whatever ramp the
+    // breath is drawing.
+    for (const index of [0, ARMED_PULSE_HOLD_FRAMES, ARMED_PULSE_HOLD_FRAMES * 2, 137]) {
+      const armed = stateWith({ meter: [CONFIG.maxMeter, CONFIG.maxMeter] });
+      const ctx = createRecordingCanvas();
+      drawFrame(
+        ctx,
+        { index, decisionPoint: 0, progressBasisPoints: 0, from: armed, to: armed },
+        { config: CONFIG, viewport: VIEWPORT, roster: PAIR },
+      );
+
+      const gaugeRows = ctx
+        .calls()
+        .filter(
+          (call) =>
+            call.op === 'fillRect' &&
+            call.args[2] === 328 &&
+            (call.args[1] as number) >= 62 &&
+            (call.args[1] as number) < 78,
+        );
+      expect(gaugeRows.length).toBeGreaterThan(0);
+      // Two fighters armed, each callout drawn twice: the shadow pass and the
+      // legible one. Every baseline is below the gauge's last row.
+      const callouts = ctx
+        .calls()
+        .filter((call) => call.op === 'fillText' && String(call.args[0]) === 'ULTIMATE READY');
+      expect(callouts).toHaveLength(4);
+      for (const call of callouts) {
+        expect(call.args[2] as number).toBeGreaterThan(78);
+      }
+    }
+  });
+
+  it("pins the visual gate's copy of the band to the layout that is actually drawn", () => {
+    // `scripts/visual-gate.mjs` is dependency-free ESM run straight by Node and
+    // cannot import this module, so it carries a copy of the row spans and the
+    // sampling boxes. A copy nothing compares is a copy that goes stale, and a
+    // stale copy makes the gate sample empty rows and report a HUD element as
+    // missing -- or, worse, report a moved one as present.
+    const gate = readFileSync(new URL('../../../../scripts/visual-gate.mjs', import.meta.url), 'utf8');
+    const literal = /const HUD_BAND = JSON\.parse\(`([\s\S]*?)`\)/.exec(gate);
+    expect(literal).not.toBeNull();
+    const band = JSON.parse(String(literal?.[1])) as {
+      rows: readonly Record<string, unknown>[];
+      regions: readonly Record<string, unknown>[];
+    };
+
+    expect(band.rows).toStrictEqual(HUD_ROW_SPANS.map((span) => ({ ...span })));
+    expect(band.regions).toStrictEqual(
+      hudRegions({ width: 960, height: 400 }).map((region) => ({ ...region })),
+    );
+
+    // And the criterion the gate computes off that copy holds: no two row spans
+    // in this band intersect. Asserted here as well as there, because the gate
+    // needs a browser and this does not.
+    for (const [index, row] of HUD_ROW_SPANS.entries()) {
+      for (const other of HUD_ROW_SPANS.slice(index + 1)) {
+        expect(row.top < other.bottom && other.top < row.bottom).toBe(false);
+      }
+    }
   });
 });

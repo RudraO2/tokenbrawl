@@ -91,6 +91,10 @@ function createRecordingCanvas(): RecordingCanvas {
   surface.clearRect = (x, y, w, h) => record('clearRect', [x, y, w, h]);
   surface.save = () => record('save', []);
   surface.restore = () => record('restore', []);
+  // Story 12.6: the portrait plate is the first thing in this module that draws
+  // an image, and the destination rectangle is what the inset case reads.
+  surface.drawImage = (image, sx, sy, sw, sh, dx, dy, dw, dh) =>
+    record('drawImage', [String(image), sx, sy, sw, sh, dx, dy, dw, dh]);
 
   return surface;
 }
@@ -658,5 +662,87 @@ describe('the colour set the hero has to hold (AC6)', () => {
 
   it('is frozen, so a consumer cannot quietly extend the hero palette at runtime', () => {
     expect(Object.isFrozen(ARCADE_HUD_COLOURS)).toBe(true);
+  });
+});
+
+/**
+ * Story 12.6's two new primitives and its timer.
+ *
+ * The plate is the HUD's one non-bar surface and the timer is the one number on
+ * the canvas that a careless reading could turn into a clock, so both get cases
+ * about the failure rather than about the happy path.
+ */
+describe('the plate, the pip and the timer (12.6)', () => {
+  it('draws a plate that stays inside the box it was given', () => {
+    // Four `fillRect` edges rather than a `strokeRect`, because a stroke is
+    // centred on its path and would put the outline a pixel outside the
+    // declared rectangle. The band packs the portrait, the bars and the pips
+    // against measured gaps, so an edge that overhangs its own box is how a
+    // HUD element starts overlapping the one beside it.
+    const ctx = createRecordingCanvas();
+    drawArcadePlate(ctx, { x: 24, y: 12, width: 44, height: 44, fill: ARENA_PALETTE.hudPlate });
+
+    expect(ctx.calls().every((call) => call.op === 'fillRect')).toBe(true);
+    for (const call of ctx.calls()) {
+      const [x, y, width, height] = call.args as readonly number[];
+      expect(x).toBeGreaterThanOrEqual(24);
+      expect(y).toBeGreaterThanOrEqual(12);
+      expect(x + width).toBeLessThanOrEqual(24 + 44);
+      expect(y + height).toBeLessThanOrEqual(12 + 44);
+    }
+  });
+
+  it('draws nothing at all for a degenerate plate rather than a negative rectangle', () => {
+    const ctx = createRecordingCanvas();
+    drawArcadePlate(ctx, { x: 0, y: 0, width: 0, height: 44, fill: ARENA_PALETTE.hudPlate });
+    drawArcadePlate(ctx, { x: 0, y: 0, width: 44, height: -3, fill: ARENA_PALETTE.hudPlate });
+    expect(ctx.calls()).toStrictEqual([]);
+  });
+
+  it('insets the portrait inside its frame, so the face never paints over the outline', () => {
+    const ctx = createRecordingCanvas();
+    drawPortraitPlate(
+      ctx,
+      { x: 24, y: 12, width: 44, height: 44, fill: ARENA_PALETTE.hudPlate },
+      { image: 'FACE', sx: 0, sy: 0, sw: 208, sh: 208 },
+    );
+
+    const drawn = ctx.calls().find((call) => call.op === 'drawImage');
+    expect(drawn).toBeDefined();
+    // dx, dy, dw, dh -- the box less one frame thickness on every side.
+    expect((drawn?.args ?? []).slice(5)).toStrictEqual([
+      24 + FRAME_THICKNESS,
+      12 + FRAME_THICKNESS,
+      44 - FRAME_THICKNESS * 2,
+      44 - FRAME_THICKNESS * 2,
+    ]);
+  });
+
+  it('counts down two digits over the whole Match and clamps at both ends', () => {
+    expect(timerLabel(0, 1_200)).toBe('99');
+    expect(timerLabel(1_200, 1_200)).toBe('00');
+    // Past the end, and before the beginning. Neither can arise from the film,
+    // and both would print something a viewer cannot read if they did.
+    expect(timerLabel(5_000, 1_200)).toBe('00');
+    expect(timerLabel(-40, 1_200)).toBe('99');
+    // A hand-built config, which `assertIntegerConfig` rejects upstream: the
+    // honest failure for a readout is to clamp, not to divide by zero and put
+    // `Infinity` through `String()`.
+    expect(timerLabel(10, 0)).toBe('00');
+    expect(timerReading(10, Number.NaN)).toBe(0);
+  });
+
+  it('never rises as the Match runs, which is the one thing a countdown must not do', () => {
+    // Monotone over every tick of the shipped length, asserted rather than
+    // reasoned about: integer division is exactly where an off-by-one turns
+    // into a timer that ticks back up for one frame.
+    const readings = Array.from({ length: 1_201 }, (_unused, tick) => timerReading(tick, 1_200));
+    for (const [tick, reading] of readings.entries()) {
+      if (tick > 0) {
+        expect(reading).toBeLessThanOrEqual(readings[tick - 1]);
+      }
+    }
+    expect(readings[0]).toBe(99);
+    expect(readings[1_200]).toBe(0);
   });
 });
