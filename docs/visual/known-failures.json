@@ -1,0 +1,15 @@
+{
+  "_readme": "Waivers for scripts/visual-gate.mjs. A check named here may fail without failing the gate, because it describes a defect a later story owns. The ratchet turns one way only: when a waived check starts passing, the gate FAILS until its entry is deleted here. Adding an entry is how you record a known defect; deleting one is part of the story that fixes it. Never add an entry to get a run green.",
+  "arcade-live-canvas": {
+    "story": "12-2-arcade-renders-while-you-play",
+    "recorded": "2026-08-10",
+    "what": "Play vs CPU runs headlessly. arcade/run.ts states it outright: the canvas is not on screen until the Match has already finished, so a visitor presses keys blind for a whole Match and is shown a replay afterwards.",
+    "clears_when": "#arcade holds a visible canvas while a Match is being played."
+  },
+  "no-horizontal-overflow": {
+    "story": "12-4-app-shell-and-screen-router",
+    "recorded": "2026-08-10",
+    "what": "At 390px the document scrolls sideways: scrollWidth 992 against clientWidth 390. The 960px arena canvas does not scale, and .tb-tagline runs past the viewport at 409px.",
+    "clears_when": "document.documentElement.scrollWidth <= clientWidth at 390x844."
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "label": "story-12-1",
+  "ranAt": "2026-08-10T07:31:58.516Z",
+  "checks": [
+    {
+      "id": "arcade-live-canvas",
+      "ok": false,
+      "detail": "started=true canvases=0 visible=0"
+    },
+    {
+      "id": "canvas-not-blank-desktop",
+      "ok": true,
+      "detail": "2 canvas(es), ink app:98.0% spectate:97.9%"
+    },
+    {
+      "id": "spectate-animates",
+      "ok": true,
+      "detail": "hash -1196624346 -> 1932937326"
+    },
+    {
+      "id": "no-horizontal-overflow",
+      "ok": false,
+      "detail": "scrollWidth=992 clientWidth=390 widest: canvas.tb-spectate-canvas@992px, p.tb-tagline@409px"
+    },
+    {
+      "id": "canvas-not-blank-mobile",
+      "ok": true,
+      "detail": "2 canvas(es), ink app:98.0% spectate:97.9%"
+    },
+    {
+      "id": "console-clean",
+      "ok": true,
+      "detail": "no errors or warnings"
+    }
+  ],
+  "waived": [
+    "arcade-live-canvas",
+    "no-horizontal-overflow"
+  ],
+  "staleWaivers": []
+}

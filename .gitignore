@@ -69,6 +69,14 @@ scratch/
 _bmad/config.user.yaml
 .bmad-loop/archive/
 
+# Story 12.1 — visual-gate captures. The PNGs exist so a person or an agent can
+# LOOK at the three surfaces during the run that produced them; that is their
+# whole job and it is over when the story is. Committing six screenshots per
+# story would add megabytes a week to a repo whose value is its source. The
+# machine-checkable half of the gate is `report.json`, which is committed, as is
+# `known-failures.json` — the ratchet has to travel with the code.
+docs/visual/*/*.png
+
 # Story 9.1 / AD-16 — dev-only pointer to the local Extraction reference
 # project, populated on a developer's own machine with paths outside this
 # repository. Never committed: the .gitignore entry and the mechanism that

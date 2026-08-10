@@ -7,6 +7,49 @@ The exit-gate step for any story that changes what the page looks like. Story
 sequences*. A wrong sprite scale, a missing backdrop and an unwired asset each
 produce a perfectly valid call sequence, and all three shipped in Epic 9.
 
+## Story 12.1: half of this is now a command
+
+```bash
+npm run visual-gate -- --label <story-key>
+```
+
+`scripts/visual-gate.mjs` boots the dev server, drives headless Chrome over the
+DevTools Protocol with no dependencies, and writes six screenshots plus a
+`report.json` to `docs/visual/<story-key>/`. It is the third entry in
+`.bmad-loop/policy.toml`'s `[verify]` block, which means **it is a real exit
+gate now, not a runbook step someone might skip.**
+
+Everything this page said before Story 12.1 was true and was also ignored,
+forty stories running. What changed is not the advice; it is that six of the
+checks below fail a build instead of a reviewer's attention.
+
+| Check | Fails when |
+|---|---|
+| `arcade-live-canvas` | `#arcade` has no visible canvas while a Match is being played |
+| `no-horizontal-overflow` | the document scrolls sideways at 390×844 |
+| `canvas-not-blank-*` | a visible canvas is under 2% ink — an unwired asset or a dead frame |
+| `spectate-animates` | the Spectate canvas hash does not change over 700ms of playback |
+| `console-clean` | any unallowlisted `error` or `warning` reaches the console |
+| `surface-present-*` | `#app`, `#arcade` or `#spectate` is missing from the page |
+
+### The waiver ratchet
+
+`docs/visual/known-failures.json` names checks that fail *today* because a
+later story owns the fix. A waived failure is reported and tolerated; an
+unwaived one fails the build. The ratchet turns one way: **when a waived check
+starts passing, the gate fails until its entry is deleted.** Removing your
+story's waiver is part of your story. Adding a waiver to get a run green is
+not a repair, and the entry's `story` and `clears_when` fields exist so that
+the next reader can tell the difference.
+
+### What the command still cannot do
+
+It proves a frame was drawn. It cannot tell you the frame looks right — that
+fighters read at the wrong scale, that the camera never moves, that a HUD label
+sits on top of the bar it describes. **Open the PNGs.** They are written to
+`docs/visual/<story-key>/` for exactly that, and they are gitignored because
+their job is over when the story is.
+
 ## The three surfaces
 
 Screenshot **all three, every time** — even when the story names only one. The
