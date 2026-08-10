@@ -885,6 +885,45 @@ body {
   box-shadow: var(--tb-shadow-warn);
 }
 
+/*
+ * Story 12.2: the Arcade live view's canvas box.
+ *
+ * The canvas *inside* it is the arena, released from three of docs/DESIGN.md's
+ * rules (the "Two regimes" split). The box *around* it is page chrome and keeps
+ * every one of them: a ground border at the full border width, the hard offset
+ * shadow, zero radius, a flat `--tb-bg` fill, no translucency. It is a
+ * deliberate copy of `.tb-stage`/`.tb-canvas` -- the replay player's own frame
+ * on `#app` -- so the fight a visitor plays and the replay it becomes read as
+ * one product rather than two.
+ *
+ * Hidden until a Match is running: the panel adds `--live` on Play and drops it
+ * when the Match ends and the replay re-mounts, so the two are never on screen
+ * at once and the box never sits blank between fights. `width: 100%` keeps the
+ * 960px backbuffer scaling down to a narrow viewport rather than forcing the
+ * page wider (the horizontal-overflow defect owed by 12-4 is a different
+ * element; this one must not add to it).
+ */
+.tb-arcade-stage {
+  display: none;
+  margin: var(--tb-space-2) 0;
+  border: var(--tb-border-width) solid var(--tb-ink);
+  box-shadow: var(--tb-shadow);
+  background: var(--tb-bg);
+  max-width: 960px;
+}
+
+.tb-arcade-stage--live {
+  display: block;
+}
+
+.tb-arcade-canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+  /* Sprite-crisp scaling: pixel art, not a photograph -- same as `.tb-canvas`. */
+  image-rendering: pixelated;
+}
+
 /* The BYOK badge on a Match run in this tab. Says why it will never be ranked. */
 .tb-chip--byok {
   border-color: var(--tb-accent);

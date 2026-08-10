@@ -1,7 +1,14 @@
-import type { Action, Agent, AgentIdentityV2, CommandLogV2 } from '@tokenbrawl/contracts';
+import type {
+  Action,
+  Agent,
+  AgentIdentityV2,
+  CommandLogV2,
+  EnvironmentAdapter,
+} from '@tokenbrawl/contracts';
 import { runMatch } from '../../../../packages/core/src/match-runner';
 import { DEFAULT_FIGHTER_CONFIG } from '../../../../packages/env-fighter/src/config';
 import { createFighterEnvironment } from '../../../../packages/env-fighter/src/environment';
+import type { FighterState } from '../../../../packages/env-fighter/src/state';
 import {
   createAggressiveBot,
   createRandomBot,
@@ -52,6 +59,27 @@ export interface ArcadeRunConfig {
    * one place an input becomes an Action or is dropped (AD-14).
    */
   readonly onLegalActions?: (legalActions: readonly Action[]) => void;
+  /**
+   * Story 12.2. Called with every `FighterState` this Match passes through, in
+   * order: the reset state first, then the state after each `env.step`.
+   *
+   * This is the live view's whole frame source. Until this story an Arcade
+   * Match ran headlessly and a visitor watched nothing until the replay
+   * re-mounted afterwards; now the panel draws each state as it is produced,
+   * through the same `drawJuicedFrame` the replay player uses (see
+   * `arcade/live.ts`). The sequence this reports is exactly the `states` array
+   * `buildReplayFilm` would rebuild from the finished log, so a live-viewed
+   * Match and its own replay are identical frame for frame.
+   *
+   * It is a *read*, wired as a tee on the Environment below rather than by
+   * touching `runMatch` or `createFighterEnvironment` (both untouched, INV-1 /
+   * AD-14): the wrapper forwards `env.step`'s own return value unchanged and
+   * only observes it on the way past, so the Command Log and its Final-State
+   * Hash are byte-identical to a headless run. A throw from this listener is
+   * contained for the same reason the `onLegalActions` tee contains one -- a UI
+   * callback must never be able to break a Match in progress.
+   */
+  readonly onState?: (state: FighterState) => void;
 }
 
 export interface ArcadeMatchHandle {
@@ -126,6 +154,32 @@ export function runArcadeMatch(config: ArcadeRunConfig): ArcadeMatchHandle {
     },
   };
 
+  // Story 12.2. A read-only tee on the Environment, the mirror of the human
+  // tee above. `reset` and `step` are the only two methods that mint a new
+  // `FighterState`, so wrapping exactly those two reports every state the Match
+  // passes through while forwarding each call's own return value untouched.
+  // Every other method (`observe`, `isActionable`, `terminal`, `hash`) and both
+  // value fields (`ticksPerDecision`, `maxTicks`) carry over by spread, so
+  // `runMatch` sees an Environment indistinguishable from `env` except that it
+  // is watched -- the Command Log and its Final-State Hash cannot move.
+  //
+  // The observation is contained in a try/catch for the reason the human tee is:
+  // `onState` runs a canvas draw, and a UI callback that threw must not fail a
+  // Decision Point.
+  const observe = (state: FighterState): FighterState => {
+    try {
+      config.onState?.(state);
+    } catch {
+      // A reporting listener that threw. The Match is not its business.
+    }
+    return state;
+  };
+  const watchedEnv: EnvironmentAdapter<FighterState> = {
+    ...env,
+    reset: (seed) => observe(env.reset(seed)),
+    step: (state, actions) => observe(env.step(state, actions)),
+  };
+
   const agents: [Agent, Agent] =
     humanIndex === 0 ? [watchedHuman, botAgent] : [botAgent, watchedHuman];
 
@@ -140,7 +194,7 @@ export function runArcadeMatch(config: ArcadeRunConfig): ArcadeMatchHandle {
           { id: humanId, kind: 'human' },
         ];
 
-  const log = runMatch(env, agents, config.seed).then((match) =>
+  const log = runMatch(watchedEnv, agents, config.seed).then((match) =>
     buildArcadeCommandLog(match, {
       environment: { id: env.id, version: env.version },
       seed: config.seed,

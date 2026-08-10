@@ -421,6 +421,8 @@ function mountByok(
 function mountArcade(
   globals: BrowserGlobals,
   mount: (log: CommandLog) => MountedApp,
+  /** Story 12.2. The page's view, for the live arena's animation-frame clock. */
+  view: HostView,
 ): ArcadePanel | null {
   const host = globals.document?.querySelector('#arcade');
   if (host == null) {
@@ -428,6 +430,10 @@ function mountArcade(
   }
   try {
     return mountArcadePanel(host as unknown as ArcadeHost, {
+      // Story 12.2. The live view draws the fight while it is being played,
+      // through the same `drawJuicedFrame` the replay player uses. Handed the
+      // page's view so its clock can count animation-frame callbacks.
+      view,
       onLog: (log) => {
         // `mount` routes through `buildReplayFilm`, which can throw (e.g. an
         // unrecognised schema version). Left unwrapped, that throw escaped
@@ -686,18 +692,26 @@ export async function startup(globals: BrowserGlobals): Promise<StartupResult | 
      * -- which re-mount through `mount` and are dressed by it at line ~577 --
      * nothing else would ever hand it the art.
      */
-    const panels: { spectate: SpectatePanel | null } = { spectate: null };
+    const panels: { spectate: SpectatePanel | null; arcade: ArcadePanel | null } = {
+      spectate: null,
+      arcade: null,
+    };
 
     /** Records a decoded pack on the page and pushes it to every live surface. */
     const dressArtist = (agentIndex: 0 | 1, artist: FighterArtist): void => {
       dressing.artists[agentIndex] = artist;
       player.mounted.setArtist(agentIndex, artist);
       panels.spectate?.setArtist(agentIndex, artist);
+      // Story 12.2. The Arcade live view draws through the same compositor now,
+      // so a pack that reached only the player would leave a live Match on the
+      // block artist for the whole session.
+      panels.arcade?.setArtist(agentIndex, artist);
     };
     const dressBackdrop = (backdrop: Backdrop): void => {
       dressing.backdrop = backdrop;
       player.mounted.setBackdrop(backdrop);
       panels.spectate?.setBackdrop(backdrop);
+      panels.arcade?.setBackdrop(backdrop);
     };
     /**
      * Story 11.2, widened by Story 11.6: both live surfaces, not the player
@@ -709,12 +723,15 @@ export async function startup(globals: BrowserGlobals): Promise<StartupResult | 
       dressing.vfx = vfx;
       player.mounted.setVfx(vfx);
       panels.spectate?.setVfx(vfx);
+      // Story 12.2. The Arcade live view too, for the reason above.
+      panels.arcade?.setVfx(vfx);
     };
     /** Story 11.4, widened by Story 11.6 for the reason `dressVfx` gives. */
     const dressUlt = (ult: UltSheet): void => {
       dressing.ult = ult;
       player.mounted.setUlt(ult);
       panels.spectate?.setUlt(ult);
+      panels.arcade?.setUlt(ult);
     };
 
     const upgrades: Promise<void>[] = SPRITE_LAYOUT_URLS.map(async (url, index) => {
@@ -761,7 +778,31 @@ export async function startup(globals: BrowserGlobals): Promise<StartupResult | 
       );
     }
 
-    const arcadePanel = mountArcade(globals, mount);
+    const arcadePanel = mountArcade(globals, mount, view);
+    panels.arcade = arcadePanel;
+    // Adopt whatever already landed, for the reason the Spectate block below
+    // gives: the upgrades started before this mount, so on a warm cache a pack
+    // resolves first and is recorded in `dressing` and pushed to nobody -- a
+    // live Arcade Match would then draw blocks precisely when the assets loaded
+    // fastest. The dressing lives on the panel's live arena, so this is correct
+    // even though the arena's canvas is not on screen until the visitor plays.
+    if (arcadePanel !== null) {
+      for (const agentIndex of [0, 1] as const) {
+        const artist = dressing.artists[agentIndex];
+        if (artist !== undefined) {
+          arcadePanel.setArtist(agentIndex, artist);
+        }
+      }
+      if (dressing.backdrop !== undefined) {
+        arcadePanel.setBackdrop(dressing.backdrop);
+      }
+      if (dressing.vfx !== undefined) {
+        arcadePanel.setVfx(dressing.vfx);
+      }
+      if (dressing.ult !== undefined) {
+        arcadePanel.setUlt(dressing.ult);
+      }
+    }
     const spectatePanel = mountSpectate(
       globals,
       () => {

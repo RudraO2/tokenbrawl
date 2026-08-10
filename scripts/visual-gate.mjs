@@ -362,6 +362,39 @@ const scrollIntoView = (selector) => `(() => {
   return true;
 })()`;
 
+/**
+ * Dispatches a real `keydown` on `selector`. Story 12.2's
+ * `arcade-input-moves-fighter` drives the fighter this way -- an actual
+ * `KeyboardEvent` on the page's key-capture element -- rather than by calling
+ * into the panel, so the check exercises the same path a visitor's keyboard
+ * does, listener and all.
+ */
+const dispatchKeydown = (selector, key) => `(() => {
+  const el = document.querySelector(${JSON.stringify(selector)});
+  if (!el) return false;
+  el.dispatchEvent(new KeyboardEvent('keydown', { key: ${JSON.stringify(key)}, bubbles: true }));
+  return true;
+})()`;
+
+/** The pixel hash of the single visible canvas under `host`, or `null` when there is none. */
+const hostCanvasHashProbe = (hostSelector) => `(() => {
+  const host = document.querySelector(${JSON.stringify(hostSelector)});
+  if (!host) return null;
+  const canvas = [...host.querySelectorAll('canvas')].find((c) => {
+    const rect = c.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+  });
+  if (!canvas) return null;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return null;
+  const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+  let hash = 0;
+  for (let i = 0; i < data.length; i += 28) {
+    hash = (hash * 31 + data[i] + data[i + 1] * 3 + data[i + 2] * 7) | 0;
+  }
+  return hash;
+})()`;
+
 // --------------------------------------------------------------------------
 // the run
 // --------------------------------------------------------------------------
@@ -481,6 +514,28 @@ async function main() {
           'arcade-live-canvas',
           started.ok === true && arcade.visible > 0,
           `started=${String(started.ok)} canvases=${arcade.canvases} visible=${arcade.visible}`,
+        );
+
+        // --- C1b arcade-input-moves-fighter (Story 12.2) -------------------
+        // The Match is now waiting on the visitor at its first Decision Point.
+        // Thirty real ArrowRight keydowns walk the fighter across the stage; the
+        // canvas the fighter is drawn on must change between the first press and
+        // the last. Driven through `keydown` on the page, not a call into the
+        // panel, so it exercises the listener a keyboard reaches.
+        const arcadeHashBefore = await cdp.evaluate(hostCanvasHashProbe('#arcade'));
+        for (let press = 0; press < 30; press += 1) {
+          await cdp.evaluate(dispatchKeydown('#arcade [data-arcade-keys]', 'ArrowRight'));
+          await sleep(40);
+        }
+        // Let the live clock animate through the last states the presses queued.
+        await sleep(500);
+        const arcadeHashAfter = await cdp.evaluate(hostCanvasHashProbe('#arcade'));
+        record(
+          'arcade-input-moves-fighter',
+          arcadeHashBefore !== null && arcadeHashAfter !== null && arcadeHashBefore !== arcadeHashAfter,
+          arcadeHashBefore === null
+            ? 'no visible canvas under #arcade to drive'
+            : `hash ${arcadeHashBefore} -> ${arcadeHashAfter}`,
         );
       }
 

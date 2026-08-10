@@ -143,8 +143,19 @@ function simulate(
   return states;
 }
 
-/** Expands the simulated states into one entry per playback frame. */
-function toFrames(states: readonly FighterState[]): readonly RenderFrame[] {
+/**
+ * Expands the simulated states into one entry per playback frame.
+ *
+ * Exported since Story 12.2. The Arcade live view draws a Match *while it is
+ * being played*, before there is a Command Log to build a film from, so it
+ * observes the `FighterState` sequence directly and calls this to turn it into
+ * the same `RenderFrame` list `buildReplayFilm` produces. Reusing this one
+ * transform rather than re-deriving the frame model is what makes a live-viewed
+ * Match and the replay that re-mounts after it identical frame for frame --
+ * `index`, `decisionPoint` and `progressBasisPoints` cannot drift between two
+ * paths that share this function.
+ */
+export function toFrames(states: readonly FighterState[]): readonly RenderFrame[] {
   const frames: RenderFrame[] = [];
   // `states.length - 1` transitions: the last state is a destination, not the
   // start of another step, and giving it its own frames would hold the final

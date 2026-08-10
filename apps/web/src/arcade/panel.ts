@@ -1,5 +1,10 @@
 import type { Action, CommandLogV2 } from '@tokenbrawl/contracts';
-import { escapeHtml } from '../main';
+import { escapeHtml, prefersReducedMotion, type CanvasSurface, type HostView } from '../main';
+import type { FighterArtist } from '../render/artist';
+import type { Backdrop } from '../render/backdrop';
+import type { UltSheet } from '../render/ult-sheet';
+import type { VfxSheet } from '../render/vfx-sheet';
+import { createLiveArena, type LiveArena } from './live';
 import { defaultKeyMap, runArcadeMatch, type ArcadeMatchHandle, type ArcadeRunConfig } from './run';
 
 /**
@@ -43,6 +48,23 @@ import { defaultKeyMap, runArcadeMatch, type ArcadeMatchHandle, type ArcadeRunCo
  * tell a player their bar is full. Story 10.4's visual check measured peak
  * gauge fills of 62%, 55%, 1% and 1% across four hand-played Matches, i.e. a
  * player can easily go a whole Match never knowing how close they came.
+ *
+ * ## Story 12.2: the fight is now on screen while it is played
+ *
+ * The premise the paragraph above rests on -- "the canvas is not on screen until
+ * the Match has already finished" -- is no longer true. This panel now mounts a
+ * live canvas under `#arcade` (`arcade/live.ts`) that draws each `FighterState`
+ * as `run.ts` produces it, through the same `drawJuicedFrame` the replay player
+ * uses. The Super Gauge, the fighters and every hit are on screen *during* play.
+ *
+ * The affordance text below is kept exactly as it was rather than removed: it is
+ * `aria-live`, so it announces "Ultimate ready" to a screen reader that cannot
+ * see the gauge light up, and it is the fallback on a page with no
+ * `requestAnimationFrame` where the live canvas never mounts. It narrates a
+ * state the canvas now also shows, which is additive, not redundant.
+ *
+ * When the Match ends the live canvas is torn down and the replay re-mounts on
+ * `#app` exactly as before -- the two are never on screen at once.
  */
 
 export type ArcadeEvent = 'click' | 'keydown';
@@ -58,6 +80,18 @@ export interface ArcadeNode {
   addEventListener(type: ArcadeEvent, listener: (event?: ArcadeKeyEvent) => void): void;
   /** Optional/structural, matching this file's non-`lib.dom` convention (P3). */
   focus?(): void;
+}
+
+/**
+ * The live-view canvas node (Story 12.2). Structural, matching this file's
+ * non-`lib.dom` convention: the fields `createLiveArena` needs of a canvas and
+ * nothing more, so a test can drive the live view with a recording fake and no
+ * real DOM -- exactly as `spectate/panel.ts` declares `SpectateCanvasNode`.
+ */
+export interface ArcadeCanvasNode {
+  width: number;
+  height: number;
+  getContext(id: '2d'): ReturnType<CanvasSurface['getContext']>;
 }
 
 export interface ArcadeHost {
@@ -76,12 +110,34 @@ export interface ArcadePanelDeps {
   readonly humanSide?: 0 | 1;
   /** Same seed default philosophy as BYOK: a constant, not a random draw. */
   readonly seed?: number;
+  /**
+   * Story 12.2. The page's view, for the live arena's animation-frame clock.
+   *
+   * Optional: absent on a page or a test with no `requestAnimationFrame`, in
+   * which case the panel keeps its pre-12.2 behaviour exactly -- the Match runs
+   * and the replay re-mounts afterwards -- with no live canvas. That is the same
+   * warn-not-throw degrade every asset on this page takes.
+   */
+  readonly view?: HostView;
 }
 
 export interface ArcadePanel {
   /** Starts a Match the same way clicking "Play vs CPU" does. */
   readonly play: () => void;
   readonly state: () => ArcadeState;
+  /**
+   * Story 12.2. Dresses the live arena, on exactly the terms
+   * `SpectatePanel.setArtist` dresses that surface: the sprite packs and
+   * scenery belong to the *page* (`startup.ts` decodes them once), and this is
+   * how they reach the `#arcade` canvas rather than being left to draw blocks.
+   * A no-op on a panel with no live arena (no `view`, or no canvas).
+   */
+  readonly setArtist: (agentIndex: 0 | 1, artist: FighterArtist) => void;
+  readonly setBackdrop: (backdrop: Backdrop) => void;
+  /** Story 12.2. The impact FX sheet, on the same terms as `setArtist`. */
+  readonly setVfx: (vfx: VfxSheet) => void;
+  /** Story 12.2. The Ultimate's per-character art, on the same terms as `setArtist`. */
+  readonly setUlt: (ult: UltSheet) => void;
 }
 
 /** Not the BYOK panel's seed, so the two demos are visibly different Matches. */
@@ -139,6 +195,9 @@ export function arcadeMarkup(): string {
       No key, no signup, no server -- and this Match is never rated.
     </p>
     <button class="tb-button tb-arcade-play" type="button" data-arcade-play>Play vs CPU</button>
+    <div class="tb-arcade-stage" data-arcade-stage>
+      <canvas class="tb-arcade-canvas"></canvas>
+    </div>
     <div class="tb-arcade-keys" data-arcade-keys tabindex="0">${onScreenButtonsMarkup()}</div>
     <p class="tb-arcade-ultimate" data-arcade-ultimate role="status" aria-live="polite"></p>
     <p class="tb-arcade-status" data-arcade-status role="status" aria-live="polite"></p>
@@ -175,6 +234,47 @@ export function mountArcadePanel(host: ArcadeHost, deps: ArcadePanelDeps): Arcad
   const runMatch = deps.run ?? runArcadeMatch;
   const humanSide = deps.humanSide ?? 0;
   const seed = deps.seed ?? DEFAULT_SEED;
+
+  /**
+   * The live arena, or `null` when this environment cannot mount one (Story
+   * 12.2).
+   *
+   * Built once, here, over the persistent `#arcade` canvas: it holds the page's
+   * dressing across Matches (each Play resets only the states, never the sprite
+   * packs) exactly as the replay player's dressing outlives a re-mount. `null`
+   * when there is no `view` to drive an animation-frame clock, or no canvas with
+   * a 2D context -- both the shapes a test with no DOM has -- and in that case
+   * the panel behaves exactly as it did before this story: the Match runs and
+   * the replay re-mounts afterwards, with no live view. Warn-not-throw is the
+   * same degrade every asset on this page takes.
+   */
+  const stageNode = host.querySelector('[data-arcade-stage]');
+  const canvasNode = host.querySelector('canvas');
+  const liveArena: LiveArena | null = ((): LiveArena | null => {
+    if (deps.view === undefined || canvasNode === null) {
+      return null;
+    }
+    const asCanvas = canvasNode as unknown as ArcadeCanvasNode;
+    if (typeof asCanvas.getContext !== 'function') {
+      return null;
+    }
+    try {
+      return createLiveArena({
+        canvas: asCanvas as unknown as CanvasSurface,
+        view: deps.view,
+        reducedMotion: prefersReducedMotion(deps.view),
+      });
+    } catch {
+      // A browser that gave no 2D context. The Match still runs headlessly and
+      // the replay still re-mounts; only the live view is lost.
+      return null;
+    }
+  })();
+
+  /** Shows or hides the live canvas. Hidden when idle so it never sits blank beside the panel. */
+  const showStage = (live: boolean): void => {
+    stageNode?.setAttribute?.('class', live ? 'tb-arcade-stage tb-arcade-stage--live' : 'tb-arcade-stage');
+  };
 
   const panelState: {
     value: ArcadeState;
@@ -244,6 +344,10 @@ export function mountArcadePanel(host: ArcadeHost, deps: ArcadePanelDeps): Arcad
     panelState.handle = null;
     playNode.disabled = false;
     setArmed(false);
+    // The live view stops with the Match: a stalled fight left drawing on screen
+    // would be as misleading as a stuck "Fighting...".
+    liveArena?.stop();
+    showStage(false);
     say('error', `Could not run the Match: ${String(error instanceof Error ? error.message : error)}`);
   };
 
@@ -258,6 +362,13 @@ export function mountArcadePanel(host: ArcadeHost, deps: ArcadePanelDeps): Arcad
     setArmed(false);
     say('running', `Fighting. Arrow keys or Z/X/C, ${ULTIMATE_KEY} for the Ultimate, or the buttons below.`);
 
+    // Arm the live view and reveal its canvas before the Match starts, so the
+    // reset state (reported synchronously the instant `runMatch` reaches
+    // `env.reset`) has a canvas to land on and the first frame is drawn without
+    // waiting for the visitor's first key.
+    liveArena?.begin();
+    showStage(liveArena !== null);
+
     try {
       const handle = runMatch({
         seed,
@@ -265,6 +376,11 @@ export function mountArcadePanel(host: ArcadeHost, deps: ArcadePanelDeps): Arcad
         mapInput,
         onLegalActions: (legalActions) => {
           setArmed(legalActions.includes(ULTIMATE_ACTION));
+        },
+        // Story 12.2. Every state the Match passes through, drawn as it is
+        // produced. A no-op when there is no live arena.
+        onState: (state) => {
+          liveArena?.pushState(state);
         },
       });
       panelState.handle = handle;
@@ -280,6 +396,11 @@ export function mountArcadePanel(host: ArcadeHost, deps: ArcadePanelDeps): Arcad
           playNode.disabled = false;
           // The Match is over, so there is no gauge to be full any more.
           setArmed(false);
+          // The live view gives way to the replay rather than both being on
+          // screen at once: stop the live clock and hide its canvas here, before
+          // `onLog` re-mounts the replay player on `#app`.
+          liveArena?.stop();
+          showStage(false);
           say('done', 'Done. Your Match is playing above. It is excluded from every rating.');
           deps.onLog(log);
         })
@@ -309,7 +430,25 @@ export function mountArcadePanel(host: ArcadeHost, deps: ArcadePanelDeps): Arcad
   });
 
   setArmed(false);
+  showStage(false);
   say('idle', 'Fight a Baseline Bot. No key, no signup.');
 
-  return Object.freeze({ play, state: (): ArcadeState => panelState.value });
+  return Object.freeze({
+    play,
+    state: (): ArcadeState => panelState.value,
+    // Story 12.2. Forwarded to the live arena, which holds the dressing across
+    // Matches. A no-op when there is no live arena (no `view`, or no canvas).
+    setArtist: (agentIndex: 0 | 1, artist: FighterArtist): void => {
+      liveArena?.setArtist(agentIndex, artist);
+    },
+    setBackdrop: (backdrop: Backdrop): void => {
+      liveArena?.setBackdrop(backdrop);
+    },
+    setVfx: (vfx: VfxSheet): void => {
+      liveArena?.setVfx(vfx);
+    },
+    setUlt: (ult: UltSheet): void => {
+      liveArena?.setUlt(ult);
+    },
+  });
 }
