@@ -496,11 +496,18 @@ export function drawArcadePlate(ctx: Canvas2D, plate: ArcadePlate): void {
   ctx.fillStyle = plate.fill;
   ctx.fillRect(plate.x, plate.y, width, height);
 
+  // Clamped, and then *offset* by the clamp. On a box one pixel tall the naive
+  // `plate.y + height - FRAME_THICKNESS` lands a row **above** the box, which is
+  // the exact overhang the four-`fillRect` construction exists to prevent -- and
+  // an independent review of this story caught it sitting inside the docblock
+  // that argues against it. Unreachable at today's sizes; a rule with one size
+  // it does not hold for is not a rule.
+  const edge = Math.min(FRAME_THICKNESS, width, height);
   ctx.fillStyle = ARENA_PALETTE.hudFrame;
-  ctx.fillRect(plate.x, plate.y, width, Math.min(FRAME_THICKNESS, height));
-  ctx.fillRect(plate.x, plate.y + height - FRAME_THICKNESS, width, Math.min(FRAME_THICKNESS, height));
-  ctx.fillRect(plate.x, plate.y, Math.min(FRAME_THICKNESS, width), height);
-  ctx.fillRect(plate.x + width - FRAME_THICKNESS, plate.y, Math.min(FRAME_THICKNESS, width), height);
+  ctx.fillRect(plate.x, plate.y, width, edge);
+  ctx.fillRect(plate.x, plate.y + height - edge, width, edge);
+  ctx.fillRect(plate.x, plate.y, edge, height);
+  ctx.fillRect(plate.x + width - edge, plate.y, edge, height);
 }
 
 /**

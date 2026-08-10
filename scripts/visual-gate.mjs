@@ -898,29 +898,44 @@ const hudBandProbe = (hostSelector) => `(() => {
   const is = (data, i, rgb) => data[i] === rgb[0] && data[i + 1] === rgb[1] && data[i + 2] === rgb[2];
 
   const regions = band.regions.map((region) => {
-    const out = { id: region.id, frame: 0, ink: 0, gold: 0, hash: 0 };
+    const out = { id: region.id, frame: 0, ink: 0, gold: 0, colours: 0, hash: 0 };
     if (region.x < 0 || region.y < 0) return out;
     if (region.x + region.width > canvas.width || region.y + region.height > canvas.height) return out;
     const data = ctx.getImageData(region.x, region.y, region.width, region.height).data;
+    const seen = new Set();
     for (let i = 0; i < data.length; i += 4) {
       if (is(data, i, frame)) out.frame += 1;
       if (is(data, i, nameInk)) out.ink += 1;
       if (is(data, i, gold)) out.gold += 1;
+      seen.add((data[i] << 16) | (data[i + 1] << 8) | data[i + 2]);
       out.hash = (out.hash * 31 + data[i] + data[i + 1] * 3 + data[i + 2] * 7) | 0;
     }
+    out.colours = seen.size;
     return out;
   });
 
-  const readout = band.rows.find((row) => row.id === 'readout');
-  let readoutBarInk = 0;
-  if (readout && readout.bottom <= canvas.height) {
-    const rows = ctx.getImageData(0, readout.top, canvas.width, readout.bottom - readout.top).data;
+  // The pixel half of hud-no-overlap: bar-frame ink inside the two text row
+  // bands, across the whole width. A callout or a readout that shared rows with
+  // a bar would find the bar's own outline in its band, which is the reading of
+  // the two defects Story 12.1 photographed. (No backticks in here: this comment
+  // lives inside a template literal, and one would end the probe mid-sentence.)
+  const barInkIn = (id) => {
+    const row = band.rows.find((entry) => entry.id === id);
+    if (!row || row.bottom > canvas.height) return -1;
+    const rows = ctx.getImageData(0, row.top, canvas.width, row.bottom - row.top).data;
+    let count = 0;
     for (let i = 0; i < rows.length; i += 4) {
-      if (is(rows, i, frame)) readoutBarInk += 1;
+      if (is(rows, i, frame)) count += 1;
     }
-  }
+    return count;
+  };
 
-  return { cinematic: false, regions, readoutBarInk };
+  return {
+    cinematic: false,
+    regions,
+    readoutBarInk: barInkIn('readout'),
+    calloutBarInk: barInkIn('callout'),
+  };
 })()`;
 
 /**
@@ -941,14 +956,42 @@ const scrubTo = (percent) => `(() => {
   return { max, value };
 })()`;
 
-/** Which HUD regions came back with less than the floor of their proving colour. */
+/**
+ * Distinct colours a portrait region must carry for the *face* to have drawn.
+ *
+ * An independent review of Story 12.6 found the first version of this check
+ * counting only `hudFrame`, which is the plate's own outline: a surface that
+ * lost its portrait sheet -- the exact shape of the regression Story 12.5 found
+ * in Spectate -- would still draw an aura-filled framed box and still report
+ * `p1-portrait:336`. A flat plate carries two colours. A decoded portrait
+ * carries hundreds.
+ */
+const PORTRAIT_COLOURS_MIN = 8;
+
+/** Gold pixels the timer plate must carry for its digits to have drawn. */
+const TIMER_DIGIT_INK_MIN = 20;
+
+/**
+ * Which HUD regions came back short of the ink that proves their element drew.
+ *
+ * Each region is judged on the colour only *it* can produce, never on total
+ * brightness: the backdrop is painted full-frame behind the HUD, so "this box
+ * has bright pixels in it" is true of every box whether or not anything drew.
+ * And each is judged on the element's **content** where the element has any --
+ * a plate's own frame proves a plate, and a plate is not a portrait.
+ */
 const emptyRegions = (regions) =>
   regions
-    .filter((region) =>
-      region.id.endsWith('-name')
-        ? region.ink < HUD_REGION_INK_MIN
-        : region.frame < HUD_REGION_INK_MIN,
-    )
+    .filter((region) => {
+      if (region.id.endsWith('-name')) return region.ink < HUD_REGION_INK_MIN;
+      if (region.id.endsWith('-portrait')) {
+        return region.frame < HUD_REGION_INK_MIN || region.colours < PORTRAIT_COLOURS_MIN;
+      }
+      if (region.id === 'timer') {
+        return region.frame < HUD_REGION_INK_MIN || region.gold < TIMER_DIGIT_INK_MIN;
+      }
+      return region.frame < HUD_REGION_INK_MIN;
+    })
     .map((region) => region.id);
 
 /** Row spans that intersect. Empty is the passing state. */
@@ -1479,41 +1522,69 @@ async function main() {
       // and pip checks scrub and re-read. Sampling separately would let one
       // check's evidence describe a frame another check never saw.
       if (!viewport.mobile) {
+        // **All three arena surfaces, not the player alone.** An independent
+        // review of Story 12.6 pointed out that a HUD element wired into one
+        // surface and forgotten in another is this repository's signature
+        // defect -- it is what Story 12.5 found in Spectate a story ago -- and
+        // that a check reading `#app` only could not see it. The player is
+        // still where the timer and the pips are read, because it is the one
+        // surface whose playback position this gate can set.
+        const bands = [];
+        for (const route of ARENA_ROUTES) {
+          await goto(route);
+          await sleep(400);
+          bands.push({ route, band: await cdp.evaluate(hudBandProbe(route === '/replay' ? '#app' : route === '/play' ? '#arcade' : '#spectate')) });
+        }
+        const judgedBands = bands.filter(
+          (entry) => entry.band !== null && entry.band.cinematic !== true,
+        );
+        const shortfalls = judgedBands.flatMap((entry) =>
+          emptyRegions(entry.band.regions).map((id) => `${entry.route}:${id}`),
+        );
+        record(
+          'hud-has-all-five',
+          judgedBands.length === ARENA_ROUTES.length && shortfalls.length === 0,
+          judgedBands.length < ARENA_ROUTES.length
+            ? `only ${judgedBands.length} of ${ARENA_ROUTES.length} arena surfaces could be read (${bands
+                .filter((entry) => entry.band === null || entry.band.cinematic === true)
+                .map((entry) => entry.route)
+                .join(', ')})`
+            : shortfalls.length === 0
+            ? judgedBands
+                .map(
+                  (entry) =>
+                    `${entry.route} ${entry.band.regions.length} regions ok (portrait colours ${entry.band.regions
+                      .filter((r) => r.id.endsWith('-portrait'))
+                      .map((r) => r.colours)
+                      .join('/')}, timer gold ${entry.band.regions.find((r) => r.id === 'timer')?.gold})`,
+                )
+                .join(' | ')
+            : `EMPTY: ${shortfalls.join(', ')}`,
+        );
+
         await goto('/replay');
         const atStart = await cdp.evaluate(scrubTo(0));
         await sleep(500);
         const band = await cdp.evaluate(hudBandProbe('#app'));
 
-        const missing = band === null || band.cinematic === true ? null : emptyRegions(band.regions);
-        record(
-          'hud-has-all-five',
-          missing !== null && missing.length === 0,
-          band === null
-            ? 'no visible canvas under #app to read the HUD from'
-            : band.cinematic === true
-            ? 'the Ultimate cinematic was on screen, so no HUD region could be measured'
-            : missing.length === 0
-            ? `${band.regions.length} regions, all inked: ${band.regions.map((r) => `${r.id}:${r.frame + r.ink}`).join(' ')}`
-            : `EMPTY: ${missing.join(', ')}`,
-        );
-
         // Two halves, and both must hold. The declared row spans do not
         // intersect -- which is the criterion, and which `renderer.test.ts`
-        // pins to the shipped constants -- and the readout's own rows carry no
-        // bar-frame ink, which is the pixel reading of the `HP 69 overlaps the
-        // bar` defect Story 12.1 recorded.
+        // pins to the shipped constants -- and neither text band carries any
+        // bar-frame ink, which is the pixel reading of the two defects Story
+        // 12.1 photographed: the callout drawn on the gauge and the readout
+        // sharing rows with the bar under it. A callout band that overlapped
+        // the gauge would find the gauge's own outline inside it.
         const clashes = overlappingRows(HUD_BAND.rows);
+        const textBandInk =
+          band === null || band.cinematic === true ? -1 : band.readoutBarInk + band.calloutBarInk;
         record(
           'hud-no-overlap',
-          clashes.length === 0 &&
-            band !== null &&
-            band.cinematic !== true &&
-            band.readoutBarInk === 0,
+          clashes.length === 0 && textBandInk === 0,
           clashes.length > 0
             ? `row spans intersect: ${clashes.join(' | ')}`
-            : band === null || band.cinematic === true
-            ? 'no HUD frame to measure the readout rows on'
-            : `6 row spans disjoint; ${band.readoutBarInk} bar pixels in the readout's rows`,
+            : textBandInk < 0
+            ? 'no HUD frame to measure the text rows on'
+            : `6 row spans disjoint; ${band.calloutBarInk} bar pixels in the callout's rows and ${band.readoutBarInk} in the readout's`,
         );
 
         // --- hud-timer-counts-down ------------------------------------------

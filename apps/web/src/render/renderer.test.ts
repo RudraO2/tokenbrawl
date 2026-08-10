@@ -19,6 +19,7 @@ import type { Canvas2D } from './canvas2d';
 import { createBlockArtist } from './artist';
 import {
   FLOOR_INSET,
+  HUD_BOTTOM,
   HUD_ROW_SPANS,
   ROUND_PIPS_PER_SIDE,
   cameraForFrame,
@@ -1296,6 +1297,18 @@ describe('the HUD band (12.6)', () => {
     expect(band.regions).toStrictEqual(
       hudRegions({ width: 960, height: 400 }).map((region) => ({ ...region })),
     );
+
+    // `ARENA_TOP_PX` is the gate's other hand-copied number and the one the
+    // comparison above cannot reach, because it is not part of the band -- it
+    // is where the band *stops*. An independent review of Story 12.6 named the
+    // failure: a later story grows the HUD past it, and every framing check
+    // starts hashing HUD pixels, which advance on their own every Decision
+    // Point. `arcade-input-moves-fighter` would then go green on a fight that
+    // had frozen, which is precisely what that constant's docblock says it
+    // exists to prevent.
+    const arenaTop = /const ARENA_TOP_PX = (\d+);/.exec(gate);
+    expect(arenaTop).not.toBeNull();
+    expect(Number(arenaTop?.[1])).toBeGreaterThanOrEqual(HUD_BOTTOM);
 
     // And the criterion the gate computes off that copy holds: no two row spans
     // in this band intersect. Asserted here as well as there, because the gate

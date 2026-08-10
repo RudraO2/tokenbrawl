@@ -855,6 +855,8 @@ export function drawFrame(ctx: Canvas2D, frame: RenderFrame, options: DrawFrameO
 
   ctx.restore();
 
+  drawHudGround(ctx, viewport);
+
   for (const agentIndex of [0, 1] as const) {
     const x =
       agentIndex === 0 ? HUD_SIDE_INSET : viewport.width - HUD_SIDE_INSET - HUD_BAR_WIDTH;
@@ -957,6 +959,57 @@ export function drawFrame(ctx: Canvas2D, frame: RenderFrame, options: DrawFrameO
 }
 
 /**
+ * The plate every piece of HUD type is measured against (Story 12.6).
+ *
+ * An independent review of this story found the recorded contrast ratios
+ * describing a ground the visitor never sees. `options.backdrop?.draw` fills the
+ * whole frame *before* the HUD, so a callout, a name or the tick readout was
+ * being drawn on the dusk mountains rather than on `--tb-bg` — and the numbers
+ * that had been written down were against `--tb-bg`. Measured against the lit
+ * cliff behind the left column -- a mid orange-brown, sampled off the Story 12.6
+ * captures; the value is not written here because `style-discipline.test.ts`
+ * reads comments too and a hex outside the three declared sources is a
+ * violation whatever it is doing there -- `--tb-muted` came out at **1.30:1**:
+ * `TICK 960` was, in the captures, very nearly invisible.
+ *
+ * So the type gets a ground of its own. `hudPlate` is the arena palette's
+ * darkening layer -- it is what the bars already sit on, and its whole purpose
+ * (`arena-palette.ts`) is to be a backing surface rather than a shape to be
+ * seen. Drawn flat, with no frame, so it reads as the stage dimming under the
+ * HUD rather than as a fourth box; the bars and plates on top keep their
+ * outlines.
+ *
+ * Every ratio this story records is now a fact about two palette entries rather
+ * than about whichever pixel of scenery happened to be behind a letter:
+ * `--tb-ink` 17.87:1, `ARENA_PALETTE.gold` 13.73:1, both on `hudPlate`.
+ *
+ * The portrait plates sit outside these columns and carry their own ground, and
+ * the centre band stops above the bars so the fight is not walled off from the
+ * scenery any more than it has to be.
+ */
+function drawHudGround(ctx: Canvas2D, viewport: Viewport): void {
+  const top = HUD_NAME_BASELINE - ARCADE_ASCENT;
+  ctx.fillStyle = ARENA_PALETTE.hudPlate;
+  for (const agentIndex of [0, 1] as const) {
+    ctx.fillRect(
+      agentIndex === 0 ? HUD_SIDE_INSET : viewport.width - HUD_SIDE_INSET - HUD_BAR_WIDTH,
+      top,
+      HUD_BAR_WIDTH,
+      HUD_BOTTOM - top,
+    );
+  }
+
+  const centre = Math.round(viewport.width / 2);
+  const groupWidth = TIMER_WIDTH + (PIP_INSET + PIP_GROUP_WIDTH) * 2;
+  ctx.fillRect(
+    centre - Math.floor(groupWidth / 2),
+    top,
+    groupWidth,
+    HUD_CALLOUT_BASELINE + ARCADE_DESCENT - top,
+  );
+}
+
+/**
  * The round timer and the round pips (Story 12.6).
  *
  * Screen space, at the centre of the frame, outside Story 12.3's camera
@@ -1021,6 +1074,13 @@ function drawCentreColumn(
     }
   }
 
+  // Ink rather than `--tb-muted`, which is what this readout carried from Story
+  // 4.1 until an independent review of 12.6 measured it. `--tb-muted` is a
+  // metadata colour chosen against `--tb-bg`, where it clears the floor at
+  // 5.42:1; on `hudPlate` it is **3.81:1** and on the backdrop it was actually
+  // being drawn over it was **1.30:1**. A tick counter is a number a visitor
+  // reads, so it answers to the 4.5:1 floor like every other string on this
+  // canvas. `--tb-ink` on `hudPlate` is 17.87:1.
   arcadeText(
     ctx,
     theme,
@@ -1028,7 +1088,7 @@ function drawCentreColumn(
     centre,
     HUD_CALLOUT_BASELINE,
     'center',
-    theme.muted,
+    theme.ink,
   );
 }
 

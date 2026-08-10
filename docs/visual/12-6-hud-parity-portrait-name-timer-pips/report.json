@@ -1,6 +1,6 @@
 {
   "label": "12-6-hud-parity-portrait-name-timer-pips",
-  "ranAt": "2026-08-10T13:54:11.850Z",
+  "ranAt": "2026-08-10T14:23:50.548Z",
   "checks": [
     {
       "id": "hidden-screens-are-idle-on-load-desktop",
@@ -45,22 +45,22 @@
     {
       "id": "canvas-not-blank-desktop",
       "ok": true,
-      "detail": "3 canvas(es), ink app:97.5% arcade:97.8% spectate:97.9%"
+      "detail": "3 canvas(es), ink app:79.6% arcade:80.0% spectate:80.0%"
     },
     {
       "id": "fighters-inside-frame-desktop",
       "ok": true,
-      "detail": "app edge=0 span=377..551 of 960 | arcade edge=0 span=435..596 of 960 | spectate edge=0 span=417..533 of 960"
+      "detail": "app edge=0 span=377..551 of 960 | arcade edge=0 span=454..596 of 960 | spectate edge=0 span=406..548 of 960"
     },
     {
       "id": "fight-is-centred-desktop",
       "ok": true,
-      "detail": "app ink centre 464 of 960 | arcade ink centre 516 of 960 | spectate ink centre 475 of 960"
+      "detail": "app ink centre 464 of 960 | arcade ink centre 525 of 960 | spectate ink centre 477 of 960"
     },
     {
       "id": "spectate-animates",
       "ok": true,
-      "detail": "hash 226921475 -> -1913044408"
+      "detail": "hash -190235939 -> -336198943"
     },
     {
       "id": "hidden-screens-are-idle-desktop",
@@ -70,12 +70,12 @@
     {
       "id": "hud-has-all-five",
       "ok": true,
-      "detail": "11 regions, all inked: p1-portrait:336 p1-name:394 p1-health:1330 p1-meter:1379 p1-pips:160 p2-portrait:336 p2-name:343 p2-health:1330 p2-meter:1379 p2-pips:160 timer:400"
+      "detail": "/replay 11 regions ok (portrait colours 1460/1493, timer gold 124) | /play 11 regions ok (portrait colours 1457/1490, timer gold 78) | /watch 11 regions ok (portrait colours 1457/1490, timer gold 113)"
     },
     {
       "id": "hud-no-overlap",
       "ok": true,
-      "detail": "6 row spans disjoint; 0 bar pixels in the readout's rows"
+      "detail": "6 row spans disjoint; 0 bar pixels in the callout's rows and 0 in the readout's"
     },
     {
       "id": "hud-timer-counts-down",
@@ -130,7 +130,7 @@
     {
       "id": "canvas-not-blank-mobile",
       "ok": true,
-      "detail": "3 canvas(es), ink app:97.5% arcade:97.4% spectate:98.0%"
+      "detail": "3 canvas(es), ink app:79.6% arcade:79.5% spectate:81.0%"
     },
     {
       "id": "fighters-inside-frame-mobile",
