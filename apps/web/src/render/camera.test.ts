@@ -194,6 +194,8 @@ describe('degenerate inputs draw something rather than nothing', () => {
 });
 
 describe('applyCamera', () => {
+  const GROUND_Y = 360;
+
   function recording(): Canvas2D & { readonly calls: readonly string[] } {
     const calls: string[] = [];
     return {
@@ -203,20 +205,74 @@ describe('applyCamera', () => {
     } as unknown as Canvas2D & { readonly calls: readonly string[] };
   }
 
+  /**
+   * A surface that *applies* the transform instead of recording it, and reports
+   * where a drawn rect landed.
+   *
+   * The first draft of the two cases below modelled the transform in the test
+   * and asserted the model, which an independent review correctly called a
+   * tautology: `(groundY - groundY) * scale + groundY === groundY` is true for
+   * every scale and never calls `applyCamera` at all. This runs the real
+   * function over a real 2D affine view -- the same arithmetic `hero/raster.ts`
+   * implements -- so the anchor is asserted rather than restated.
+   */
+  function tracking(): Canvas2D & { readonly rects: { x: number; y: number }[] } {
+    const view = { dx: 0, dy: 0, sx: 1, sy: 1 };
+    const rects: { x: number; y: number }[] = [];
+    return {
+      rects,
+      translate: (x: number, y: number) => {
+        view.dx += view.sx * x;
+        view.dy += view.sy * y;
+      },
+      scale: (x: number, y: number) => {
+        view.sx *= x;
+        view.sy *= y;
+      },
+      fillRect: (x: number, y: number) => {
+        rects.push({ x: view.dx + view.sx * x, y: view.dy + view.sy * y });
+      },
+    } as unknown as Canvas2D & { readonly rects: { x: number; y: number }[] };
+  }
+
   it('uses only transform calls the hero raster also implements', () => {
     const ctx = recording();
-    applyCamera(ctx, { x: 480, scale: 0.75 }, VIEWPORT, 360);
+    applyCamera(ctx, { x: 480, scale: 0.75 }, VIEWPORT, GROUND_Y);
     expect(ctx.calls).toStrictEqual(['translate 480 360', 'scale 0.75 0.75', 'translate -480 -360']);
   });
 
-  it('pins the floor: the ground line maps to itself at every scale', () => {
-    // Modelled rather than asserted through a canvas, because this is the one
-    // property the anchor exists for: a zoom about the frame's centre would
-    // slide the floor up and down as the fighters closed.
-    for (const scale of [0.5, 0.75, CAMERA_MAX_SCALE]) {
-      const groundY = 360;
-      const y = (groundY - groundY) * scale + groundY;
-      expect(y).toBe(groundY);
+  it('pins the floor: a point on the ground line lands on it at every scale', () => {
+    // The one property the anchor exists for. Anchoring on the frame's centre
+    // instead -- the obvious alternative -- would slide the ground up and down
+    // the canvas as the fighters closed, which is the one thing in a fighting
+    // game that must never move.
+    for (const scale of [1 / 2, 0.75, CAMERA_MAX_SCALE]) {
+      const ctx = tracking();
+      applyCamera(ctx, { x: 300, scale }, VIEWPORT, GROUND_Y);
+      ctx.fillRect(300, GROUND_Y, 1, 1);
+      expect(ctx.rects[0]).toStrictEqual({ x: VIEWPORT.width / 2, y: GROUND_Y });
     }
+  });
+
+  it('scales heights about the floor, so a head moves and the feet do not', () => {
+    const ctx = tracking();
+    applyCamera(ctx, { x: 480, scale: 1 / 2 }, VIEWPORT, GROUND_Y);
+    ctx.fillRect(480, GROUND_Y - 200, 1, 1);
+    expect(ctx.rects[0]).toStrictEqual({ x: VIEWPORT.width / 2, y: GROUND_Y - 100 });
+  });
+
+  it('puts a world x where the camera says, which is what the clamp cases assume', () => {
+    // Ties `screenXOf` -- the model every case above is written against -- to
+    // the function under test. Without this the suite would validate the model.
+    const camera = cameraAt(320, 640);
+    const ctx = tracking();
+    applyCamera(ctx, camera, VIEWPORT, GROUND_Y);
+    for (const units of [320, 640, 0, 960]) {
+      const world = worldXFor(units, CONFIG, VIEWPORT);
+      ctx.fillRect(world, GROUND_Y, 1, 1);
+    }
+    expect(ctx.rects.map((rect) => rect.x)).toStrictEqual(
+      [320, 640, 0, 960].map((units) => screenXOf(worldXFor(units, CONFIG, VIEWPORT), camera)),
+    );
   });
 });

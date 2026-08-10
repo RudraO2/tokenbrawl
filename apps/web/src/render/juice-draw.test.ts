@@ -23,7 +23,7 @@ import {
   type JuiceKind,
 } from './juice';
 import { ARENA_PALETTE } from './arena-palette';
-import { FLOOR_INSET } from './renderer';
+import { FLOOR_INSET, cameraForFrame } from './renderer';
 import { DEFAULT_ROSTER, ROSTER_NAMES, auraFor } from './roster';
 import { THEME } from './theme';
 import { ULT_PARTS, createUltSheet, validateUltSheetLayout, type UltSheet } from './ult-sheet';
@@ -235,6 +235,104 @@ describe('drawJuicedFrame composites the shake around an untouched drawFrame', (
     expect(still.calls.map((call) => call.op)).toStrictEqual(shaken.calls.map((call) => call.op));
     const translate = still.calls.find((call) => call.op === 'translate');
     expect(translate?.args).toStrictEqual([0, 0]);
+  });
+});
+
+describe('the juice is composited in the camera the fighters were drawn in (12.3)', () => {
+  /**
+   * The gap an independent review of Story 12.3 found, closed.
+   *
+   * Replacing `applyCamera` in `drawJuicedFrame` with a no-op left the entire
+   * suite green -- 1157 tests -- and the visual gate could not see it either,
+   * because the gate never fires an Ultimate and never samples a spark frame.
+   * The failure that would have shipped is specific and silent: every spark,
+   * damage number, impact cell and Ultimate beam drawn at the pre-camera 1:1
+   * position, so a beam fired by a fighter standing at world 900 lands hundreds
+   * of pixels away from the fighter that threw it. The call sequence would be
+   * unchanged and every coordinate would still be the "right" number.
+   */
+  const noise = juiceFrame({
+    sparks: [{ positionBasisPoints: 9_000, offsetPx: 0, heightPx: 96, sizePx: 5 }],
+    damageNumbers: [{ damage: 9, positionBasisPoints: 9_000, heightPx: 120 }],
+  });
+
+  /** The `translate`/`scale`/`translate` triple `applyCamera` issues, wherever it appears. */
+  function cameraTriples(calls: readonly Call[]): readonly (readonly (number | string)[])[] {
+    const triples: (readonly (number | string)[])[] = [];
+    for (const [index, call] of calls.entries()) {
+      if (call.op !== 'scale') continue;
+      const before = calls[index - 1];
+      const after = calls[index + 1];
+      if (before?.op !== 'translate' || after?.op !== 'translate') continue;
+      triples.push([...before.args, ...call.args, ...after.args]);
+    }
+    return triples;
+  }
+
+  it('puts the overlay under the same camera the renderer just used', () => {
+    const ctx = createRecordingCanvas();
+    drawJuicedFrame(ctx, FRAME, noise, OPTIONS);
+    const camera = cameraForFrame(FRAME, DEFAULT_FIGHTER_CONFIG, VIEWPORT);
+    const expected = [
+      VIEWPORT.width / 2,
+      GROUND_Y,
+      camera.scale,
+      camera.scale,
+      -camera.x,
+      -GROUND_Y,
+    ];
+
+    // Twice: once by `drawFrame` around the fighters, once here around the
+    // juice. Identical, because both derive it from the same frame.
+    expect(cameraTriples(ctx.calls)).toStrictEqual([expected, expected]);
+  });
+
+  it('draws the sparks and the numbers inside that transform, not after it', () => {
+    const ctx = createRecordingCanvas();
+    drawJuicedFrame(ctx, FRAME, noise, OPTIONS);
+
+    const scales = ctx.calls
+      .map((call, index) => ({ call, index }))
+      .filter(({ call }) => call.op === 'scale');
+    expect(scales).toHaveLength(2);
+    const overlayCameraAt = scales[1].index;
+
+    // Between the overlay's camera and the `restore` that closes it sit both
+    // marks: the spark's square and the damage number. `findIndex` on the bare
+    // op would find the HUD's own `fillText`, which `drawFrame` drew several
+    // hundred calls earlier and in screen space, so the window is what makes
+    // this an assertion about the overlay rather than about the HUD.
+    const closesAt = ctx.calls.findIndex(
+      (call, index) => index > overlayCameraAt && call.op === 'restore',
+    );
+    expect(closesAt).toBeGreaterThan(overlayCameraAt);
+    const inside = ctx.calls.slice(overlayCameraAt, closesAt);
+    expect(inside.some((call) => call.op === 'fillRect')).toBe(true);
+    expect(inside.some((call) => call.op === 'fillText' && String(call.args[0]) === '9')).toBe(
+      true,
+    );
+
+    // And nothing after the compositor inherits an arena transform.
+    expect(ctx.calls[ctx.calls.length - 1].op).toBe('restore');
+  });
+
+  it('moves the overlay with the fight: a corner exchange transforms differently', () => {
+    const cornered: RenderFrame = {
+      ...FRAME,
+      from: stateWith({ position: [920, 960] }),
+      to: stateWith({ position: [920, 960], health: [100, 91] }),
+    };
+    const centre = createRecordingCanvas();
+    const corner = createRecordingCanvas();
+    drawJuicedFrame(centre, FRAME, noise, OPTIONS);
+    drawJuicedFrame(corner, cornered, noise, OPTIONS);
+
+    // Same call sequence -- the camera never changes *what* is drawn -- and a
+    // different transform, which is the whole of it.
+    expect(corner.calls.map((call) => call.op)).toStrictEqual(
+      centre.calls.map((call) => call.op),
+    );
+    expect(cameraTriples(corner.calls)).not.toStrictEqual(cameraTriples(centre.calls));
   });
 });
 

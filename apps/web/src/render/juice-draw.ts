@@ -68,6 +68,17 @@ import type { VfxPose, VfxSheet } from './vfx-sheet';
  * then clamped so no square is ever drawn outside the stage, and both are
  * rounded to whole pixels: a rect on a half-pixel is a blur, which is exactly
  * what the flat-block house style is not.
+ *
+ * **Story 12.3 changed what "outside the stage" means here, and left the
+ * clamps alone deliberately.** Everything this function draws is now inside the
+ * camera transform, so `0..viewport.width` is no longer the frame's edges -- it
+ * is the *arena*, `arenaMin..arenaMax`, which under the camera sits inside the
+ * frame with stage margin either side. That is the better bound of the two: a
+ * spark belongs where the fight is, and the old reading let one sit against the
+ * frame edge with no fighter anywhere near it. The same is true of
+ * `NUMBER_MARGIN_PX` below and of the beam's clamps in `drawCinematicStage`.
+ * A later story that wants an effect to reach the frame's true edge has to draw
+ * it outside the camera, the way `drawCinematicPlate` already does.
  */
 function paintSparks(
   ctx: Canvas2D,

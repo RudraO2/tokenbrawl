@@ -26,4 +26,31 @@ export default defineConfig({
   build: {
     outDir: 'dist',
   },
+  test: {
+    /**
+     * 30s rather than Vitest's 5s default, for this workspace only.
+     *
+     * Story 12.1 recorded the problem and commit 76e953f took the first bite:
+     * a handful of cases here walk an entire replay film, drawing every frame
+     * through the real renderer against a recording surface, and they finish in
+     * under two seconds alone. Under the parallel load of 52 files and 1166
+     * tests they do not -- `hero.test.ts`'s drift gate measured 5.9s and 6.3s,
+     * and Story 12.3's new camera cases pushed four more over the line
+     * (`hero-artefact`'s GIF rebuild, two in `cinematic-neutrality`, one in
+     * `juice-neutrality`), with *which* four varying run to run.
+     *
+     * 76e953f raised one case rather than the project, and said why: a blanket
+     * timeout hides a genuine hang. That was right at one case and stops being
+     * right at five, because the set is unstable -- every remaining film-walking
+     * case is one new test file away from joining it, and a suite that is green
+     * most of the time teaches the next session to shrug at a red one. Epic 12
+     * runs a story per chat with no orchestrator re-running the verify block, so
+     * a red suite is the only thing between a wrong claim and a commit.
+     *
+     * What is given up is precision, not detection: a hung test still fails, 25
+     * seconds later. "Five seconds" was never a hang detector for a case whose
+     * honest cost is two.
+     */
+    testTimeout: 30_000,
+  },
 });

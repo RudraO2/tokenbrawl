@@ -1,0 +1,75 @@
+{
+  "label": "12-3-camera-follow-clamp-and-zoom",
+  "ranAt": "2026-08-10T10:16:32.569Z",
+  "checks": [
+    {
+      "id": "arcade-live-canvas",
+      "ok": true,
+      "detail": "started=true canvases=1 visible=1"
+    },
+    {
+      "id": "camera-frames-the-fight",
+      "ok": true,
+      "detail": "arcade middle=3280 outerFifth=0 span=322..629 (32.0% of 960)"
+    },
+    {
+      "id": "arcade-input-moves-fighter",
+      "ok": true,
+      "detail": "arena hash 74500624 -> 657647151"
+    },
+    {
+      "id": "fighters-inside-frame-at-the-wall",
+      "ok": true,
+      "detail": "arcade edge=0 span=435..596 of 960"
+    },
+    {
+      "id": "canvas-not-blank-desktop",
+      "ok": true,
+      "detail": "3 canvas(es), ink app:98.0% arcade:98.3% spectate:98.8%"
+    },
+    {
+      "id": "fighters-inside-frame-desktop",
+      "ok": true,
+      "detail": "app edge=0 span=387..584 of 960 | arcade edge=0 span=454..596 of 960 | spectate edge=0 span=416..534 of 960"
+    },
+    {
+      "id": "fight-is-centred-desktop",
+      "ok": true,
+      "detail": "app ink centre 486 of 960 | arcade ink centre 525 of 960 | spectate ink centre 475 of 960"
+    },
+    {
+      "id": "spectate-animates",
+      "ok": true,
+      "detail": "hash 1418129170 -> -650776072"
+    },
+    {
+      "id": "no-horizontal-overflow",
+      "ok": false,
+      "detail": "scrollWidth=992 clientWidth=390 widest: canvas.tb-spectate-canvas@992px, p.tb-tagline@409px"
+    },
+    {
+      "id": "canvas-not-blank-mobile",
+      "ok": true,
+      "detail": "3 canvas(es), ink app:98.0% arcade:0.0% spectate:98.4%"
+    },
+    {
+      "id": "fighters-inside-frame-mobile",
+      "ok": true,
+      "detail": "app edge=0 span=387..584 of 960 | spectate edge=0 span=399..584 of 960"
+    },
+    {
+      "id": "fight-is-centred-mobile",
+      "ok": true,
+      "detail": "app ink centre 486 of 960 | spectate ink centre 492 of 960"
+    },
+    {
+      "id": "console-clean",
+      "ok": true,
+      "detail": "no errors or warnings"
+    }
+  ],
+  "waived": [
+    "no-horizontal-overflow"
+  ],
+  "staleWaivers": []
+}

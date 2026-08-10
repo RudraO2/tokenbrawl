@@ -403,6 +403,227 @@ const dispatchKeydown = (selector, key) => `(() => {
 const ARENA_TOP_PX = 130;
 
 /**
+ * The arena's lower bound, in backbuffer pixels from the bottom.
+ *
+ * `renderer.ts`'s `FLOOR_INSET` is 40: the floor rule is drawn at
+ * `height - 40` in `theme.ink`, which is the brightest value on the canvas and
+ * spans the frame edge to edge. Sampling through it would make every ink check
+ * below report the floor rather than a fighter, so the arena band stops
+ * strictly above it -- which is also exactly what Story 12.3's first acceptance
+ * criterion asks for ("above the floor line").
+ */
+const FLOOR_INSET_PX = 40;
+
+/**
+ * Max channel above which a pixel counts as sprite ink.
+ *
+ * Measured, not guessed. On the Story 12-2 captures the backdrop's brightest
+ * pixel anywhere in the arena band is 140 (the dimmed dusk mountains; `dim` is
+ * 0.55 toward `#0a0a0a`) while the fighters carry thousands of pixels above
+ * 190. 160 sits in the gap with room on both sides, so the check separates a
+ * fighter from the scenery it is standing in front of rather than measuring
+ * total ink -- which `canvas-not-blank` already does and which cannot tell a
+ * drawn fighter from a drawn mountain.
+ */
+const SPRITE_INK_MIN = 160;
+
+/** How many columns at each edge count as "the frame is cutting the fighter". */
+const EDGE_COLUMNS = 4;
+
+/**
+ * Where sprite ink falls across an arena canvas, per visible canvas.
+ *
+ * One probe, two checks. `fighters-inside-frame` reads `edgeInk`; the framing
+ * check reads `outerFifthInk` and `middleInk`. Splitting them into two page
+ * evaluations would sample two different frames of a running fight, and the
+ * whole point of both is that they describe the same picture.
+ *
+ * ## The Ultimate cinematic, and why it is excluded rather than tolerated
+ *
+ * The plate half of the cinematic is **screen space by design**
+ * (`juice-draw.ts`, `drawCinematicPlate`): the caster's portrait slides in from
+ * `viewport.width + portraitWidth` and is therefore *supposed* to cross the
+ * frame's right edge, the orb blooms at its hand, and the slam fills the whole
+ * viewport. None of that is a fighter clipped by the frame, and a check that
+ * counted it would fail at random -- which is exactly what happened on the
+ * first run of these checks: `#spectate` reported `edge=27@255 span=403..959`
+ * on one run and `edge=0 span=382..563` on the next, because Spectate autoplays
+ * a randomly chosen Match and one of them threw an Ultimate as the probe fired.
+ * A gate that fails by luck is worse than no gate.
+ *
+ * So a canvas whose frame is *letterboxed* is skipped, and the skip is
+ * reported rather than silent. The detector is the plate's own bottom bar:
+ * `ARENA_PALETTE.curtain` is `#000000` exactly, and nothing else on this canvas
+ * paints exact black -- the ground is `#0a0a0a` and the backdrop dims toward it
+ * without reaching it. The slam's full-viewport flash is caught separately, by
+ * counting rows that are ink nearly all the way across; a canvas that is mostly
+ * such rows is a full-frame effect rather than a fight.
+ *
+ * Both exclusions are one-way: a canvas that is skipped contributes nothing,
+ * and a check every canvas skipped fails rather than passing on an empty set.
+ */
+const arenaInkProbe = (hostSelector) => `(() => {
+  const scope = ${hostSelector === null ? 'document' : `document.querySelector(${JSON.stringify(hostSelector)})`};
+  if (!scope) return [];
+  return [...scope.querySelectorAll('canvas')]
+    .filter((c) => {
+      const rect = c.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0;
+    })
+    .map((c) => {
+      const host = c.closest('#app, #arcade, #spectate');
+      const out = {
+        host: host ? host.id : null,
+        width: c.width,
+        edgeInk: 0,
+        brightestEdge: 0,
+        outerFifthInk: 0,
+        middleInk: 0,
+        leftmost: null,
+        rightmost: null,
+        samples: [],
+        cinematic: false,
+      };
+      const ctx = c.getContext('2d');
+      const top = ${ARENA_TOP_PX};
+      const bottom = c.height - ${FLOOR_INSET_PX};
+      if (!ctx || bottom <= top) return out;
+      const rowIsFullFrame = Math.floor(c.width * 0.9);
+
+      // The letterbox, read off the canvas's own bottom row.
+      const lastRow = ctx.getImageData(0, c.height - 1, c.width, 1).data;
+      let black = 0;
+      for (let x = 0; x < c.width; x += 1) {
+        const i = x * 4;
+        if (lastRow[i] === 0 && lastRow[i + 1] === 0 && lastRow[i + 2] === 0) black += 1;
+      }
+      if (black >= rowIsFullFrame) {
+        out.cinematic = true;
+        return out;
+      }
+
+      const data = ctx.getImageData(0, top, c.width, bottom - top).data;
+      const fifth = Math.floor(c.width / 5);
+      let fullFrameRows = 0;
+      for (let y = 0; y < bottom - top; y += 1) {
+        const row = [];
+        for (let x = 0; x < c.width; x += 1) {
+          const i = (y * c.width + x) * 4;
+          if (data[i + 3] <= 8) continue;
+          const m = Math.max(data[i], data[i + 1], data[i + 2]);
+          if (m >= ${SPRITE_INK_MIN}) row.push([x, m]);
+        }
+        if (row.length >= rowIsFullFrame) {
+          fullFrameRows += 1;
+          continue;
+        }
+        for (const [x, m] of row) {
+          if (x < ${EDGE_COLUMNS} || x >= c.width - ${EDGE_COLUMNS}) {
+            out.edgeInk += 1;
+            if (m > out.brightestEdge) out.brightestEdge = m;
+            if (out.samples.length < 6) {
+              const i2 = (y * c.width + x) * 4;
+              out.samples.push(x + ',' + (y + top) + ':' + data[i2] + '/' + data[i2 + 1] + '/' + data[i2 + 2]);
+            }
+          }
+          if (x < fifth || x >= c.width - fifth) out.outerFifthInk += 1;
+          else out.middleInk += 1;
+          if (out.leftmost === null || x < out.leftmost) out.leftmost = x;
+          if (out.rightmost === null || x > out.rightmost) out.rightmost = x;
+        }
+      }
+      // A canvas that is mostly full-frame rows is the slam, not a fight.
+      if (fullFrameRows * 2 >= bottom - top) out.cinematic = true;
+      return out;
+    });
+})()`;
+
+/** One line per canvas, for a failure message that does not need a second run. */
+const describeInk = (canvases) =>
+  canvases
+    .map(
+      (c) =>
+        `${c.host ?? '?'} edge=${c.edgeInk}${c.edgeInk > 0 ? `@${c.brightestEdge} [${(c.samples ?? []).join(' ')}]` : ''} span=${String(c.leftmost)}..${String(c.rightmost)} of ${c.width}`,
+    )
+    .join(' | ');
+
+/** A canvas with no sprite ink at all passes every ink *absence* check vacuously. */
+const hasSpriteInk = (c) => c.leftmost !== null && c.rightmost !== null;
+
+/**
+ * Canvases a framing check can speak about, and a verdict that is never vacuous.
+ *
+ * `judged` drops any canvas showing an Ultimate cinematic (see `arenaInkProbe`).
+ * `verdict` then fails if *every* canvas was dropped, so "the cinematic was on
+ * screen on all three surfaces" reports as a failure to measure rather than as
+ * a pass -- the same rule the harness catch at the bottom of this file follows.
+ */
+const judged = (canvases) => canvases.filter((c) => !c.cinematic);
+
+const verdict = (canvases, holds) => {
+  const measured = judged(canvases);
+  return measured.length > 0 && measured.every(holds);
+};
+
+const skipNote = (canvases) => {
+  const skipped = canvases.filter((c) => c.cinematic).map((c) => c.host ?? '?');
+  return skipped.length === 0 ? '' : ` (cinematic, not judged: ${skipped.join(', ')})`;
+};
+
+const spanOf = (c) => (hasSpriteInk(c) ? c.rightmost - c.leftmost : 0);
+const spanCentreOf = (c) => (hasSpriteInk(c) ? (c.leftmost + c.rightmost) / 2 : 0);
+
+/**
+ * The widest the pair may read, as a fraction of the canvas.
+ *
+ * Measured off `<REF>/shots/04_local_match.png`, where the two fighters and the
+ * gap between them occupy about a third of the frame's width. This build at 1:1
+ * -- the mapping this story replaces -- put the same pair across 44% of the
+ * frame at the opening positions; with the camera it reads at 26%. The bound
+ * sits between the two with margin on both sides, which is what makes the check
+ * fail on the defect rather than merely describe the fix.
+ *
+ * An independent review found the first version of this check -- "some ink in
+ * the middle three fifths, none in the outer fifth" -- passing unchanged on the
+ * pre-camera build, because at the *opening* positions the old mapping put the
+ * pair at 216..744 of 960, which is inside the middle three fifths. The story's
+ * acceptance criterion says that much and no more; this is the same criterion
+ * with the number that separates the two pictures added to it.
+ */
+const MAX_PAIR_SPAN_RATIO = 0.35;
+
+/** Ink below this is a stray pixel, not a pair of fighters, and must not satisfy "the fight is framed". */
+const MIN_FIGHT_INK = 500;
+
+const framesTheFight = (c) =>
+  hasSpriteInk(c) &&
+  c.outerFifthInk === 0 &&
+  c.middleInk >= MIN_FIGHT_INK &&
+  spanOf(c) <= c.width * MAX_PAIR_SPAN_RATIO;
+
+const describeFraming = (c) =>
+  `${c.host ?? '?'} middle=${c.middleInk} outerFifth=${c.outerFifthInk} span=${String(c.leftmost)}..${String(c.rightmost)} (${((spanOf(c) / c.width) * 100).toFixed(1)}% of ${c.width})`;
+
+/**
+ * Whether the fight sits in the middle third of the frame.
+ *
+ * The universal half of the framing check, and the only half that can be asked
+ * of `#app` and `#spectate`: both autoplay, so neither is ever caught at a
+ * Match's opening positions, and the span bound above is a statement about the
+ * opening. What *is* true of every frame under a clamped camera is that the
+ * pair's centre of ink stays near the frame's centre -- which is exactly the
+ * property Story 12.1 found violated ("fighters sit far right with roughly four
+ * fifths of the frame empty") on a surface that never leaves its opening third.
+ */
+const fightIsCentred = (c) =>
+  hasSpriteInk(c) &&
+  spanCentreOf(c) >= c.width / 3 &&
+  spanCentreOf(c) <= (c.width * 2) / 3;
+
+const describeCentring = (c) =>
+  `${c.host ?? '?'} ink centre ${hasSpriteInk(c) ? spanCentreOf(c).toFixed(0) : 'none'} of ${c.width}`;
+
+/**
  * The pixel hash of the arena region (below the HUD) of the single visible
  * canvas under `host`, or `null` when there is none.
  */
@@ -547,6 +768,24 @@ async function main() {
           `started=${String(started.ok)} canvases=${arcade.canvases} visible=${arcade.visible}`,
         );
 
+        // --- C1c camera-frames-the-fight (Story 12.3) ----------------------
+        // Sampled here, before a single key is pressed, because this is the
+        // only moment any surface is reliably at a Match's *opening positions*
+        // -- the arcade Match hangs at its first Decision Point waiting for the
+        // visitor (Story 12.2), so what is on screen is `startPosition`, which
+        // is [320, 640] of a 0..960 arena. With the fighters 1:1 on the canvas
+        // that put them in the middle third with the outer thirds empty; the
+        // camera has to bring them in without pushing either into the outer
+        // fifth on the way.
+        const opening = await cdp.evaluate(arenaInkProbe('#arcade'));
+        record(
+          'camera-frames-the-fight',
+          verdict(opening, framesTheFight),
+          opening.length === 0
+            ? 'no visible canvas under #arcade to frame'
+            : `${opening.map(describeFraming).join(' | ')}${skipNote(opening)}`,
+        );
+
         // --- C1b arcade-input-moves-fighter (Story 12.2) -------------------
         // The Match is now waiting on the visitor at its first Decision Point.
         // Thirty real ArrowRight keydowns walk the fighter across the stage; the
@@ -575,6 +814,22 @@ async function main() {
             ? 'no visible canvas under #arcade to drive'
             : `arena hash ${arcadeHashBefore} -> ${arcadeHashAfter}`,
         );
+
+        // --- C1d fighters-inside-frame, at the wall (Story 12.3) -----------
+        // Thirty ArrowRight presses is 30 * moveUnitsPerTick * ticksPerDecision
+        // past `startPosition`, which is well past `arenaMax`: the fighter is
+        // standing on the right wall. That is the case the 1:1 mapping drew
+        // centred on the canvas's right edge, with half the sprite outside the
+        // frame. Same check as the page sweep below, re-sampled where it used
+        // to fail hardest.
+        const atWall = await cdp.evaluate(arenaInkProbe('#arcade'));
+        record(
+          'fighters-inside-frame-at-the-wall',
+          verdict(atWall, (c) => hasSpriteInk(c) && c.edgeInk === 0),
+          atWall.length === 0
+            ? 'no visible canvas under #arcade'
+            : `${describeInk(atWall)}${skipNote(atWall)}`,
+        );
       }
 
       // --- C2 no-horizontal-overflow ---------------------------------------
@@ -597,6 +852,41 @@ async function main() {
         canvases.length === 0
           ? 'no canvas on the page at all'
           : `${canvases.length} canvas(es), ink ${canvases.map((c) => `${c.host ?? '?'}:${(c.inkRatio * 100).toFixed(1)}%`).join(' ')}`,
+      );
+
+      // --- C3b fighters-inside-frame (Story 12.3) ---------------------------
+      // Every visible arena canvas on the page, not just the one this story
+      // was thinking about. The clipping was a property of the coordinate
+      // mapping, so it was identical on all three surfaces, and a check that
+      // swept one of them would have gone green on a camera wired into the
+      // player and forgotten in Spectate.
+      const inkAcross = await cdp.evaluate(arenaInkProbe(null));
+      record(
+        `fighters-inside-frame-${viewport.name}`,
+        // `hasSpriteInk` is not decoration. Without it the check passes on a
+        // canvas with no fighter on it at all -- a NaN camera scale paints
+        // nothing, and `canvas-not-blank` still reports 98% ink because the
+        // backdrop is drawn in screen space and survives whatever the camera
+        // does. Two green checks over an arena with no fighters in it was the
+        // hole an independent review of this story found.
+        verdict(inkAcross, (c) => hasSpriteInk(c) && c.edgeInk === 0),
+        inkAcross.length === 0
+          ? 'no visible canvas to sample'
+          : `${describeInk(inkAcross)}${skipNote(inkAcross)}`,
+      );
+
+      // --- C3c fight-is-centred (Story 12.3) --------------------------------
+      // The framing check's universal half, on every surface. `#app` and
+      // `#spectate` autoplay and are never at a Match's opening positions, so
+      // the span bound cannot be asked of them -- but "the pair is near the
+      // middle of the picture" can, and it is the property Story 12.1 recorded
+      // as violated on `#app`.
+      record(
+        `fight-is-centred-${viewport.name}`,
+        verdict(inkAcross, fightIsCentred),
+        inkAcross.length === 0
+          ? 'no visible canvas to sample'
+          : `${inkAcross.map(describeCentring).join(' | ')}${skipNote(inkAcross)}`,
       );
 
       // --- C4 spectate-animates ---------------------------------------------

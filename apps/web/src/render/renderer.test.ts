@@ -16,7 +16,7 @@ import type { BankReading } from '../replay/token-bank';
 import { BASIS_POINTS_FULL } from '../replay/film';
 import type { Canvas2D } from './canvas2d';
 import { createBlockArtist } from './artist';
-import { drawFrame } from './renderer';
+import { FLOOR_INSET, cameraForFrame, drawFrame } from './renderer';
 import {
   ARCADE_HUD_COLOURS,
   ARMED_PULSE_HOLD_FRAMES,
@@ -277,6 +277,119 @@ describe('drawing a frame', () => {
       expect(allowed.has(call.fillStyle)).toBe(true);
       expect(allowed.has(call.strokeStyle)).toBe(true);
     }
+  });
+});
+
+describe('the camera (12.3)', () => {
+  /**
+   * These are the cases the recorders exist for.
+   *
+   * An independent review of this story found that deleting the `applyCamera`
+   * call from `drawFrame` left every test in `src/render` and `src/spectate`
+   * green -- 510 of them -- and failed only the hero GIF's byte-for-byte drift
+   * gate, whose message reads "expected 212902 to be 215489". A binary diff is
+   * not a description of what broke. So the wiring is pinned here, in the file
+   * that owns `drawFrame`'s call sequence, in terms a reader can act on.
+   */
+  const GROUND_Y = VIEWPORT.height - FLOOR_INSET;
+
+  function transformAfter(ctx: RecordingCanvas, saveIndex: number): readonly RecordedCall[] {
+    return ctx.calls().slice(saveIndex + 1, saveIndex + 4);
+  }
+
+  it('draws the fighters inside the camera transform and everything else outside it', () => {
+    const frame = frameWith(stateWith(), stateWith());
+    const ctx = draw(frame);
+    const ops = ctx.calls();
+    const camera = cameraForFrame(frame, DEFAULT_FIGHTER_CONFIG, VIEWPORT);
+
+    const saveAt = ops.findIndex((call) => call.op === 'save');
+    const restoreAt = ops.findIndex((call) => call.op === 'restore');
+    expect(saveAt).toBeGreaterThan(0);
+    expect(restoreAt).toBeGreaterThan(saveAt);
+
+    expect(transformAfter(ctx, saveAt).map((call) => [call.op, ...call.args])).toStrictEqual([
+      ['translate', VIEWPORT.width / 2, GROUND_Y],
+      ['scale', camera.scale, camera.scale],
+      ['translate', -camera.x, -GROUND_Y],
+    ]);
+
+    // The floor rule is laid before the camera, because it spans the frame
+    // however the camera is pointed.
+    const floorAt = ops.findIndex(
+      (call) =>
+        call.op === 'fillRect' && call.args[1] === GROUND_Y && call.args[2] === VIEWPORT.width,
+    );
+    expect(floorAt).toBeGreaterThanOrEqual(0);
+    expect(floorAt).toBeLessThan(saveAt);
+
+    // Both fighter bodies are inside it.
+    const bodies = ops
+      .map((call, index) => ({ call, index }))
+      .filter(({ call }) => call.op === 'fillRect' && call.args[3] === 160);
+    expect(bodies.length).toBeGreaterThanOrEqual(2);
+    for (const { index } of bodies) {
+      expect(index).toBeGreaterThan(saveAt);
+      expect(index).toBeLessThan(restoreAt);
+    }
+
+    // And the HUD is outside it, which is what keeps its screen coordinates
+    // unchanged by any camera value.
+    const tickAt = ops.findIndex(
+      (call) => call.op === 'fillText' && String(call.args[0]).startsWith('TICK'),
+    );
+    expect(tickAt).toBeGreaterThan(restoreAt);
+  });
+
+  it('applies the camera the frame asks for, not a fixed one', () => {
+    // Two frames the old 1:1 mapping would have drawn with the same (absent)
+    // transform, and which the camera has to distinguish: an opening pair, and
+    // a pair jammed into the right corner.
+    const opening = frameWith(stateWith(), stateWith());
+    const corner = frameWith(
+      stateWith({ position: [920, 960] }),
+      stateWith({ position: [920, 960] }),
+    );
+
+    const openingTransform = (() => {
+      const ctx = draw(opening);
+      return transformAfter(ctx, ctx.calls().findIndex((call) => call.op === 'save'));
+    })();
+    const cornerTransform = (() => {
+      const ctx = draw(corner);
+      return transformAfter(ctx, ctx.calls().findIndex((call) => call.op === 'save'));
+    })();
+
+    expect(openingTransform).not.toStrictEqual(cornerTransform);
+    expect(cornerTransform[1].args[0]).toBeGreaterThan(Number(openingTransform[1].args[0]));
+    expect(Number(cornerTransform[2].args[0])).toBeLessThan(
+      Number(openingTransform[2].args[0]),
+    );
+  });
+
+  it('leaves the HUD in screen space, whatever the camera is doing', () => {
+    // The test plan's fourth line, as an assertion: two frames whose fighters
+    // are as far apart as this arena allows, drawn at different camera scales
+    // and different camera centres, must produce byte-identical HUD calls.
+    const hudOf = (frame: RenderFrame): readonly (string | number)[][] => {
+      const ops = draw(frame).calls();
+      const restoreAt = ops.findIndex((call) => call.op === 'restore');
+      return ops.slice(restoreAt + 1).map((call) => [call.op, ...call.args]);
+    };
+    expect(hudOf(frameWith(stateWith(), stateWith()))).toStrictEqual(
+      hudOf(frameWith(stateWith({ position: [920, 960] }), stateWith({ position: [920, 960] }))),
+    );
+  });
+
+  it('balances its save and restore, so nothing after it inherits the transform', () => {
+    const ops = draw(frameWith(stateWith(), stateWith())).calls();
+    let depth = 0;
+    for (const call of ops) {
+      if (call.op === 'save') depth += 1;
+      if (call.op === 'restore') depth -= 1;
+      expect(depth).toBeGreaterThanOrEqual(0);
+    }
+    expect(depth).toBe(0);
   });
 });
 
