@@ -1,6 +1,6 @@
 {
   "label": "12-4-app-shell-and-screen-router",
-  "ranAt": "2026-08-10T12:21:26.846Z",
+  "ranAt": "2026-08-10T12:27:40.604Z",
   "checks": [
     {
       "id": "hidden-screens-are-idle-on-load-desktop",
@@ -35,32 +35,32 @@
     {
       "id": "arcade-input-moves-fighter",
       "ok": true,
-      "detail": "arena hash 74500624 -> -1698331857"
+      "detail": "arena hash 74500624 -> 349394729"
     },
     {
       "id": "fighters-inside-frame-at-the-wall",
       "ok": true,
-      "detail": "arcade edge=0 span=435..596 of 960"
+      "detail": "arcade edge=0 span=310..596 of 960"
     },
     {
       "id": "canvas-not-blank-desktop",
       "ok": true,
-      "detail": "3 canvas(es), ink app:98.1% arcade:98.4% spectate:97.9%"
+      "detail": "3 canvas(es), ink app:98.1% arcade:98.4% spectate:67.2%"
     },
     {
       "id": "fighters-inside-frame-desktop",
       "ok": true,
-      "detail": "app edge=0 span=377..551 of 960 | arcade edge=0 span=454..596 of 960 | spectate edge=0 span=325..627 of 960"
+      "detail": "app edge=0 span=377..551 of 960 | arcade edge=0 span=435..596 of 960 | spectate edge=0 span=null..null of 960 (cinematic, not judged: spectate)"
     },
     {
       "id": "fight-is-centred-desktop",
       "ok": true,
-      "detail": "app ink centre 464 of 960 | arcade ink centre 525 of 960 | spectate ink centre 476 of 960"
+      "detail": "app ink centre 464 of 960 | arcade ink centre 516 of 960 | spectate ink centre none of 960 (cinematic, not judged: spectate)"
     },
     {
       "id": "spectate-animates",
       "ok": true,
-      "detail": "hash -227331676 -> -2000032743"
+      "detail": "hash 1994641731 -> -1209613423"
     },
     {
       "id": "hidden-screens-are-idle-desktop",
@@ -105,17 +105,17 @@
     {
       "id": "canvas-not-blank-mobile",
       "ok": true,
-      "detail": "3 canvas(es), ink app:98.1% arcade:97.9% spectate:99.2%"
+      "detail": "3 canvas(es), ink app:98.1% arcade:97.9% spectate:99.0%"
     },
     {
       "id": "fighters-inside-frame-mobile",
       "ok": true,
-      "detail": "app edge=0 span=377..551 of 960 | arcade edge=0 span=322..629 of 960 | spectate edge=0 span=387..584 of 960"
+      "detail": "app edge=0 span=377..551 of 960 | arcade edge=0 span=322..629 of 960 | spectate edge=0 span=395..533 of 960"
     },
     {
       "id": "fight-is-centred-mobile",
       "ok": true,
-      "detail": "app ink centre 464 of 960 | arcade ink centre 476 of 960 | spectate ink centre 486 of 960"
+      "detail": "app ink centre 464 of 960 | arcade ink centre 476 of 960 | spectate ink centre 464 of 960"
     },
     {
       "id": "hidden-screens-are-idle-mobile",

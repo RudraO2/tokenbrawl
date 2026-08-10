@@ -424,6 +424,28 @@ const CHARACTER_SELECT_PROBE = `(() => {
   return { reached: true, screen: shown.id, found: roster.filter((name) => text.includes(name)) };
 })()`;
 
+/**
+ * Scrolls a surface's *canvas* to the middle of the viewport, or the surface
+ * itself when it has none.
+ *
+ * `scrollIntoView(selector)` centres the whole section, and on a 390px phone a
+ * section taller than the viewport centres on whatever happens to be in its
+ * middle -- which on `#app` is the reasoning panel. Story 12.3's finding had to
+ * record that its mobile replay capture showed no arena at all, and the run was
+ * green because the framing was measured separately. A capture that does not
+ * show the thing it is named after is not evidence.
+ */
+const scrollSurfaceIntoView = (selector) => `(() => {
+  const host = document.querySelector(${JSON.stringify(selector)});
+  if (!host) return false;
+  const canvas = [...host.querySelectorAll('canvas')].find((c) => {
+    const rect = c.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+  });
+  (canvas ?? host).scrollIntoView({ block: 'center' });
+  return true;
+})()`;
+
 const scrollIntoView = (selector) => `(() => {
   const el = document.querySelector(${JSON.stringify(selector)});
   if (!el) return false;
@@ -1224,7 +1246,7 @@ async function main() {
       // that only scrolled would photograph whichever screen was showing.
       for (const surface of SURFACES) {
         await goto(surface.route);
-        const present = await cdp.evaluate(scrollIntoView(surface.selector));
+        const present = await cdp.evaluate(scrollSurfaceIntoView(surface.selector));
         await sleep(250);
         const shot = await cdp.send('Page.captureScreenshot', { format: 'png' });
         const file = join(shotDir, `${viewport.name}-${surface.id}.png`);
