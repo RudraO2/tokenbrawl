@@ -11,7 +11,7 @@ import {
   type JuiceTrack,
 } from '../render/juice';
 import { drawJuicedFrame } from '../render/juice-draw';
-import { DEFAULT_ROSTER } from '../render/roster';
+import { DEFAULT_ROSTER, type RosterPair } from '../render/roster';
 import type { UltSheet } from '../render/ult-sheet';
 import type { VfxSheet } from '../render/vfx-sheet';
 import { toFrames, type RenderFrame } from '../replay/film';
@@ -97,6 +97,13 @@ export interface LiveArena {
   readonly setVfx: (vfx: VfxSheet) => void;
   /** Story 11.4's Ultimate art, absent-tolerant on the same terms as `setVfx`. */
   readonly setUlt: (ult: UltSheet) => void;
+  /**
+   * Story 12.5. Which fighters this Match is drawn as, on exactly `setUlt`'s
+   * terms: the visitor chooses on another screen, and a live arena that had
+   * captured the pair at construction would draw the previous choice for the
+   * rest of the session.
+   */
+  readonly setRoster: (roster: RosterPair) => void;
   /** Halts the clock. Called by the panel when the Match ends and the replay re-mounts. */
   readonly stop: () => void;
   /**
@@ -168,7 +175,15 @@ export function createLiveArena(deps: LiveArenaDeps): LiveArena {
     backdrop: Backdrop | undefined;
     vfx: VfxSheet | undefined;
     ult: UltSheet | undefined;
-  } = { artists: [blockArtist, blockArtist], backdrop: undefined, vfx: undefined, ult: undefined };
+    /** Story 12.5. Who the visitor chose, or the default pair until they do. */
+    roster: RosterPair;
+  } = {
+    artists: [blockArtist, blockArtist],
+    backdrop: undefined,
+    vfx: undefined,
+    ult: undefined,
+    roster: DEFAULT_ROSTER,
+  };
 
   const sim: {
     states: FighterState[];
@@ -217,7 +232,7 @@ export function createLiveArena(deps: LiveArenaDeps): LiveArena {
       // Always passed, exactly as Spectate passes it: `render/roster.ts` is the
       // single place an agent index becomes a fighter id, so the caster's aura
       // and portrait resolve here the same way they do on the player.
-      roster: DEFAULT_ROSTER,
+      roster: dressing.roster,
       reducedMotion,
     });
   };
@@ -367,6 +382,10 @@ export function createLiveArena(deps: LiveArenaDeps): LiveArena {
     },
     setUlt: (ult: UltSheet): void => {
       dressing.ult = ult;
+      repaint();
+    },
+    setRoster: (roster: RosterPair): void => {
+      dressing.roster = roster;
       repaint();
     },
     stop,

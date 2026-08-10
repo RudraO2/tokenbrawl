@@ -2,6 +2,7 @@ import type { Action, CommandLogV2 } from '@tokenbrawl/contracts';
 import { escapeHtml, prefersReducedMotion, type CanvasSurface, type HostView } from '../main';
 import type { FighterArtist } from '../render/artist';
 import type { Backdrop } from '../render/backdrop';
+import type { RosterPair } from '../render/roster';
 import type { UltSheet } from '../render/ult-sheet';
 import type { VfxSheet } from '../render/vfx-sheet';
 import { createLiveArena, type LiveArena } from './live';
@@ -138,6 +139,13 @@ export interface ArcadePanel {
   readonly setVfx: (vfx: VfxSheet) => void;
   /** Story 12.2. The Ultimate's per-character art, on the same terms as `setArtist`. */
   readonly setUlt: (ult: UltSheet) => void;
+  /**
+   * Story 12.5. Which fighters this Match is drawn as. Forwarded to the live
+   * arena on exactly `setUlt`'s terms, and a no-op without one -- the Match
+   * itself has no notion of a character, so a panel with no live view loses
+   * nothing but the picture.
+   */
+  readonly setRoster: (roster: RosterPair) => void;
   /**
    * Story 12.4. Suspends the live view while this screen is not showing, and
    * resumes it when it is. The Match itself is untouched: states keep arriving
@@ -456,6 +464,9 @@ export function mountArcadePanel(host: ArcadeHost, deps: ArcadePanelDeps): Arcad
     },
     setUlt: (ult: UltSheet): void => {
       liveArena?.setUlt(ult);
+    },
+    setRoster: (roster: RosterPair): void => {
+      liveArena?.setRoster(roster);
     },
     // Story 12.4. The router calls this when the play screen stops or starts
     // showing. A no-op when there is no live arena, exactly like the dressing

@@ -20,11 +20,24 @@ import { ARENA_PALETTE } from './arena-palette';
  * ## Four ids, two in play
  *
  * `ROSTER_IDS` is the whole roster; `DEFAULT_ROSTER` is the pair a live Match
- * actually shows. Both are here rather than one being derived from the other,
- * because they answer different questions: the first is "what art exists", the
- * second is "who is fighting". Character select is still absent (the epic
- * context records it as a known gap), and when it lands it replaces
- * `DEFAULT_ROSTER` at its call sites without touching anything else.
+ * shows when nobody has chosen. Both are here rather than one being derived
+ * from the other, because they answer different questions: the first is "what
+ * art exists", the second is "who is fighting".
+ *
+ * ## Story 12.5: the choosing
+ *
+ * Character select landed, and it landed the way the paragraph above predicted
+ * it would -- `createRosterSelection` replaces `DEFAULT_ROSTER` at its call
+ * sites and nothing else here changed. `DEFAULT_ROSTER` stays, because it is
+ * still the honest answer to "who is fighting" on a first load, a direct link
+ * to a replay, and the hero raster: the pair used when nothing has been chosen.
+ *
+ * The selection is a factory with closure state rather than a module-level
+ * binding, per house convention (`source-discipline.test.ts` bans the latter),
+ * and it is *presentation only*. A character is a key into art. It appears in
+ * no Command Log field and must never be added to one: the identity of a
+ * fighter is its Agent, and two Deployments of the same model drawn as
+ * different characters would make the log lie about who fought.
  *
  * No colour literal, no asset byte, no reference to the project this art came
  * from. The aura is read back out of `ARENA_PALETTE`, which stays the only
@@ -89,4 +102,66 @@ export function auraFor(id: RosterId): string {
  */
 export function spriteLayoutUrlFor(id: RosterId): string {
   return `/sprites/${id}/layout.json`;
+}
+
+/**
+ * The fighter's portrait, the same file the Ultimate cinematic already cuts to
+ * (`/fx/ult-layout.json` names it per fighter).
+ *
+ * Story 12.5 draws it a second time, as an `<img>` on the character-select
+ * screen. Deliberately the *same* asset rather than new art: four portraits
+ * shipped in Story 9.7 and a select screen that invented its own would be that
+ * story's defect -- art shipped, art unwired -- committed a second time.
+ */
+export function portraitUrlFor(id: RosterId): string {
+  return `/portraits/${id}.png`;
+}
+
+/** Which fighter a side of the Match is drawn as. `0` is the visitor, `1` the opponent. */
+export type RosterSide = 0 | 1;
+
+/**
+ * The pair a live Match is drawn with, and the ability to change it.
+ *
+ * Read through `pair()` at every draw rather than captured once, because the
+ * visitor can choose again between Matches and a surface holding a stale
+ * snapshot would draw the previous choice for the rest of the session -- the
+ * same failure mode `startup.ts`'s dressing boxes exist to prevent.
+ */
+export interface RosterSelection {
+  /** Who is fighting right now. `DEFAULT_ROSTER` until something is chosen. */
+  readonly pair: () => RosterPair;
+  /** Puts `id` on `side`. A no-op when that side already carries it. */
+  readonly select: (side: RosterSide, id: RosterId) => void;
+}
+
+export interface RosterSelectionDeps {
+  /** The pair before anything is chosen. `DEFAULT_ROSTER` unless a test says otherwise. */
+  readonly initial?: RosterPair;
+  /**
+   * Called with the new pair after every change that is a change.
+   *
+   * This is how a choice reaches the sprite packs: `startup.ts` fetches the
+   * chosen fighters' layouts and the Ultimate art keyed by them. Not called on a
+   * no-op re-selection, so picking the fighter you already have does not
+   * re-fetch a megabyte of art.
+   */
+  readonly onChange?: (pair: RosterPair) => void;
+}
+
+export function createRosterSelection(deps: RosterSelectionDeps = {}): RosterSelection {
+  // Closure state in a factory, never a module-level binding.
+  const state: { pair: RosterPair } = { pair: deps.initial ?? DEFAULT_ROSTER };
+  return Object.freeze({
+    pair: (): RosterPair => state.pair,
+    select: (side: RosterSide, id: RosterId): void => {
+      if (state.pair[side] === id) {
+        return;
+      }
+      state.pair = Object.freeze(
+        side === 0 ? ([id, state.pair[1]] as const) : ([state.pair[0], id] as const),
+      );
+      deps.onChange?.(state.pair);
+    },
+  });
 }

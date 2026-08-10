@@ -185,6 +185,8 @@ interface Harness {
   readonly arcadeHost: FakeRoot;
   /** The `#spectate` host (Story 9.3), separate from `#app` for the same reason `#byok`/`#arcade` are. */
   readonly spectateHost: FakeRoot;
+  /** The `#select` host (Story 12.5), separate from `#app` for the same reason every other panel host is. */
+  readonly selectHost: FakeRoot;
   readonly painted: () => readonly string[];
   readonly frames: () => number;
   readonly runFrames: (count: number) => void;
@@ -232,6 +234,8 @@ function createHarness(
     readonly noArcadeHost?: boolean;
     /** A page with no spectate panel at all -- which must still play the replay. */
     readonly noSpectateHost?: boolean;
+    /** A page with no character-select screen at all -- which must still play the replay (Story 12.5). */
+    readonly noSelectHost?: boolean;
     /**
      * Story 11.6. Answer `/replays/manifest.json` with a real one-entry manifest
      * (the demo log standing in for a streamed Match), so the Spectate panel
@@ -255,6 +259,7 @@ function createHarness(
   const byokHost = createRoot();
   const arcadeHost = createRoot();
   const spectateHost = createRoot();
+  const selectHost = createRoot();
   const queue: (() => void)[] = [];
   const requested: string[] = [];
 
@@ -324,6 +329,9 @@ function createHarness(
         // landing panel", the same reading `noByokHost`/`noArcadeHost`/
         // `noSpectateHost` give their own panel when absent, and it keeps a
         // fourth panel from silently sharing `root` with `#app`.
+        if (selector === '#select') {
+          return options.noSelectHost === true ? null : selectHost;
+        }
         if (selector === '#landing') {
           return null;
         }
@@ -365,6 +373,7 @@ function createHarness(
     byokHost,
     arcadeHost,
     spectateHost,
+    selectHost,
     painted: () => root.painted(),
     frames: () => queue.length,
     runFrames: (count: number): void => {

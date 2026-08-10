@@ -98,21 +98,13 @@
     -->
     <section class="tb-screen tb-spectate" id="spectate" data-screen></section>
     <!--
-      Story 12.4 registers the character-select route and gives it a real
-      screen to be, rather than a route that resolves to nothing: a visitor who
-      reaches #/select must land on a page that says what it is, not on a blank
-      viewport. The content is static and deliberately thin -- Story 12.5 builds
-      the roster here, and the gate's `character-select-reachable` check is
-      waived to that story precisely because this placeholder does not offer
-      four fighters.
+      Story 12.4 registered this route; Story 12.5 filled it. `shell/select.ts`
+      writes the roster in here on mount, so the section is an empty host like
+      #arcade and #spectate rather than markup maintained in two places. A page
+      whose script never ran shows an empty screen, which is the same degrade
+      every other panel on this page takes.
     -->
-    <section class="tb-screen tb-select" id="select" data-screen>
-      <h2 class="tb-select-heading">Characters</h2>
-      <p class="tb-select-note">
-        Character select is not built yet. Four fighters ship with full sprite packs and portraits;
-        picking between them arrives in Story 12.5. Until then every Match uses the default pair.
-      </p>
-    </section>
+    <section class="tb-screen tb-select" id="select" data-screen></section>
     <script type="module" src="/src/boot.ts"></script>
   </body>
 </html>

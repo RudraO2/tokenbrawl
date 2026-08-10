@@ -20,7 +20,7 @@ import type { Backdrop } from './render/backdrop';
 import { createIdentityArtist, deriveVisualIdentity } from './render/identity';
 import { DEFAULT_JUICE_TUNING, arenaFor, buildJuiceTrack } from './render/juice';
 import { drawJuicedFrame } from './render/juice-draw';
-import { DEFAULT_ROSTER } from './render/roster';
+import { DEFAULT_ROSTER, type RosterPair } from './render/roster';
 import type { UltSheet } from './render/ult-sheet';
 import type { VfxSheet } from './render/vfx-sheet';
 import {
@@ -155,6 +155,17 @@ export interface MountedPlayer {
    * so the art appears without waiting for the next frame.
    */
   readonly setUlt: (ult: UltSheet) => void;
+  /**
+   * Story 12.5. Which fighters this Match is drawn as, and therefore whose aura
+   * and whose name the Ultimate cinematic carries.
+   *
+   * A setter on exactly `setUlt`'s terms rather than a mount parameter: the
+   * visitor can choose again between Matches, and a player that captured the
+   * pair at mount would draw the previous choice until it was re-mounted. It
+   * repaints for the same reason every other setter here does -- a paused or
+   * finished playback would otherwise never draw a frame that used it.
+   */
+  readonly setRoster: (roster: RosterPair) => void;
   readonly repaint: () => void;
   /** The Decision Point currently on screen. `0` before the first frame is drawn. */
   readonly decisionPoint: () => number;
@@ -250,8 +261,17 @@ export function mountPlayer(
     vfx: VfxSheet | undefined;
     /** Story 11.4. The Ultimate's per-character art, on the same terms as `vfx`. */
     ult: UltSheet | undefined;
+    /** Story 12.5. Who is drawn. `DEFAULT_ROSTER` until a character select says otherwise. */
+    roster: RosterPair;
     frameIndex: number;
-  } = { artists: [], backdrop: undefined, vfx: undefined, ult: undefined, frameIndex: 0 };
+  } = {
+    artists: [],
+    backdrop: undefined,
+    vfx: undefined,
+    ult: undefined,
+    roster: DEFAULT_ROSTER,
+    frameIndex: 0,
+  };
   const blockArtist = createBlockArtist();
 
   /**
@@ -379,7 +399,9 @@ export function mountPlayer(
       // procedural beam in the caster's aura, and without either it is Story
       // 10.4's banner-and-band.
       ult: dressing.ult,
-      roster: DEFAULT_ROSTER,
+      // Story 12.5: read per paint, so a choice made between Matches reaches
+      // the cinematic without a re-mount.
+      roster: dressing.roster,
       // Story 11.3. The same read the clock and the juice track already make,
       // threaded in rather than taken again inside the renderer.
       reducedMotion: prefersReducedMotion(view),
@@ -434,6 +456,10 @@ export function mountPlayer(
     },
     setUlt: (ult: UltSheet): void => {
       dressing.ult = ult;
+      repaint();
+    },
+    setRoster: (roster: RosterPair): void => {
+      dressing.roster = roster;
       repaint();
     },
     repaint,

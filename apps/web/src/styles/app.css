@@ -1166,7 +1166,119 @@ body {
   image-rendering: pixelated;
 }
 
-/* The reserved character-select screen. Story 12.5 replaces what is inside it. */
+/*
+ * Story 12.5: the character-select screen.
+ *
+ * Page chrome, every rule kept: flat fills, square corners, ink borders at the
+ * token width, the hard offset shadow with zero blur, press-displaces on
+ * `:active`, stepped `--tb-step` motion. The arena's release covers
+ * `src/render/**\/*.ts` and nothing here, so a portrait is an image in a
+ * bordered box rather than a glowing card.
+ *
+ * The row is `grid` with `minmax(0, 1fr)` columns rather than four fixed
+ * widths, which is the whole of the mobile story: four 512px portraits in a
+ * flex row is the obvious layout and the obvious way to put the 390px viewport
+ * back into horizontal overflow, which Story 12.4 had just cleared. `minmax(0,
+ * ...)` and not `1fr` alone, because a grid item's default `min-width: auto` is
+ * its content's intrinsic width -- with a 512px image inside, `1fr` columns
+ * refuse to shrink below 2048px and the page scrolls sideways again.
+ */
+.tb-select-side {
+  margin-bottom: var(--tb-space-3);
+}
+
+.tb-select-side-heading {
+  margin: 0 0 var(--tb-space-2);
+  font-size: 18px;
+  font-weight: 800;
+  letter-spacing: var(--tb-tracking-display);
+  text-transform: uppercase;
+  color: var(--tb-muted);
+}
+
+.tb-select-row {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--tb-space-2);
+  max-width: 720px;
+}
+
+.tb-select-card {
+  display: block;
+  min-width: 0;
+  padding: 0;
+  background: var(--tb-bg);
+  border: var(--tb-border-width) solid var(--tb-ink);
+  box-shadow: var(--tb-shadow);
+  cursor: pointer;
+  transition:
+    transform var(--tb-step) step-end,
+    box-shadow var(--tb-step) step-end,
+    background var(--tb-step) step-end;
+}
+
+.tb-select-portrait {
+  display: block;
+  width: 100%;
+  height: auto;
+  /* Pixel art, not a photograph -- the same call `.tb-canvas` makes. */
+  image-rendering: pixelated;
+}
+
+.tb-select-plate {
+  display: block;
+  border-top: var(--tb-border-width) solid var(--tb-ink);
+  padding: var(--tb-space-1);
+  font-family: var(--tb-font-display);
+  font-weight: 800;
+  font-size: 14px;
+  letter-spacing: var(--tb-tracking-display);
+  text-transform: uppercase;
+  text-align: center;
+  color: var(--tb-ink);
+}
+
+.tb-select-card:hover {
+  background: var(--tb-accent);
+}
+
+.tb-select-card:hover .tb-select-plate {
+  color: var(--tb-bg);
+}
+
+.tb-select-card:active {
+  transform: translate(var(--tb-shadow-offset), var(--tb-shadow-offset));
+  box-shadow: 0 0 0 var(--tb-accent);
+}
+
+.tb-select-card:focus-visible {
+  outline: 3px solid var(--tb-accent);
+  outline-offset: var(--tb-space-1);
+}
+
+/*
+ * The chosen fighter. `aria-pressed` is the selector rather than a class, for
+ * the reason `.tb-nav-link[aria-current]` is: the visible state and the
+ * announced state are then the same attribute and cannot drift.
+ */
+.tb-select-card[aria-pressed='true'] {
+  background: var(--tb-accent);
+}
+
+.tb-select-card[aria-pressed='true'] .tb-select-plate {
+  color: var(--tb-bg);
+}
+
+.tb-select-fight {
+  margin-top: var(--tb-space-1);
+}
+
+.tb-select-readout {
+  margin: var(--tb-space-2) 0 0;
+  color: var(--tb-muted);
+  font-family: var(--tb-font-mono);
+}
+
 .tb-select-heading {
   margin: 0 0 var(--tb-space-2);
   font-size: 32px;

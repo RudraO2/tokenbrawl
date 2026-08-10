@@ -9,7 +9,14 @@ import { createBackdrop, validateBackdropLayout, type Backdrop } from './render/
 import type { AudioSink } from './render/audio';
 import { createAudioBus, type AudioContextLike, type AudioFetchResponse } from './render/audio-bus';
 import { createSpriteSheet, validateSpriteSheetLayout } from './render/sprite-sheet';
-import { DEFAULT_ROSTER, spriteLayoutUrlFor } from './render/roster';
+import {
+  createRosterSelection,
+  spriteLayoutUrlFor,
+  type RosterId,
+  type RosterPair,
+  type RosterSelection,
+  type RosterSide,
+} from './render/roster';
 import {
   createUltSheet,
   imageUrlsFor,
@@ -27,6 +34,7 @@ import {
   type ScreenRouter,
   type ShellView,
 } from './shell/router';
+import { mountSelectPanel, type SelectHost, type SelectPanel } from './shell/select';
 import { ROUTE_BYOK, ROUTE_PLAY, ROUTE_REPLAY, ROUTE_WATCH, SCREENS } from './shell/screens';
 
 /**
@@ -76,14 +84,6 @@ import { ROUTE_BYOK, ROUTE_PLAY, ROUTE_REPLAY, ROUTE_WATCH, SCREENS } from './sh
 
 /** Same-origin, so both are covered by the no-remote-asset sweep in `style-discipline.test.ts`. */
 export const DEMO_REPLAY_URL = '/replays/demo.command-log.json';
-/**
- * One pack per agent index, so the two fighters are told apart by silhouette.
- * Story 9.7: the four-character roster (`clawde`, `chatty`, `gemini`, `grokk`)
- * supersedes the Martial Hero CC0 pair; a live Match still only shows two
- * fighters at once, so this names the default pair and the other two packs
- * ship ready for a future character-select story to point here instead.
- */
-const SPRITE_LAYOUT_URLS = DEFAULT_ROSTER.map(spriteLayoutUrlFor);
 const BACKDROP_LAYOUT_URL = '/sprites/mountain-dusk/layout.json';
 /**
  * Story 11.2. The impact FX sheet's strip layout, authored in this repo beside
@@ -164,6 +164,20 @@ export interface StartupResult {
    * 9.8). Exposed for the same reason `byok`, `arcade` and `spectate` are.
    */
   readonly landing: LandingPanel | null;
+  /**
+   * The character-select screen (Story 12.5), or `null` when the page has no
+   * `#select` host. Exposed for the same reason every panel above is.
+   */
+  readonly select: SelectPanel | null;
+  /**
+   * Who the visitor chose to play as and against (Story 12.5).
+   *
+   * Exposed rather than kept private because it is the one piece of page state
+   * that outlives every panel: a test asserting that a pick reaches the sprite
+   * URLs needs to make the pick, and the arcade's Match, the player's re-mount
+   * and the select screen's marks all read this one object.
+   */
+  readonly selection: RosterSelection;
   /**
    * The screen router (Story 12.4), or `null` in an environment with no
    * `location` to route on -- every test that hands `startup` a bare object,
@@ -287,22 +301,25 @@ async function loadVfx(globals: BrowserGlobals): Promise<VfxSheet | undefined> {
  *
  * `loadVfx`'s shape, with one difference worth stating: only the images the
  * fighters *in play* need are fetched. The four portraits are ~200 KB each and
- * a live Match shows two fighters, so `imageUrlsFor(layout, DEFAULT_ROSTER)`
- * keeps most of a megabyte off a page whose whole first-frame budget is two
- * seconds -- and when character select lands it passes a different pair and
- * nothing else here changes.
+ * a live Match shows two fighters, so `imageUrlsFor(layout, pair)` keeps most of
+ * a megabyte off a page whose whole first-frame budget is two seconds.
+ *
+ * Story 12.5 made that sentence's last clause true rather than hypothetical:
+ * the pair is a parameter now, and a visitor who chooses gemini gets gemini's
+ * portrait fetched and nobody else's. Nothing else here changed, which is what
+ * `render/roster.ts`'s docblock promised character select would cost.
  *
  * A failure costs the page nothing but the cutscene's art: `juice-draw.ts`
  * still draws a procedural beam in the caster's aura, and without a roster it
  * draws Story 10.4's banner-and-band. One warning, then `undefined`.
  */
-async function loadUlt(globals: BrowserGlobals): Promise<UltSheet | undefined> {
+async function loadUlt(globals: BrowserGlobals, pair: RosterPair): Promise<UltSheet | undefined> {
   try {
     if (globals.Image === undefined) {
       return undefined;
     }
     const layout = validateUltSheetLayout(await fetchJson(globals, ULT_LAYOUT_URL));
-    const urls = imageUrlsFor(layout, DEFAULT_ROSTER);
+    const urls = imageUrlsFor(layout, pair);
     return createUltSheet(await decodeAll(globals, urls), layout);
   } catch (error) {
     warn('Ultimate FX unavailable, the cinematic will draw without per-character art', error);
@@ -580,6 +597,51 @@ function mountLanding(
 }
 
 /**
+ * Mounts the character-select screen, or returns `null` when this page has no
+ * `#select` host (Story 12.5). Mirrors every other mount here, warn-not-throw
+ * included.
+ *
+ * The two callbacks are deliberately thin, exactly as the landing CTAs are:
+ * `shell/select.ts` never imports `ArcadePanel`, so the screen knows how to
+ * offer a roster and nothing whatever about how a Match starts. Navigation
+ * happens *before* `play()` for the reason `mountLanding` records -- the live
+ * arena does not paint while its screen is hidden, so starting the Match first
+ * would drop its opening frames on the floor.
+ */
+function mountSelect(
+  globals: BrowserGlobals,
+  selection: RosterSelection,
+  arcade: ArcadePanel | null,
+  onGesture: () => void,
+  navigate: (route: string) => void,
+): SelectPanel | null {
+  const host = globals.document?.querySelector('#select');
+  if (host == null) {
+    return null;
+  }
+  try {
+    return mountSelectPanel(host as unknown as SelectHost, {
+      pair: () => selection.pair(),
+      onPick: (side: RosterSide, id: RosterId) => {
+        selection.select(side, id);
+      },
+      onFight: () => {
+        onGesture();
+        navigate(ROUTE_PLAY);
+        if (arcade === null) {
+          warn('Character select', 'Play vs CPU is unavailable: the Arcade panel did not mount.');
+        } else {
+          arcade.play();
+        }
+      },
+    });
+  } catch (error) {
+    warn('Character select unavailable', error);
+    return null;
+  }
+}
+
+/**
  * Builds the screen router and the nav strip, or returns `null` when this
  * environment has no hash to route on (Story 12.4).
  *
@@ -673,6 +735,29 @@ export async function startup(globals: BrowserGlobals): Promise<StartupResult | 
     const log = (await fetchJson(globals, DEMO_REPLAY_URL)) as CommandLog;
 
     /**
+     * Who is fighting, and the box a choice travels through (Story 12.5).
+     *
+     * The selection is built first because the dressing below is initialised
+     * from it, and its `onChange` is routed through a box for the reason
+     * `shell.router` is one: reacting to a pick means fetching that fighter's
+     * sprite pack and Ultimate art, and those functions need the dressing that
+     * needs the selection. A box breaks the cycle without turning either into a
+     * module-level binding.
+     */
+    const chosen: { apply: (pair: RosterPair) => void } = {
+      apply: () => {
+        // Replaced below, once there is something to dress. A pick that
+        // arrived before then would be a pick made on a screen that has not
+        // mounted, so doing nothing is the honest answer rather than a throw.
+      },
+    };
+    const selection = createRosterSelection({
+      onChange: (pair) => {
+        chosen.apply(pair);
+      },
+    });
+
+    /**
      * The dressing, held outside any one mount (Story 4.6).
      *
      * A BYOK Match re-mounts the player with a different log, and the sprite
@@ -694,7 +779,19 @@ export async function startup(globals: BrowserGlobals): Promise<StartupResult | 
       vfx: VfxSheet | undefined;
       /** Story 11.4. The Ultimate's per-character art, held for the same reason. */
       ult: UltSheet | undefined;
-    } = { artists: [undefined, undefined], backdrop: undefined, vfx: undefined, ult: undefined };
+      /**
+       * Story 12.5. Who the visitor chose to play as, held here for exactly the
+       * reason the sheets above are: it belongs to the *page*, so a Match that
+       * re-mounts the player keeps it and a surface mounted later adopts it.
+       */
+      roster: RosterPair;
+    } = {
+      artists: [undefined, undefined],
+      backdrop: undefined,
+      vfx: undefined,
+      ult: undefined,
+      roster: selection.pair(),
+    };
     /**
      * The audio graph, built once and held outside any one mount (Story 9.6),
      * for exactly the reason the dressing above is: a BYOK or Arcade Match
@@ -755,6 +852,11 @@ export async function startup(globals: BrowserGlobals): Promise<StartupResult | 
       if (dressing.ult !== undefined) {
         mounted.setUlt(dressing.ult);
       }
+      // Story 12.5. Always set rather than guarded: there is always a pair, and
+      // a re-mounted player that kept `DEFAULT_ROSTER` would draw the arcade
+      // Match the visitor just played as somebody else the moment its replay
+      // threw an Ultimate.
+      mounted.setRoster(dressing.roster);
       player.mounted = mounted;
       // Story 12.4. Show the visitor the fight they just finished. Before the
       // router this was a re-mount into whatever section they happened to be
@@ -826,13 +928,63 @@ export async function startup(globals: BrowserGlobals): Promise<StartupResult | 
       panels.spectate?.setUlt(ult);
       panels.arcade?.setUlt(ult);
     };
+    /**
+     * Story 12.5. Who the two fighters are drawn as, pushed to the surfaces a
+     * choice can reach.
+     *
+     * **Not** Spectate. Its entries are fixed by their committed Command Logs
+     * and the pair drawn there is a property of the log, not of the visitor --
+     * a stream that changed characters when somebody browsed the roster would
+     * be describing a Match that never happened.
+     */
+    const dressRoster = (pair: RosterPair): void => {
+      dressing.roster = pair;
+      player.mounted.setRoster(pair);
+      panels.arcade?.setRoster(pair);
+    };
 
-    const upgrades: Promise<void>[] = SPRITE_LAYOUT_URLS.map(async (url, index) => {
-      const artist = await loadArtist(globals, url);
-      if (artist !== undefined) {
-        dressArtist(index as 0 | 1, artist);
-      }
-    });
+    /**
+     * Fetches the chosen pair's sprite packs and Ultimate art, and dresses every
+     * live surface with them.
+     *
+     * The generation counter is the part worth reading. A visitor clicking
+     * across the roster starts a fetch per pick, and those land in whatever
+     * order the network gives them: without this, picking gemini and then grokk
+     * could dress the fight as gemini, because gemini's pack resolved second.
+     * A stale load is dropped rather than cancelled -- the browser's cache keeps
+     * what it fetched, so re-picking is free.
+     */
+    const art: { generation: number } = { generation: 0 };
+    const loadRosterArt = async (pair: RosterPair): Promise<void> => {
+      art.generation += 1;
+      const generation = art.generation;
+      const current = (): boolean => art.generation === generation;
+      await Promise.all([
+        ...pair.map(async (id, index) => {
+          const artist = await loadArtist(globals, spriteLayoutUrlFor(id));
+          if (artist !== undefined && current()) {
+            dressArtist(index as 0 | 1, artist);
+          }
+        }),
+        (async (): Promise<void> => {
+          const ult = await loadUlt(globals, pair);
+          if (ult !== undefined && current()) {
+            dressUlt(ult);
+          }
+        })(),
+      ]);
+    };
+
+    // The box declared above, now that there is something to dress. A pick
+    // re-dresses immediately -- while the visitor is still on the select screen
+    // -- rather than when they press Fight, so the packs are decoded by the time
+    // the Match starts instead of swapping in mid-fight.
+    chosen.apply = (pair: RosterPair): void => {
+      dressRoster(pair);
+      void loadRosterArt(pair);
+    };
+
+    const upgrades: Promise<void>[] = [loadRosterArt(selection.pair())];
     upgrades.push(
       (async (): Promise<void> => {
         const backdrop = await loadBackdrop(globals);
@@ -846,14 +998,6 @@ export async function startup(globals: BrowserGlobals): Promise<StartupResult | 
         const vfx = await loadVfx(globals);
         if (vfx !== undefined) {
           dressVfx(vfx);
-        }
-      })(),
-    );
-    upgrades.push(
-      (async (): Promise<void> => {
-        const ult = await loadUlt(globals);
-        if (ult !== undefined) {
-          dressUlt(ult);
         }
       })(),
     );
@@ -895,6 +1039,10 @@ export async function startup(globals: BrowserGlobals): Promise<StartupResult | 
       if (dressing.ult !== undefined) {
         arcadePanel.setUlt(dressing.ult);
       }
+      // Story 12.5, and unconditional for the reason the re-mount above is: a
+      // live arena left on `DEFAULT_ROSTER` would draw the visitor's chosen
+      // fighter's sprites under clawde's aura and clawde's name.
+      arcadePanel.setRoster(dressing.roster);
     }
     const spectatePanel = mountSpectate(
       globals,
@@ -931,6 +1079,17 @@ export async function startup(globals: BrowserGlobals): Promise<StartupResult | 
     }
     const landingPanel = mountLanding(
       globals,
+      arcadePanel,
+      () => {
+        sink?.unlock();
+      },
+      (route: string) => {
+        shell.router?.go(route);
+      },
+    );
+    const selectPanel = mountSelect(
+      globals,
+      selection,
       arcadePanel,
       () => {
         sink?.unlock();
@@ -1049,6 +1208,8 @@ export async function startup(globals: BrowserGlobals): Promise<StartupResult | 
       arcade: arcadePanel,
       spectate: spectatePanel,
       landing: landingPanel,
+      select: selectPanel,
+      selection,
       router: shell.router,
       current: (): MountedApp => player.mounted,
       showLog: mount,
