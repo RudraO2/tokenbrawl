@@ -56,7 +56,9 @@ Prefer `Edit` over rewriting a file. Rewrites lose comments that encode why some
 
 ## 3. Independent review — a subagent, not you
 
-Spawn ONE general-purpose subagent, `run_in_background: false`. Hand it:
+Spawn ONE general-purpose subagent, `run_in_background: false`, **with `model: "opus"` regardless of which model is driving this chat**. The reviewer reads a diff rather than a repo, so its context is small and the stronger model is cheap here — and this is the one step where being wrong is silent. On Story 12.2 this reviewer caught a new gate check that hashed the whole canvas including the ticking clock, which would have passed on frozen fighters. That is the exact class of defect this project keeps shipping.
+
+Hand it:
 
 - the story file path,
 - the full `git diff` of your work against the story's starting commit,
