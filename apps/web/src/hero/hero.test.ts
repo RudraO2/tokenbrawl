@@ -134,9 +134,16 @@ describe('the hero scene', () => {
     expect(renderHeroFrame(state.scene, 0)).toHaveLength(HERO_WIDTH * HERO_HEIGHT);
   });
 
+  // 30s rather than vitest's default 5s. This renders a full hero frame twice
+  // and compares every pixel, and it runs alongside every other file in the
+  // workspace: alone it takes ~4.3s, under the parallel load of the whole suite
+  // it has measured 5.9s and 6.3s and timed out. Story 12.1 recorded it as a
+  // latent flake, Epic 12's new test files pushed it over the line, and a gate
+  // that is green most of the time is worse than one that is red -- the honour
+  // system this epic runs on depends on a red suite meaning something.
   it('draws the same frame identically twice, which is what makes the artefact drift-gateable', () => {
     expect(renderHeroFrame(state.scene, 30)).toStrictEqual(renderHeroFrame(state.scene, 30));
-  });
+  }, 30_000);
 
   it('refuses a frame index the film does not have', () => {
     expect(() => renderHeroFrame(state.scene, state.scene.frames.length)).toThrow(/no film frame/);
