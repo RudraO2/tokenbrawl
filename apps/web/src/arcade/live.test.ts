@@ -381,3 +381,106 @@ describe('the live arena while its screen is hidden (Story 12.4)', () => {
     expect(canvas.calls.length).toBe(afterShow);
   });
 });
+
+/**
+ * Story 12.7: the set score and the KO / TIME OVER overlay on the live arena.
+ *
+ * A richer recording canvas than the op-only one above, because these
+ * assertions are about *which* text drew and *which* colour a pip filled with --
+ * exactly what a bare op list cannot answer.
+ */
+function createRichCanvas(): CanvasSurface & {
+  readonly texts: () => readonly string[];
+  readonly fills: () => readonly string[];
+} {
+  const texts: string[] = [];
+  const fills: string[] = [];
+  const ctx = {
+    fillStyle: '',
+    strokeStyle: '',
+    lineWidth: 0,
+    font: '',
+    textAlign: '',
+    imageSmoothingEnabled: true,
+    globalAlpha: 1,
+    globalCompositeOperation: 'source-over',
+    fillRect(this: { fillStyle: string }): void {
+      fills.push(this.fillStyle);
+    },
+    strokeRect(): void {},
+    fillText(this: { fillStyle: string }, text: string): void {
+      texts.push(String(text));
+    },
+    clearRect(): void {},
+    drawImage(): void {},
+    save(): void {},
+    restore(): void {},
+    translate(): void {},
+    scale(): void {},
+  } as unknown as Canvas2D;
+  return {
+    width: 0,
+    height: 0,
+    getContext: (): Canvas2D | null => ctx,
+    texts: (): readonly string[] => texts,
+    fills: (): readonly string[] => fills,
+  };
+}
+
+describe('the live arena carries the set score and the ending (12.7)', () => {
+  const GOLD = '#ffd24a';
+
+  it('finish() parks the clock on the round\u2019s final frame', () => {
+    const arena = createLiveArena({ canvas: createRichCanvas(), view: createFakeView(), reducedMotion: false });
+    const produced = states(4);
+    arena.begin();
+    for (const state of produced) {
+      arena.pushState(state);
+    }
+    // Before finishing, the still first frame is on screen.
+    expect(arena.frameIndex()).toBe(0);
+    arena.finish();
+    // Parked on the last frame the states allow -- 4 states is 3 transitions of
+    // 12 film frames, so the final frame index is 35.
+    expect(arena.frameIndex()).toBe(3 * 12 - 1);
+  });
+
+  it('draws the overlay only while one is set, and clears it', () => {
+    const canvas = createRichCanvas();
+    const arena = createLiveArena({ canvas, view: createFakeView(), reducedMotion: false });
+    arena.begin();
+    for (const state of states(3)) {
+      arena.pushState(state);
+    }
+
+    arena.showMatchEnd({ endReason: 'timeout', outcome: 'p2' });
+    expect(canvas.texts()).toContain('TIME OVER');
+    expect(canvas.texts()).toContain('P2 WINS');
+
+    arena.showMatchEnd(null);
+    // A repaint with no overlay: the freshly drawn frame carries neither word.
+    const after = canvas.texts().length;
+    arena.showMatchEnd(null);
+    expect(canvas.texts().slice(after)).not.toContain('TIME OVER');
+  });
+
+  it('retains the pips across begin() but clears the overlay', () => {
+    const canvas = createRichCanvas();
+    const arena = createLiveArena({ canvas, view: createFakeView(), reducedMotion: false });
+    arena.begin();
+    arena.pushState(states(1)[0]);
+
+    arena.setRoundsWon([1, 0]);
+    arena.showMatchEnd({ endReason: 'ko', outcome: 'p1' });
+    expect(canvas.fills()).toContain(GOLD); // a filled pip
+    expect(canvas.texts()).toContain('K.O.');
+
+    // A fresh round: the pips are retained, the overlay is gone.
+    arena.begin();
+    arena.pushState(states(1)[0]);
+    expect(canvas.fills()).toContain(GOLD); // the retained pip still fills gold
+    const afterBegin = canvas.texts().length;
+    arena.pushState(states(2)[1]);
+    expect(canvas.texts().slice(afterBegin)).not.toContain('K.O.');
+  });
+});

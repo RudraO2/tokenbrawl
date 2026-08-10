@@ -63,18 +63,15 @@ export const ROUNDS_TO_WIN_SET = 2;
  */
 export const MAX_ROUNDS = 3;
 
-/** The frozen schema's `seed` bound; a derived seed must land inside it. */
-const SEED_MODULUS = 4_294_967_296;
-
 /**
  * The seed for round `round` of a session (Story 12.7).
  *
- * A pure, deterministic mix of the session seed and the round index into a
- * uint32 -- inside the frozen `seed` bound and a safe integer, which is what
- * `assertSeed` in `run.ts` requires. Mixed rather than incremented so round 2's
- * seed is not merely round 1's neighbour: consecutive seeds would make the three
- * Matches read as hand-typed variations of one rather than three independent
- * fights.
+ * A pure, deterministic mix of the session seed and the round index. `>>> 0`
+ * lands the result in 0..2^32-1 -- inside the frozen `seed` bound and a safe
+ * integer, which is what `assertSeed` in `run.ts` requires. Mixed rather than
+ * incremented so round 2's seed is not merely round 1's neighbour: consecutive
+ * seeds would make the three Matches read as hand-typed variations of one rather
+ * than three independent fights.
  */
 export function matchSeedFor(sessionSeed: number, round: number): number {
   const mixed = Math.imul((sessionSeed ^ 0x9e3779b9) + Math.imul(round + 1, 0x85ebca77), 0xc2b2ae35);

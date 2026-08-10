@@ -1407,4 +1407,16 @@ describe('the match-end overlay (12.7)', () => {
       secondary: 'DRAW',
     });
   });
+
+  it('draws the set-state banner only when one is supplied', () => {
+    // The third line -- ROUND 2 between rounds, YOU WIN / YOU LOSE at the end --
+    // is the caller's string, because "you" depends on which side they play.
+    expect(textsOf(overlayCalls({ matchEnd: { endReason: 'ko', outcome: 'p1' } }))).not.toContain(
+      'YOU WIN',
+    );
+    const banner = textsOf(
+      overlayCalls({ matchEnd: { endReason: 'ko', outcome: 'p1', banner: 'YOU WIN' } }),
+    );
+    expect(banner).toContain('YOU WIN');
+  });
 });

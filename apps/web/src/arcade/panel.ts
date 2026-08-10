@@ -190,7 +190,7 @@ const DEFAULT_SEED = 9_201;
  * (INV-1). Ninety is a beat and a half at the film's 60fps -- long enough to read
  * the ending, short enough not to stall the set.
  */
-const ROUND_END_HOLD_FRAMES = 90;
+export const ROUND_END_HOLD_FRAMES = 90;
 
 /**
  * The Action the Ultimate is thrown as, and the key Story 10.6 binds to it.
@@ -355,10 +355,13 @@ export function mountArcadePanel(host: ArcadeHost, deps: ArcadePanelDeps): Arcad
     session: ArcadeSessionHandle | null;
     /** Whether the environment last reported the Ultimate as legal, i.e. the gauge full. */
     armed: boolean;
+    /** How many sets have been started, so a rematch is a different set, not a bit-identical replay. */
+    sets: number;
   } = {
     value: 'idle',
     session: null,
     armed: false,
+    sets: 0,
   };
 
   const say = (state: ArcadeState, message: string): void => {
@@ -461,11 +464,20 @@ export function mountArcadePanel(host: ArcadeHost, deps: ArcadePanelDeps): Arcad
   const onRoundEnd = async (event: ArcadeRoundEnd): Promise<void> => {
     deps.onRoundLog?.(event.log, event.round);
     liveArena?.setRoundsWon(event.roundsWon);
-    liveArena?.showMatchEnd({ endReason: event.result.endReason, outcome: event.result.outcome });
+    // Draw the round's true final frame before the overlay goes over it, rather
+    // than stamping it on whatever mid-round frame the live clock reached.
+    liveArena?.finish();
     if (event.setOver) {
-      // The set-result screen keeps the final overlay up; `onSetEnd` takes over.
+      // The final round: `onSetEnd` draws the set result over this final frame.
       return;
     }
+    liveArena?.showMatchEnd({
+      endReason: event.result.endReason,
+      outcome: event.result.outcome,
+      // `event.round` is the 0-based index that just ended, so the next round is
+      // `+ 2` one-based: ROUND 2 after round 0.
+      banner: `ROUND ${String(event.round + 2)}`,
+    });
     await holdFrames(ROUND_END_HOLD_FRAMES);
     liveArena?.showMatchEnd(null);
     // A fresh round on the same screen: health restored (a new Match resets it),
@@ -478,13 +490,28 @@ export function mountArcadePanel(host: ArcadeHost, deps: ArcadePanelDeps): Arcad
     panelState.session = null;
     playNode.disabled = false;
     setArmed(false);
-    const [side0, side1] = event.roundsWon;
+
+    const tie = event.roundsWon[0] === event.roundsWon[1];
+    const banner = tie ? 'DRAW' : event.humanWon ? 'YOU WIN' : 'YOU LOSE';
+    // The set result on the canvas, over the last round's final frame: its own
+    // KO / TIME OVER and winner, plus the set banner. The last log's `result` is
+    // the ending to name.
+    const lastResult = event.logs[event.logs.length - 1]?.result;
+    liveArena?.showMatchEnd(
+      lastResult === undefined
+        ? null
+        : { endReason: lastResult.endReason, outcome: lastResult.outcome, banner },
+    );
+
+    // The result in page chrome, always from the visitor's own side.
     const score = `${String(event.roundsWon[humanSide])}-${String(event.roundsWon[humanSide === 0 ? 1 : 0])}`;
     showSetResult(
       true,
-      event.humanWon
-        ? `You win the set ${score}. Rematch, or pick another fighter. Never rated.`
-        : `You lose the set ${String(Math.max(side0, side1))}-${String(Math.min(side0, side1))}. Rematch, or pick another fighter. Never rated.`,
+      tie
+        ? `The set is a draw, ${score}. Rematch, or pick another fighter. Never rated.`
+        : event.humanWon
+          ? `You win the set ${score}. Rematch, or pick another fighter. Never rated.`
+          : `You lose the set ${score}. Rematch, or pick another fighter. Never rated.`,
     );
     say('done', 'Set over. Every Match in it is excluded from every rating.');
   };
@@ -516,8 +543,14 @@ export function mountArcadePanel(host: ArcadeHost, deps: ArcadePanelDeps): Arcad
     showStage(liveArena !== null);
 
     try {
+      // A rematch is a fresh set, not the same three seeds again: offset the
+      // session seed by how many sets have run, kept a uint32 so it stays inside
+      // the frozen seed bound. Deterministic in the set index, so a given set is
+      // still perfectly replayable.
+      const setSeed = (seed + panelState.sets) >>> 0;
+      panelState.sets += 1;
       const session = startSession({
-        seed,
+        seed: setSeed,
         humanSide,
         mapInput,
         // The single-Match `run` is passed straight through, so a test can drive

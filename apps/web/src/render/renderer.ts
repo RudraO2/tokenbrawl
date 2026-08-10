@@ -148,6 +148,16 @@ export interface DrawFrameOptions {
 export interface MatchEndOverlay {
   readonly endReason: 'ko' | 'timeout';
   readonly outcome: 'p1' | 'p2' | 'draw';
+  /**
+   * Story 12.7. The set-state line under the ending: `ROUND 2` between rounds,
+   * or `YOU WIN` / `YOU LOSE` when the set is decided.
+   *
+   * The caller supplies the string because "you" depends on which side the
+   * visitor plays -- a fact the renderer does not carry. Absent draws the ending
+   * and the winner and no third line, which is what a plain replay-player Match
+   * shows (`main.ts`).
+   */
+  readonly banner?: string;
 }
 
 /**
@@ -330,6 +340,11 @@ const MATCH_END_SECONDARY_TOP = MATCH_END_OVERLAY_TOP + MATCH_END_PRIMARY_PLATE_
 const MATCH_END_SECONDARY_PLATE_WIDTH = 220;
 const MATCH_END_SECONDARY_PLATE_HEIGHT = 26;
 const MATCH_END_SECONDARY_BASELINE = MATCH_END_SECONDARY_TOP + 19;
+/** The set-state banner sits below the winner line. */
+const MATCH_END_BANNER_TOP = MATCH_END_SECONDARY_TOP + MATCH_END_SECONDARY_PLATE_HEIGHT + 8;
+const MATCH_END_BANNER_PLATE_WIDTH = 240;
+const MATCH_END_BANNER_PLATE_HEIGHT = 30;
+const MATCH_END_BANNER_BASELINE = MATCH_END_BANNER_TOP + 22;
 /** Where `K.O.` sits over the losing fighter's half, as basis points across the frame. */
 const MATCH_END_SIDE_BASIS_POINTS: readonly [number, number] = [2_800, 7_200];
 
@@ -1096,6 +1111,20 @@ function drawMatchEndOverlay(
     fill: ARENA_PALETTE.hudPlate,
   });
   arcadeText(ctx, theme, secondary, centre, MATCH_END_SECONDARY_BASELINE, 'center', theme.ink);
+
+  // The set-state line, when the caller supplied one: ROUND 2 between rounds,
+  // YOU WIN / YOU LOSE when the set is decided. Gold, because it is the headline
+  // the whole set builds toward, on its own plate under the winner line.
+  if (matchEnd.banner !== undefined && matchEnd.banner.length > 0) {
+    drawArcadePlate(ctx, {
+      x: centre - Math.round(MATCH_END_BANNER_PLATE_WIDTH / 2),
+      y: MATCH_END_BANNER_TOP,
+      width: MATCH_END_BANNER_PLATE_WIDTH,
+      height: MATCH_END_BANNER_PLATE_HEIGHT,
+      fill: ARENA_PALETTE.hudPlate,
+    });
+    arcadeText(ctx, theme, matchEnd.banner, centre, MATCH_END_BANNER_BASELINE, 'center', ARENA_PALETTE.gold);
+  }
 }
 
 /**

@@ -1,6 +1,6 @@
 import { DEFAULT_FIGHTER_CONFIG } from '../../../../packages/env-fighter/src/config';
 import { createFighterEnvironment } from '../../../../packages/env-fighter/src/environment';
-import { escapeHtml, prefersReducedMotion, type CanvasSurface, type HostView } from '../main';
+import { escapeHtml, prefersReducedMotion, roundPipsFor, type CanvasSurface, type HostView } from '../main';
 import { createBlockArtist, type FighterArtist } from '../render/artist';
 import {
   DEFAULT_AUDIO_TUNING,
@@ -362,11 +362,22 @@ export function mountSpectatePanel(host: SpectateHost, deps: SpectatePanelDeps):
     if (frame === undefined) {
       return;
     }
+    // Story 12.7. The Match a visitor is watching also ends with something on
+    // screen, not just fighters that stop. Six of the seven committed spectate
+    // logs end in timeout, so this is the surface where the silence was loudest:
+    // across the film's final Decision Point the winner's pip fills and the KO /
+    // TIME OVER overlay draws, read off the film's own `result` exactly as the
+    // replay player reads it, pure in the frame position.
+    const atMatchEnd = film.states.length >= 2 && frame.decisionPoint >= film.states.length - 2;
     drawJuicedFrame(ctx, frame, track.at(clockIndex), {
       config: DEFAULT_FIGHTER_CONFIG,
       viewport,
       artists: dressing.artists,
       backdrop: dressing.backdrop,
+      roundsWon: atMatchEnd ? roundPipsFor(film.result.outcome) : undefined,
+      matchEnd: atMatchEnd
+        ? { endReason: film.result.endReason, outcome: film.result.outcome }
+        : undefined,
       // Story 11.6. Absent until each decodes; absent is a named degrade in both
       // cases (9.5's square sparks, and 11.4's procedural beam) rather than a
       // failure.

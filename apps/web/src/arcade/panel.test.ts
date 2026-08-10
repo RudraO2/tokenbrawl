@@ -8,12 +8,33 @@ import type {
   ArcadeSetEnd,
 } from './session';
 import {
+  ROUND_END_HOLD_FRAMES,
   arcadeMarkup,
   mountArcadePanel,
   type ArcadeHost,
   type ArcadeKeyEvent,
   type ArcadeNode,
 } from './panel';
+
+/** A view whose animation-frame queue is pumped by hand, one callback per flush. */
+function createFakeView(): HostView & { readonly flush: () => boolean } {
+  const callbacks: (() => void)[] = [];
+  return {
+    requestAnimationFrame: (callback: () => void): number => {
+      callbacks.push(callback);
+      return callbacks.length;
+    },
+    cancelAnimationFrame: (): void => undefined,
+    flush: (): boolean => {
+      const next = callbacks.shift();
+      if (next === undefined) {
+        return false;
+      }
+      next();
+      return true;
+    },
+  };
+}
 
 /**
  * Story 12.7's surface: an arcade set is best-of-three, driven without a DOM.
@@ -219,10 +240,25 @@ describe('a best-of-three set plays out on one screen (12.7)', () => {
     mountArcadePanel(host, { runSession: fake.runSession });
 
     host.fire('[data-arcade-play]', 'click');
+    // humanSide defaults to 0, so the score is shown from the visitor's own
+    // side: they won one, lost two.
     fake.config().onSetEnd?.(setEnd([1, 2], false, [logFor('p2'), logFor('p1'), logFor('p2')]));
 
     expect(host.node('[data-arcade-setresult-text]').innerHTML).toContain('lose');
-    expect(host.node('[data-arcade-setresult-text]').innerHTML).toContain('2-1');
+    expect(host.node('[data-arcade-setresult-text]').innerHTML).toContain('1-2');
+  });
+
+  it('reports a tied set as a draw rather than a loss', () => {
+    const host = createHost();
+    const fake = createFakeSession();
+    mountArcadePanel(host, { runSession: fake.runSession });
+
+    host.fire('[data-arcade-play]', 'click');
+    fake.config().onSetEnd?.(setEnd([1, 1], false, [logFor('p1'), logFor('p2'), logFor('draw')]));
+
+    const text = host.node('[data-arcade-setresult-text]').innerHTML;
+    expect(text).toContain('draw');
+    expect(text).not.toContain('lose');
   });
 
   it('a round that does not end the set holds and then resolves for the next round', async () => {
@@ -272,6 +308,35 @@ describe('a best-of-three set plays out on one screen (12.7)', () => {
     fake.config().onSetEnd?.(setEnd([0, 2], false, [logFor('p2'), logFor('p2')]));
     host.fire('[data-arcade-select]', 'click');
     expect(returned).toBe(1);
+  });
+
+  it('holds the ending for a counted number of animation frames, never a timer', async () => {
+    const host = createHost();
+    const fake = createFakeSession();
+    const view = createFakeView();
+    mountArcadePanel(host, { runSession: fake.runSession, view });
+
+    host.fire('[data-arcade-play]', 'click');
+    // A non-terminal round: the returned promise is the between-round hold.
+    const hold = fake.config().onRoundEnd?.(roundEnd(0, 'p1', [1, 0], false));
+    let done = false;
+    void Promise.resolve(hold).then(() => {
+      done = true;
+    });
+
+    // Counted, not timed: it advances only when animation frames are pumped, and
+    // exactly `ROUND_END_HOLD_FRAMES` of them are needed. Nothing resolves it
+    // otherwise -- a bare `await` here would hang if it were a `setTimeout`.
+    for (let frame = 0; frame < ROUND_END_HOLD_FRAMES - 1; frame += 1) {
+      view.flush();
+    }
+    await Promise.resolve();
+    expect(done).toBe(false);
+
+    view.flush();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(done).toBe(true);
   });
 
   it('a second Play while a set is running is ignored', () => {

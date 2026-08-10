@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { CommandLogV2, TerminalResult } from '@tokenbrawl/contracts';
+import { createFighterEnvironment } from '../../../../packages/env-fighter/src/environment';
+import { buildReplayFilm } from '../replay/film';
 import { defaultKeyMap, type ArcadeMatchHandle, type ArcadeRunConfig } from './run';
 import {
   MAX_ROUNDS,
@@ -290,5 +292,47 @@ describe('driving the set (12.7)', () => {
     // stamps survive to the set result unchanged.
     expect(collected).toStrictEqual([first, second]);
     expect(collected.every((log) => log.agents[0].kind === 'human')).toBe(true);
+  });
+});
+
+describe('a real set produces up-to-three verifying logs (12.7, AC: inspect the logs)', () => {
+  it('drives a whole set of real Matches and every log verifies its own hash', async () => {
+    const collected: CommandLogV2[] = [];
+    let over = false;
+    const session = runArcadeSession({
+      seed: 4_601,
+      humanSide: 0,
+      mapInput: defaultKeyMap,
+      // Default `run` -- runArcadeMatch -- so these are full, unmodified Matches.
+      onSetEnd: (event) => {
+        collected.push(...event.logs);
+        over = true;
+      },
+    });
+
+    const KEYS = ['ArrowRight', 'z', 'x', 'ArrowLeft', 'c'];
+    let step = 0;
+    // Between rounds `feedInput` is briefly a no-op (the next round has not
+    // started yet); feeding straight through is harmless and keeps the set
+    // moving without modelling the gap.
+    while (!over && step < 40_000) {
+      session.feedInput(KEYS[step % KEYS.length]);
+      step += 1;
+      await Promise.resolve();
+    }
+
+    expect(over).toBe(true);
+    expect(collected.length).toBeGreaterThanOrEqual(2);
+    expect(collected.length).toBeLessThanOrEqual(3);
+
+    const env = createFighterEnvironment();
+    for (const log of collected) {
+      // Each is a full, unmodified CommandLogV2: schema v2, a human Agent kept
+      // out of the ratings (AD-14), and a Final-State Hash that verifies against
+      // an independent replay -- the frozen contract honoured, no round field.
+      expect(log.schemaVersion).toBe('2.0.0');
+      expect(log.agents.some((agent) => agent.kind === 'human')).toBe(true);
+      expect(buildReplayFilm(log, env).matchesRecordedHash).toBe(true);
+    }
   });
 });

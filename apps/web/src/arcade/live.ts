@@ -120,7 +120,21 @@ export interface LiveArena {
    * result, not a timer.
    */
   readonly showMatchEnd: (matchEnd: MatchEndOverlay | null) => void;
-  /** Halts the clock. Called by the panel when the set ends. */
+  /**
+   * Story 12.7. Jumps to the round's final frame and draws it, before the overlay
+   * goes over it.
+   *
+   * A Match against a human resolves only as fast as they press keys, and the
+   * clock draws one film frame per animation frame, so when the round's log
+   * settles the clock is usually still catching up. Stamping the KO / TIME OVER
+   * overlay on whatever frame it happened to reach -- and then clearing the
+   * states for the next round -- would draw the ending over a mid-round pose and
+   * throw away the frames the visitor never saw, the KO among them. `finish`
+   * draws the true last frame first, so the overlay sits on the fight's actual
+   * final moment.
+   */
+  readonly finish: () => void;
+  /** Halts the clock. Called by the panel on failure. */
   readonly stop: () => void;
   /**
    * Story 12.4. Suspends and resumes painting without ending the Match.
@@ -335,6 +349,28 @@ export function createLiveArena(deps: LiveArenaDeps): LiveArena {
     cancel();
   };
 
+  /**
+   * Draws the last frame the states allow, right now, and stops advancing.
+   *
+   * Not `stop()`: the arena stays `active` so the overlay repaint and the next
+   * round's `begin` still work. Only the scheduled advance ends -- the clock is
+   * parked on the final frame so the overlay lands on it. A no-op when no frame
+   * has been produced yet (a round that ended before its first state, which the
+   * environment cannot do, but the guard keeps the paint honest).
+   */
+  const finish = (): void => {
+    const end = availableEnd();
+    if (end < 0) {
+      return;
+    }
+    clock.running = false;
+    cancel();
+    clock.index = end;
+    if (!clock.paused) {
+      paint(end);
+    }
+  };
+
   const begin = (): void => {
     stop();
     sim.states = [];
@@ -430,6 +466,7 @@ export function createLiveArena(deps: LiveArenaDeps): LiveArena {
       hud.matchEnd = matchEnd;
       repaint();
     },
+    finish,
     stop,
     setPaused,
     frameIndex: (): number => clock.index,

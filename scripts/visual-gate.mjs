@@ -577,7 +577,16 @@ const HUD_REGION_INK_MIN = 30;
  */
 const MATCH_END_OVERLAY_TOP = 180;
 const MATCH_END_BAND_HEIGHT = 40;
-const MATCH_END_BAND_WIDTH = 300;
+/**
+ * Wide enough to catch the ending word wherever it lands: `TIME OVER` is centred,
+ * but `K.O.` sits over the losing fighter's half (renderer's
+ * `MATCH_END_SIDE_BASIS_POINTS`, ~269/691 px on a 960 backbuffer). A narrow
+ * centre band would see the timeout word and be blind to the KO one -- and to a
+ * KO word that regressed off-canvas. This band spans 220..740, covering both KO
+ * positions and the centred timeout, while staying below the HUD and above the
+ * fighters so frame 0 still carries no gold here.
+ */
+const MATCH_END_BAND_WIDTH = 520;
 /** Gold pixels the ending word must carry for the overlay to have drawn. */
 const MATCH_END_GOLD_MIN = 20;
 
