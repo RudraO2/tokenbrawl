@@ -1,0 +1,45 @@
+{
+  "label": "12-2-arcade-renders-while-you-play",
+  "ranAt": "2026-08-10T08:57:19.636Z",
+  "checks": [
+    {
+      "id": "arcade-live-canvas",
+      "ok": true,
+      "detail": "started=true canvases=1 visible=1"
+    },
+    {
+      "id": "arcade-input-moves-fighter",
+      "ok": true,
+      "detail": "arena hash 1394814420 -> -1164058329"
+    },
+    {
+      "id": "canvas-not-blank-desktop",
+      "ok": true,
+      "detail": "3 canvas(es), ink app:98.0% arcade:98.3% spectate:99.0%"
+    },
+    {
+      "id": "spectate-animates",
+      "ok": true,
+      "detail": "hash -1202184689 -> 330202616"
+    },
+    {
+      "id": "no-horizontal-overflow",
+      "ok": false,
+      "detail": "scrollWidth=992 clientWidth=390 widest: canvas.tb-spectate-canvas@992px, p.tb-tagline@409px"
+    },
+    {
+      "id": "canvas-not-blank-mobile",
+      "ok": true,
+      "detail": "3 canvas(es), ink app:98.0% arcade:0.0% spectate:98.3%"
+    },
+    {
+      "id": "console-clean",
+      "ok": true,
+      "detail": "no errors or warnings"
+    }
+  ],
+  "waived": [
+    "no-horizontal-overflow"
+  ],
+  "staleWaivers": []
+}

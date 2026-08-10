@@ -188,22 +188,38 @@ describe('the live-frame tee', () => {
     expect(watchedLog.finalStateHash).toBe(headlessLog.finalStateHash);
   });
 
-  it('contains a throw from the listener rather than failing the Match', async () => {
-    const handle = runArcadeMatch({
-      seed: 4_601,
-      humanSide: 0,
-      mapInput: defaultKeyMap,
-      onState: () => {
-        throw new Error('a UI callback blew up');
-      },
-    });
-    await driveToTerminal(handle);
-    const log = await handle.log;
+  it('contains a throw from the listener, and reports it exactly once', async () => {
+    const warnings: string[] = [];
+    const realWarn = console.warn;
+    console.warn = (message: unknown): void => {
+      warnings.push(String(message));
+    };
 
-    // The Match still reached a terminal state despite every state report
-    // throwing -- the tee swallowed each one exactly as the onLegalActions tee
-    // does.
-    expect(['p1', 'p2', 'draw']).toContain(log.result.outcome);
+    try {
+      const handle = runArcadeMatch({
+        seed: 4_601,
+        humanSide: 0,
+        mapInput: defaultKeyMap,
+        onState: () => {
+          throw new Error('a UI callback blew up');
+        },
+      });
+      await driveToTerminal(handle);
+      const log = await handle.log;
+
+      // The Match still reached a terminal state despite every state report
+      // throwing -- the tee contained each one exactly as the onLegalActions tee
+      // does.
+      expect(['p1', 'p2', 'draw']).toContain(log.result.outcome);
+    } finally {
+      console.warn = realWarn;
+    }
+
+    // Once, not per frame: a live view that dies must be visible to the visual
+    // gate's `console-clean` check, and a per-frame warning would drown the very
+    // console it reports through.
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain('Arcade live view failed');
   });
 });
 

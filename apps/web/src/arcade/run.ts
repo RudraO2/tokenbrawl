@@ -166,11 +166,25 @@ export function runArcadeMatch(config: ArcadeRunConfig): ArcadeMatchHandle {
   // The observation is contained in a try/catch for the reason the human tee is:
   // `onState` runs a canvas draw, and a UI callback that threw must not fail a
   // Decision Point.
+  //
+  // Reported, never swallowed -- and reported exactly once per Match. `onState`
+  // runs the live view's whole rebuild-and-paint synchronously, so a sheet that
+  // will not draw throws on every frame from then on: a bare `catch {}` would
+  // leave the visitor watching a frozen arena while their keys still registered,
+  // with nothing anywhere saying why, and `console-clean` would pass on a broken
+  // surface. One warning is what makes that failure visible to the gate; warning
+  // per frame would drown the console it is trying to report through.
+  const reported = { failed: false };
   const observe = (state: FighterState): FighterState => {
     try {
       config.onState?.(state);
-    } catch {
-      // A reporting listener that threw. The Match is not its business.
+    } catch (error) {
+      if (!reported.failed) {
+        reported.failed = true;
+        console.warn(
+          `Arcade live view failed and the fight will stop updating: ${String(error instanceof Error ? error.message : error)}`,
+        );
+      }
     }
     return state;
   };

@@ -104,17 +104,23 @@ export interface LiveArena {
 }
 
 /**
- * A one-frame film for the reset state, before any step has happened.
+ * The film for however many states have arrived.
  *
- * `toFrames` needs at least two states to emit a transition, so on the very
+ * `toFrames` needs at least two states to emit a transition, and on the very
  * first `pushState` -- the reset state, reported synchronously the moment the
- * Match starts -- there is nothing for it to expand. Drawing the pair standing
- * at their start positions is what puts sprites on the canvas immediately
- * rather than a blank stage until the visitor's first key, which is what
- * `canvas-not-blank` measures on the `#arcade` surface.
+ * Match starts -- there is only one. Rather than hand-building a frame here,
+ * the single state is passed as *both* ends of one transition: `toFrames` then
+ * expands it exactly as it expands a real step, and the fighters stand at their
+ * start positions until the visitor's first key. That matters beyond tidiness --
+ * this module's first constraint is that the frame model is single-sourced, and
+ * a hand-built `RenderFrame` would be the one shape on this surface that no
+ * replay ever produces and no replay test could reach.
  */
-function stillFrame(state: FighterState): readonly RenderFrame[] {
-  return [{ index: 0, decisionPoint: 0, progressBasisPoints: 0, from: state, to: state }];
+function filmFor(states: readonly FighterState[]): readonly RenderFrame[] {
+  if (states.length === 0) {
+    return [];
+  }
+  return toFrames(states.length === 1 ? [states[0], states[0]] : states);
 }
 
 /**
@@ -166,7 +172,7 @@ export function createLiveArena(deps: LiveArenaDeps): LiveArena {
   const availableEnd = (): number => (sim.track === null ? -1 : sim.track.frameCount - 1);
 
   const rebuild = (): void => {
-    sim.frames = sim.states.length >= 2 ? toFrames(sim.states) : sim.states.length === 1 ? stillFrame(sim.states[0]) : [];
+    sim.frames = filmFor(sim.states);
     sim.track =
       sim.frames.length > 0
         ? buildJuiceTrack(sim.frames, DEFAULT_JUICE_TUNING, arena, reducedMotion, DEFAULT_FIGHTER_CONFIG)

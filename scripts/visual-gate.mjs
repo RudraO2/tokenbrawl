@@ -253,12 +253,25 @@ function killTree(child) {
   }
 }
 
+/** Where Chrome sits under each Windows install root. */
+const CHROME_UNDER_ROOT = 'Google/Chrome/Application/chrome.exe';
+
 function findChrome() {
   if (process.env.CHROME_PATH) return process.env.CHROME_PATH;
+  // The Windows roots are read from the environment rather than written as
+  // drive-letter literals. Two reasons, and the second is the one that bites:
+  // a machine with Chrome on another drive or a localised "Program Files" is
+  // found this way and was not before -- and a tracked source file containing an
+  // absolute path fails Story 9.1's out-of-root exclusion test
+  // (`packages/cli/src/extraction-exclusion.test.ts`), which this script tripped
+  // from the moment Story 12-1 added it.
+  const windowsRoots = [
+    process.env.PROGRAMFILES,
+    process.env['PROGRAMFILES(X86)'],
+    process.env.LOCALAPPDATA,
+  ].filter((root) => typeof root === 'string' && root.length > 0);
   const candidates = [
-    'C:/Program Files/Google/Chrome/Application/chrome.exe',
-    'C:/Program Files (x86)/Google/Chrome/Application/chrome.exe',
-    join(process.env.LOCALAPPDATA ?? '', 'Google/Chrome/Application/chrome.exe'),
+    ...windowsRoots.map((root) => join(root, CHROME_UNDER_ROOT)),
     '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
     '/usr/bin/google-chrome',
     '/usr/bin/chromium',
@@ -376,8 +389,24 @@ const dispatchKeydown = (selector, key) => `(() => {
   return true;
 })()`;
 
-/** The pixel hash of the single visible canvas under `host`, or `null` when there is none. */
-const hostCanvasHashProbe = (hostSelector) => `(() => {
+/**
+ * Height of the HUD band at the top of the arena, in backbuffer pixels.
+ *
+ * `renderer.ts`'s `HUD_BOTTOM` is 118; 130 leaves margin under it. The
+ * fighter-movement check below hashes *below* this line and nothing above it,
+ * which is the difference between a check that measures the fight and one that
+ * measures the clock: `TICK NNN` and the health/meter bars change every Decision
+ * Point on their own, so a whole-canvas hash goes green on a canvas whose
+ * fighters are frozen, drawn as blocks, or drawn off-stage. Excluding the band
+ * makes the check fail if the *fighters* stop moving, which is what it is for.
+ */
+const ARENA_TOP_PX = 130;
+
+/**
+ * The pixel hash of the arena region (below the HUD) of the single visible
+ * canvas under `host`, or `null` when there is none.
+ */
+const hostArenaHashProbe = (hostSelector) => `(() => {
   const host = document.querySelector(${JSON.stringify(hostSelector)});
   if (!host) return null;
   const canvas = [...host.querySelectorAll('canvas')].find((c) => {
@@ -387,7 +416,9 @@ const hostCanvasHashProbe = (hostSelector) => `(() => {
   if (!canvas) return null;
   const ctx = canvas.getContext('2d');
   if (!ctx) return null;
-  const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+  const top = ${ARENA_TOP_PX};
+  if (canvas.height <= top) return null;
+  const data = ctx.getImageData(0, top, canvas.width, canvas.height - top).data;
   let hash = 0;
   for (let i = 0; i < data.length; i += 28) {
     hash = (hash * 31 + data[i] + data[i + 1] * 3 + data[i + 2] * 7) | 0;
@@ -519,23 +550,30 @@ async function main() {
         // --- C1b arcade-input-moves-fighter (Story 12.2) -------------------
         // The Match is now waiting on the visitor at its first Decision Point.
         // Thirty real ArrowRight keydowns walk the fighter across the stage; the
-        // canvas the fighter is drawn on must change between the first press and
+        // arena the fighter is drawn in must change between the first press and
         // the last. Driven through `keydown` on the page, not a call into the
         // panel, so it exercises the listener a keyboard reaches.
-        const arcadeHashBefore = await cdp.evaluate(hostCanvasHashProbe('#arcade'));
+        //
+        // Hashed below the HUD band: the `TICK` readout and the bars advance on
+        // their own every Decision Point, so a whole-canvas hash would pass on a
+        // frozen fighter. See `ARENA_TOP_PX`.
+        const arcadeHashBefore = await cdp.evaluate(hostArenaHashProbe('#arcade'));
         for (let press = 0; press < 30; press += 1) {
           await cdp.evaluate(dispatchKeydown('#arcade [data-arcade-keys]', 'ArrowRight'));
           await sleep(40);
         }
-        // Let the live clock animate through the last states the presses queued.
-        await sleep(500);
-        const arcadeHashAfter = await cdp.evaluate(hostCanvasHashProbe('#arcade'));
+        // Let the live clock draw through the states the presses queued. The
+        // clock advances one film frame per animation-frame callback and 30
+        // presses queue far more than that, so this waits for the drain rather
+        // than sampling mid-flight -- see the story's note on live-view pacing.
+        await sleep(4_000);
+        const arcadeHashAfter = await cdp.evaluate(hostArenaHashProbe('#arcade'));
         record(
           'arcade-input-moves-fighter',
           arcadeHashBefore !== null && arcadeHashAfter !== null && arcadeHashBefore !== arcadeHashAfter,
           arcadeHashBefore === null
             ? 'no visible canvas under #arcade to drive'
-            : `hash ${arcadeHashBefore} -> ${arcadeHashAfter}`,
+            : `arena hash ${arcadeHashBefore} -> ${arcadeHashAfter}`,
         );
       }
 

@@ -8,6 +8,7 @@ import { createBlockArtist } from '../render/artist';
 import { DEFAULT_JUICE_TUNING, arenaFor, buildJuiceTrack } from '../render/juice';
 import { drawJuicedFrame } from '../render/juice-draw';
 import { DEFAULT_ROSTER } from '../render/roster';
+import { toFrames } from '../replay/film';
 import { createLiveArena } from './live';
 
 /**
@@ -91,12 +92,16 @@ function states(count: number): readonly FighterState[] {
   return out;
 }
 
-/** The op-name sequence a direct `drawJuicedFrame` produces for the still reset frame. */
+/**
+ * The op-name sequence a direct `drawJuicedFrame` produces for the reset frame.
+ *
+ * Built through `toFrames` with the single state at both ends -- the identical
+ * shared transform `live.ts`'s `filmFor` uses -- so this is a true mirror of the
+ * arena's own path rather than a hand-built frame that only resembles it.
+ */
 function directStillOps(state: FighterState, reducedMotion: boolean): readonly string[] {
   const ctx = createRecordingCanvas();
-  const frames = [
-    { index: 0, decisionPoint: 0, progressBasisPoints: 0, from: state, to: state },
-  ];
+  const frames = toFrames([state, state]);
   const track = buildJuiceTrack(
     frames,
     DEFAULT_JUICE_TUNING,
@@ -190,6 +195,49 @@ describe('the live arena', () => {
     expect(view.pending()).toBeGreaterThan(0);
     view.flush();
     expect(arena.frameIndex()).toBeGreaterThan(caughtUp);
+  });
+
+  /**
+   * The pacing property, pinned because it is a known and accepted limitation
+   * rather than an accident (see the story's "Live-view pacing" note).
+   *
+   * The clock advances exactly one film frame per callback and never skips, so a
+   * visitor who outruns it builds a backlog. What must hold is that the backlog
+   * is *bounded and drains completely*: given enough callbacks the arena arrives
+   * at the last state the Match produced, rather than settling permanently
+   * behind it. A catch-up that skipped frames when the backlog grew would be
+   * faster and would leak how quickly states arrived, which INV-3 forbids on
+   * this path because it will later show a Deployment.
+   */
+  it('drains a backlog completely rather than settling behind the fight', () => {
+    const canvas = createRecordingCanvas();
+    const view = createFakeView();
+    const arena = createLiveArena({ canvas, view, reducedMotion: false });
+    const seq = states(6);
+
+    arena.begin();
+    // Every state at once: the visitor pressed far faster than the clock draws.
+    for (const state of seq) {
+      arena.pushState(state);
+    }
+
+    let guard = 0;
+    while (view.flush() && guard < 10_000) {
+      guard += 1;
+    }
+
+    // Caught up to the very last frame the states produced -- nothing is left
+    // undrawn, and no callback is still scheduled.
+    const frames = toFrames(seq);
+    const track = buildJuiceTrack(
+      frames,
+      DEFAULT_JUICE_TUNING,
+      arenaFor(DEFAULT_FIGHTER_CONFIG),
+      false,
+      DEFAULT_FIGHTER_CONFIG,
+    );
+    expect(arena.frameIndex()).toBe(track.frameCount - 1);
+    expect(view.pending()).toBe(0);
   });
 
   it('stops drawing once stopped', () => {
