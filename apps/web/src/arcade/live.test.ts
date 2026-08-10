@@ -293,3 +293,91 @@ describe('the live arena', () => {
     });
   });
 });
+
+/**
+ * Story 12.4. A hidden screen does not paint.
+ *
+ * The gate's `hidden-screens-are-idle` check hashes every off-screen canvas
+ * 700ms apart and fails if the hash moved. These cases are that check as a unit
+ * test: they assert the arena makes *no drawing call at all* while paused, in
+ * every way a paint can arrive here -- the clock, the synchronous first state,
+ * and a sprite pack decoding mid-Match.
+ */
+describe('the live arena while its screen is hidden (Story 12.4)', () => {
+  it('paints nothing at all while paused, however many states arrive', () => {
+    const canvas = createRecordingCanvas();
+    const view = createFakeView();
+    const arena = createLiveArena({ canvas, view, reducedMotion: false });
+
+    arena.setPaused(true);
+    arena.begin();
+    for (const state of states(6)) {
+      arena.pushState(state);
+    }
+    for (let i = 0; i < 30; i += 1) {
+      view.flush();
+    }
+
+    expect(canvas.calls).toStrictEqual([]);
+  });
+
+  it('does not repaint when a sprite pack decodes while it is hidden', () => {
+    // The one paint that arrives with no clock behind it, and therefore the one
+    // a `running`-flag guard would have missed.
+    const canvas = createRecordingCanvas();
+    const arena = createLiveArena({ canvas, view: createFakeView(), reducedMotion: false });
+
+    arena.begin();
+    arena.pushState(states(1)[0]);
+    arena.setPaused(true);
+    const painted = canvas.calls.length;
+    arena.setArtist(0, createBlockArtist());
+    arena.setBackdrop(undefined as unknown as Parameters<typeof arena.setBackdrop>[0]);
+
+    expect(canvas.calls.length).toBe(painted);
+  });
+
+  it('picks the fight back up where it left off when the screen is shown again', () => {
+    const canvas = createRecordingCanvas();
+    const view = createFakeView();
+    const arena = createLiveArena({ canvas, view, reducedMotion: false });
+
+    arena.setPaused(true);
+    arena.begin();
+    for (const state of states(6)) {
+      arena.pushState(state);
+    }
+    expect(canvas.calls).toStrictEqual([]);
+
+    arena.setPaused(false);
+    // Repainted immediately on show, rather than after one animation frame:
+    // a returning visitor must not see a blank canvas.
+    expect(canvas.calls.length).toBeGreaterThan(0);
+
+    const before = arena.frameIndex();
+    for (let i = 0; i < 10; i += 1) {
+      view.flush();
+    }
+    // The states that arrived while hidden were kept, so the film advances
+    // rather than restarting: pausing suspends the picture, not the Match.
+    expect(arena.frameIndex()).toBeGreaterThan(before);
+  });
+
+  it('is idempotent, so a repeated hide neither double-cancels nor double-paints', () => {
+    const canvas = createRecordingCanvas();
+    const view = createFakeView();
+    const arena = createLiveArena({ canvas, view, reducedMotion: false });
+
+    arena.begin();
+    arena.pushState(states(3)[0]);
+    arena.setPaused(true);
+    arena.setPaused(true);
+    const painted = canvas.calls.length;
+    arena.setPaused(false);
+    const afterShow = canvas.calls.length;
+    arena.setPaused(false);
+
+    expect(afterShow).toBeGreaterThan(painted);
+    expect(canvas.calls.length).toBe(afterShow);
+  });
+});

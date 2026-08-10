@@ -50,6 +50,13 @@ body {
 
 .tb-masthead {
   display: flex;
+  /*
+   * Story 12.4. Without this the wordmark and the tagline share one line that
+   * cannot shrink: at 390px the gate measured `.tb-tagline` running to 409px
+   * and the document scrolling sideways. A flex item's minimum is its content,
+   * so the fix is to let the row break rather than to shrink the type.
+   */
+  flex-wrap: wrap;
   align-items: baseline;
   gap: var(--tb-space-2);
   margin-bottom: var(--tb-space-3);
@@ -1045,6 +1052,133 @@ body {
 .tb-leaderboard-empty {
   border: var(--tb-border-width) solid var(--tb-ink);
   padding: var(--tb-space-3);
+  color: var(--tb-muted);
+  font-family: var(--tb-font-mono);
+}
+
+/* --- Story 12.4: the cabinet ------------------------------------------- *
+ *
+ * The page stopped being five stacked panels and became a set of screens you
+ * move between. `shell/router.ts` moves one attribute; these two rules are the
+ * whole of what that attribute means. Page chrome throughout, so every rule in
+ * docs/DESIGN.md holds: ink borders at the full width, the hard offset shadow
+ * with zero blur, square corners, flat fills, press-displaces, stepped motion.
+ * The arena's release covers `src/render/**\/*.ts` and nothing here.
+ *
+ * `display: none` rather than `visibility: hidden` or an off-screen transform,
+ * because the acceptance criterion is a zero-area bounding box and only
+ * `display` gives one -- and because a hidden screen must cost nothing to lay
+ * out on a phone, which is half the point of the story.
+ */
+
+[data-screen] {
+  display: none;
+}
+
+[data-screen][data-screen-active] {
+  display: block;
+}
+
+.tb-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--tb-space-2);
+  margin-bottom: var(--tb-space-3);
+  border-bottom: var(--tb-border-width) solid var(--tb-ink);
+  padding-bottom: var(--tb-space-2);
+}
+
+/*
+ * A link, not a button, so the keyboard reaches it and the URL survives a copy
+ * -- see `shell/nav.ts`. Styled as the sibling of `.tb-button` rather than by
+ * borrowing that class, because the two differ in exactly one place that
+ * matters (`text-decoration`) and sharing a class to then override it is how a
+ * house style stops being one.
+ */
+.tb-nav-link {
+  display: inline-block;
+  font-family: var(--tb-font-display);
+  font-weight: 800;
+  font-size: 16px;
+  letter-spacing: var(--tb-tracking-display);
+  text-transform: uppercase;
+  text-decoration: none;
+  padding: var(--tb-space-1) var(--tb-space-2);
+  background: var(--tb-bg);
+  color: var(--tb-ink);
+  border: var(--tb-border-width) solid var(--tb-ink);
+  box-shadow: var(--tb-shadow);
+  transition:
+    transform var(--tb-step) step-end,
+    box-shadow var(--tb-step) step-end,
+    background var(--tb-step) step-end,
+    color var(--tb-step) step-end;
+}
+
+/* Invert rather than tint, exactly as `.tb-button` does. */
+.tb-nav-link:hover {
+  background: var(--tb-accent);
+  color: var(--tb-bg);
+}
+
+.tb-nav-link:active {
+  transform: translate(var(--tb-shadow-offset), var(--tb-shadow-offset));
+  box-shadow: 0 0 0 var(--tb-accent);
+}
+
+.tb-nav-link:focus-visible {
+  outline: 3px solid var(--tb-accent);
+  outline-offset: var(--tb-space-1);
+}
+
+/*
+ * The screen you are on. `aria-current` is the selector rather than a class,
+ * so the visible state and the announced state cannot drift apart -- there is
+ * only one attribute and both read it.
+ */
+.tb-nav-link[aria-current='page'] {
+  background: var(--tb-accent);
+  color: var(--tb-bg);
+}
+
+/*
+ * Story 12.4: the Spectate stage, which never had a rule of its own.
+ *
+ * That is why the page scrolled sideways: the canvas carried a 960px backbuffer
+ * and no CSS width at all, so it laid out at 960 (992 with its frame) inside a
+ * 390px viewport. A deliberate copy of `.tb-stage`/`.tb-canvas`, for the reason
+ * `.tb-arcade-stage` is one: the fight a visitor watches and the replay it came
+ * from should read as one product.
+ */
+.tb-spectate-stage {
+  margin: var(--tb-space-2) 0;
+  border: var(--tb-border-width) solid var(--tb-ink);
+  box-shadow: var(--tb-shadow);
+  background: var(--tb-bg);
+  max-width: 960px;
+}
+
+.tb-spectate-canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+  /* Sprite-crisp scaling: pixel art, not a photograph -- same as `.tb-canvas`. */
+  image-rendering: pixelated;
+}
+
+/* The reserved character-select screen. Story 12.5 replaces what is inside it. */
+.tb-select-heading {
+  margin: 0 0 var(--tb-space-2);
+  font-size: 32px;
+  font-weight: 800;
+  letter-spacing: var(--tb-tracking-display);
+  text-transform: uppercase;
+  line-height: 1;
+}
+
+.tb-select-note {
+  max-width: 60ch;
+  margin: 0;
   color: var(--tb-muted);
   font-family: var(--tb-font-mono);
 }

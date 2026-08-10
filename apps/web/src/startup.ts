@@ -19,6 +19,15 @@ import {
 import { createVfxSheet, validateVfxSheetLayout, type VfxSheet } from './render/vfx-sheet';
 import { mountSpectatePanel, type SpectateHost, type SpectatePanel } from './spectate/panel';
 import { mountLandingPanel, type LandingHost, type LandingPanel } from './landing/panel';
+import { mountNav, type NavHost } from './shell/nav';
+import {
+  createScreenRouter,
+  type Screen,
+  type ScreenElement,
+  type ScreenRouter,
+  type ShellView,
+} from './shell/router';
+import { ROUTE_PLAY, ROUTE_REPLAY, ROUTE_WATCH, SCREENS } from './shell/screens';
 
 /**
  * Story 4.2: the bootstrap, and the order it does things in.
@@ -155,6 +164,15 @@ export interface StartupResult {
    * 9.8). Exposed for the same reason `byok`, `arcade` and `spectate` are.
    */
   readonly landing: LandingPanel | null;
+  /**
+   * The screen router (Story 12.4), or `null` in an environment with no
+   * `location` to route on -- every test that hands `startup` a bare object,
+   * and any embedding without a hash. A page with no router is the pre-12.4
+   * page: every panel mounted at once, which is a worse product but not a
+   * broken one, and it is the same warn-not-throw degrade every other surface
+   * here takes.
+   */
+  readonly router: ScreenRouter | null;
   /** The player currently on screen. Changes when a BYOK Match replaces the demo. */
   readonly current: () => MountedApp;
   /**
@@ -505,11 +523,6 @@ function mountSpectate(
   }
 }
 
-/** The optional structural shape a landing CTA needs of its scroll target -- nothing else. */
-interface ScrollableNode {
-  scrollIntoView?(): void;
-}
-
 /**
  * Mounts the landing page, or returns `null` when this page has no host for
  * it. Mirrors `mountByok`/`mountArcade`/`mountSpectate`'s warn-not-throw
@@ -518,24 +531,28 @@ interface ScrollableNode {
  *
  * The two CTAs are deliberately thin here: "Play vs CPU" calls the real
  * Arcade panel's own `play()` (the same Match `arcadeMarkup`'s own button
- * starts) and scrolls its section into view; "Watch Spectate" only scrolls,
- * since the Spectate stream is already playing ambiently the moment its
- * panel mounts. Neither duplicates panel logic -- `landing/panel.ts` never
- * imports `ArcadePanel` or `SpectatePanel`, only these two callbacks.
+ * starts); "Watch Spectate" only navigates, since the Spectate stream starts
+ * itself the moment its screen is shown. Neither duplicates panel logic --
+ * `landing/panel.ts` never imports `ArcadePanel` or `SpectatePanel`, only
+ * these two callbacks.
+ *
+ * Story 12.4 turned both from scrolls into routes, which is the change the
+ * story is named for: `scrollTo('#arcade')` was the honest expression of a
+ * page that was five stacked panels, and a cabinet has screens instead.
+ * Navigation happens *before* `play()`, not after -- the live arena will not
+ * paint while its screen is hidden, so starting the Match first would drop the
+ * opening frames on the floor.
  */
 function mountLanding(
   globals: BrowserGlobals,
   arcade: ArcadePanel | null,
   onGesture: () => void,
+  navigate: (route: string) => void,
 ): LandingPanel | null {
   const host = globals.document?.querySelector('#landing');
   if (host == null || globals.fetch == null) {
     return null;
   }
-  const scrollTo = (selector: string): void => {
-    const target = globals.document?.querySelector(selector) as unknown as ScrollableNode | null;
-    target?.scrollIntoView?.();
-  };
   try {
     return mountLandingPanel(host as unknown as LandingHost, {
       fetch: (url: string) => globals.fetch!(url),
@@ -544,20 +561,70 @@ function mountLanding(
       },
       onPlayCta: () => {
         onGesture();
+        navigate(ROUTE_PLAY);
         if (arcade === null) {
           warn('Landing page', 'Play vs CPU is unavailable: the Arcade panel did not mount.');
         } else {
           arcade.play();
         }
-        scrollTo('#arcade');
       },
       onSpectateCta: () => {
         onGesture();
-        scrollTo('#spectate');
+        navigate(ROUTE_WATCH);
       },
     });
   } catch (error) {
     warn('Landing panel unavailable', error);
+    return null;
+  }
+}
+
+/**
+ * Builds the screen router and the nav strip, or returns `null` when this
+ * environment has no hash to route on (Story 12.4).
+ *
+ * `null` is a supported configuration rather than a failure, and it is the one
+ * every existing test is in: `startup.test.ts` hands this function a bare
+ * object with `document`, `window` and `fetch` and nothing else. A page with no
+ * router is the pre-12.4 page -- every panel mounted at once -- which is a
+ * worse product but not a broken one, so this degrades the same warn-not-throw
+ * way every asset here does.
+ *
+ * The cast is the boundary one this file already makes for every host object:
+ * `tsconfig.base.json` has no DOM lib, so `globals.window` is declared as the
+ * shape the *player* needs of it (`HostView`: two animation-frame methods) and
+ * the router needs a different one. One lookup cannot be typed as two
+ * structural shapes at once; the real `Window` satisfies both.
+ */
+function mountRouter(globals: BrowserGlobals, screens: readonly Screen[]): ScreenRouter | null {
+  const shellView = globals.window as unknown as Partial<ShellView> | undefined;
+  if (
+    shellView == null ||
+    typeof shellView.addEventListener !== 'function' ||
+    shellView.location == null ||
+    typeof shellView.location.hash !== 'string'
+  ) {
+    return null;
+  }
+  try {
+    const navHost = globals.document?.querySelector('#screen-nav') as unknown as NavHost | null;
+    // A nav that could not mount must not cost the visitor the router: the
+    // links are one way to reach a screen, the URL is another, and the
+    // callbacks the panels hold are a third.
+    const markCurrent =
+      navHost == null || typeof navHost.querySelectorAll !== 'function'
+        ? null
+        : mountNav(
+            navHost,
+            screens.map((screen) => ({ route: screen.route, label: screen.label })),
+          );
+    return createScreenRouter({
+      view: shellView as ShellView,
+      screens,
+      ...(markCurrent === null ? {} : { onRoute: markCurrent }),
+    });
+  } catch (error) {
+    warn('Screen router unavailable, every panel will show at once', error);
     return null;
   }
 }
@@ -650,6 +717,16 @@ export async function startup(globals: BrowserGlobals): Promise<StartupResult | 
 
     const player: { mounted: MountedApp } = { mounted: renderApp(root, log, view, sink) };
 
+    /**
+     * The router, once it exists (Story 12.4).
+     *
+     * Held in a box for the same reason `panels` below is: `mount` is created
+     * before the router -- the router's screen callbacks need the panel handles,
+     * and the panels need `mount` -- and a finished Match has to be able to
+     * navigate to the screen it re-mounted on.
+     */
+    const shell: { router: ScreenRouter | null } = { router: null };
+
     /** Re-mounts the player on a new log, stopping the old clock first. */
     const mount = (nextLog: CommandLog): MountedApp => {
       // Without this the previous clock keeps its `requestAnimationFrame` loop
@@ -679,6 +756,11 @@ export async function startup(globals: BrowserGlobals): Promise<StartupResult | 
         mounted.setUlt(dressing.ult);
       }
       player.mounted = mounted;
+      // Story 12.4. Show the visitor the fight they just finished. Before the
+      // router this was a re-mount into whatever section they happened to be
+      // scrolled to; on a cabinet, a completed Match that re-mounts on a screen
+      // nobody is on is a replay played to an empty room.
+      shell.router?.go(ROUTE_REPLAY);
       return mounted;
     };
 
@@ -836,19 +918,91 @@ export async function startup(globals: BrowserGlobals): Promise<StartupResult | 
         spectatePanel.setUlt(dressing.ult);
       }
     }
-    const landingPanel = mountLanding(globals, arcadePanel, () => {
-      sink?.unlock();
+    const landingPanel = mountLanding(
+      globals,
+      arcadePanel,
+      () => {
+        sink?.unlock();
+      },
+      (route: string) => {
+        shell.router?.go(route);
+      },
+    );
+    const byokPanel = mountByok(globals, mount);
+
+    // --- Story 12.4: the cabinet -------------------------------------------
+    //
+    // Built last, because every screen callback below needs a panel handle and
+    // every panel needed `mount`. The router applies the current hash on
+    // construction, so the first thing it does is stop the four clocks the
+    // mounts above just started -- which is the point of the story that is not
+    // about layout.
+    //
+    // What each screen does when it is hidden is written here rather than in
+    // `router.ts` for the same reason the CTAs are two callbacks rather than a
+    // panel import: this is the one file that already holds every handle, and
+    // the router must not learn what a Spectate walk or a playback clock is.
+    const watch = { playing: spectatePanel?.isPlaying() ?? false };
+    const screens: Screen[] = SCREENS.map((spec) => {
+      const element = (globals.document?.querySelector(spec.selector) ??
+        null) as unknown as ScreenElement | null;
+      const base = { route: spec.route, label: spec.label, element };
+      if (spec.route === ROUTE_PLAY) {
+        return {
+          ...base,
+          onShow: (): void => {
+            arcadePanel?.setPaused(false);
+          },
+          onHide: (): void => {
+            arcadePanel?.setPaused(true);
+          },
+        };
+      }
+      if (spec.route === ROUTE_WATCH) {
+        return {
+          ...base,
+          onShow: (): void => {
+            spectatePanel?.setPlaying(watch.playing);
+          },
+          onHide: (): void => {
+            // Remembered, not assumed: a visitor who paused the stream and
+            // navigated away must not come back to it playing.
+            watch.playing = spectatePanel?.isPlaying() ?? watch.playing;
+            spectatePanel?.setPlaying(false);
+          },
+        };
+      }
+      if (spec.route === ROUTE_REPLAY) {
+        return {
+          ...base,
+          // `resume` rather than `start`: `start` rewinds (see `player/clock.ts`),
+          // so returning to this screen would restart the Match from frame zero
+          // rather than continue it.
+          onShow: (): void => {
+            player.mounted.clock.resume();
+          },
+          onHide: (): void => {
+            player.mounted.clock.stop();
+          },
+        };
+      }
+      // `#landing`, `#select` and `#byok` paint nothing and make no sound, so
+      // there is nothing for them to stop. Left without callbacks rather than
+      // given empty ones, so a screen that grows a clock has to say so.
+      return base;
     });
+    shell.router = mountRouter(globals, screens);
 
     return {
       mounted: demoPlayer,
       // `then(() => undefined)` rather than the array: callers await completion,
       // not results, and every upgrade already handles its own failure.
       dressed: Promise.all(upgrades).then(() => undefined),
-      byok: mountByok(globals, mount),
+      byok: byokPanel,
       arcade: arcadePanel,
       spectate: spectatePanel,
       landing: landingPanel,
+      router: shell.router,
       current: (): MountedApp => player.mounted,
       showLog: mount,
     };

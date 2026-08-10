@@ -99,6 +99,16 @@ export interface LiveArena {
   readonly setUlt: (ult: UltSheet) => void;
   /** Halts the clock. Called by the panel when the Match ends and the replay re-mounts. */
   readonly stop: () => void;
+  /**
+   * Story 12.4. Suspends and resumes painting without ending the Match.
+   *
+   * `stop()` cannot express this: it clears `active`, so a `pushState` arriving
+   * while the visitor is on another screen would be dropped and the Match would
+   * resume with a hole in its film. Pausing keeps every state, keeps the film
+   * building, and simply stops putting pixels on a canvas nobody can see --
+   * which is the whole of what "a hidden screen does not paint" means here.
+   */
+  readonly setPaused: (paused: boolean) => void;
   /** The film frame most recently drawn, or `-1` before the first. Exposed for the panel's tests. */
   readonly frameIndex: () => number;
 }
@@ -166,8 +176,12 @@ export function createLiveArena(deps: LiveArenaDeps): LiveArena {
     track: JuiceTrack | null;
   } = { states: [], frames: [], track: null };
 
-  /** `active` spans one Match (Play to end); `running` is whether the rAF loop is scheduled. */
-  const clock = { active: false, running: false, index: -1, handle: 0 };
+  /**
+   * `active` spans one Match (Play to end); `running` is whether the rAF loop is
+   * scheduled; `paused` is Story 12.4's "this screen is not showing", which
+   * suspends painting without ending the Match.
+   */
+  const clock = { active: false, running: false, paused: false, index: -1, handle: 0 };
 
   const availableEnd = (): number => (sim.track === null ? -1 : sim.track.frameCount - 1);
 
@@ -240,8 +254,25 @@ export function createLiveArena(deps: LiveArenaDeps): LiveArena {
     clock.running = false;
   }
 
+  /**
+   * Puts frame zero on the canvas the first time there is one to put there.
+   *
+   * The one paint that does not go through the clock, and therefore the one a
+   * `running`-flag guard would miss: it must not fire while the screen is
+   * hidden (Story 12.4), and it must fire the moment the screen is shown again
+   * for a Match that was started while hidden -- the landing CTA navigates and
+   * then plays, so that is the ordinary path, not the corner case.
+   */
+  const paintFirstFrame = (): void => {
+    if (clock.paused || clock.index >= 0 || sim.track === null || sim.track.frameCount === 0) {
+      return;
+    }
+    clock.index = 0;
+    paint(0);
+  };
+
   const ensureRunning = (): void => {
-    if (!clock.active || clock.running) {
+    if (!clock.active || clock.running || clock.paused) {
       return;
     }
     if (clock.index < availableEnd()) {
@@ -277,17 +308,46 @@ export function createLiveArena(deps: LiveArenaDeps): LiveArena {
     // The first state (the reset) is painted synchronously, so the canvas
     // carries the two fighters at their start positions from frame zero rather
     // than a blank stage until the animation loop or the visitor's first key.
-    if (clock.index < 0 && sim.track !== null && sim.track.frameCount > 0) {
-      clock.index = 0;
-      paint(0);
-    }
+    paintFirstFrame();
     ensureRunning();
   };
 
   const repaint = (): void => {
-    if (clock.index >= 0) {
+    // A pack that decodes while the visitor is on another screen must not
+    // repaint this canvas: `hidden-screens-are-idle` hashes it, and a dressing
+    // upgrade is exactly the kind of paint that arrives without a clock.
+    if (!clock.paused && clock.index >= 0) {
       paint(clock.index);
     }
+  };
+
+  /**
+   * Story 12.4. Suspends painting while this screen is hidden, and picks the
+   * fight back up where it left off when it is shown again.
+   *
+   * States keep arriving and the film keeps building throughout -- only the
+   * pixels stop. Resuming repaints the frame the clock is on before scheduling,
+   * so the first thing a returning visitor sees is the current fight rather
+   * than whatever was on the canvas when they left.
+   */
+  const setPaused = (paused: boolean): void => {
+    if (clock.paused === paused) {
+      return;
+    }
+    clock.paused = paused;
+    if (paused) {
+      clock.running = false;
+      cancel();
+      return;
+    }
+    // One paint, not two: frame zero for a Match that began while hidden, the
+    // current frame for one that was already running.
+    if (clock.index < 0) {
+      paintFirstFrame();
+    } else {
+      repaint();
+    }
+    ensureRunning();
   };
 
   return Object.freeze({
@@ -310,6 +370,7 @@ export function createLiveArena(deps: LiveArenaDeps): LiveArena {
       repaint();
     },
     stop,
+    setPaused,
     frameIndex: (): number => clock.index,
   });
 }

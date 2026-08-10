@@ -138,6 +138,13 @@ export interface ArcadePanel {
   readonly setVfx: (vfx: VfxSheet) => void;
   /** Story 12.2. The Ultimate's per-character art, on the same terms as `setArtist`. */
   readonly setUlt: (ult: UltSheet) => void;
+  /**
+   * Story 12.4. Suspends the live view while this screen is not showing, and
+   * resumes it when it is. The Match itself is untouched: states keep arriving
+   * and the film keeps building -- only the painting stops. A no-op on a panel
+   * with no live arena.
+   */
+  readonly setPaused: (paused: boolean) => void;
 }
 
 /** Not the BYOK panel's seed, so the two demos are visibly different Matches. */
@@ -449,6 +456,12 @@ export function mountArcadePanel(host: ArcadeHost, deps: ArcadePanelDeps): Arcad
     },
     setUlt: (ult: UltSheet): void => {
       liveArena?.setUlt(ult);
+    },
+    // Story 12.4. The router calls this when the play screen stops or starts
+    // showing. A no-op when there is no live arena, exactly like the dressing
+    // setters above.
+    setPaused: (paused: boolean): void => {
+      liveArena?.setPaused(paused);
     },
   });
 }
