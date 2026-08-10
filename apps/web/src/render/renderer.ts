@@ -8,17 +8,24 @@ import type { Backdrop } from './backdrop';
 import { applyCamera, cameraFor, worldXFor, type Camera } from './camera';
 import type { Canvas2D } from './canvas2d';
 import { createBlockArtist, type DrawnFighter, type FighterArtist } from './artist';
+import { ARENA_PALETTE } from './arena-palette';
 import {
   ARMED_PULSE_BANDS,
   BANK_BANDS,
   SUPER_METER_BANDS,
   arcadeText,
   drawArcadeBar,
+  drawArcadePip,
+  drawArcadePlate,
   drawArcadeSegments,
+  drawPortraitPlate,
   gradientBands,
   healthBands,
   pulseLevel,
+  timerLabel,
 } from './hud';
+import { ROSTER_NAMES, auraFor, type RosterPair } from './roster';
+import type { UltSheet } from './ult-sheet';
 import { THEME, type Theme } from './theme';
 
 /**
@@ -74,6 +81,47 @@ export interface DrawFrameOptions {
    * unreduced frame.
    */
   readonly reducedMotion?: boolean;
+  /**
+   * Story 12.6. Which fighter each agent index *is*, for the HUD's portrait and
+   * name plate.
+   *
+   * Declared here as well as on `juice-draw.ts`'s `DrawJuicedFrameOptions`
+   * because the two want it for different things -- the cinematic wants the
+   * caster's aura and name, the HUD wants the name over both bars on every
+   * frame -- and the compositor already hands `drawFrame` the very same options
+   * object. Every live surface therefore gets a named HUD with no call-site
+   * change at all; the two declarations are the same type and the drift is
+   * `renderer.test.ts`'s to catch.
+   *
+   * Absent means "nobody has said", and the HUD then draws the plates with no
+   * name rather than guessing a fighter -- the same degrade ladder the cinematic
+   * uses. `hero/hero.ts` passes `DEFAULT_ROSTER`, which is what that constant is
+   * for.
+   */
+  readonly roster?: RosterPair;
+  /**
+   * Story 12.6. Where the HUD's portraits come from.
+   *
+   * The Ultimate's sheet, reused rather than re-fetched. `/portraits/<id>.png`
+   * is *already* loaded by `startup.ts` for the cinematic's cut-in, for exactly
+   * the pair in play, and it is already threaded to all three surfaces --
+   * fetching the same 200 KB file a second time under a second loader would be
+   * the one cost this HUD is not worth.
+   *
+   * Absent until it decodes and absent forever if it never does, on the same
+   * terms as `vfx`: the plate keeps its frame and its aura ground and the HUD
+   * loses nothing but the face.
+   */
+  readonly ult?: UltSheet;
+  /**
+   * Story 12.6. Rounds won by each agent, for the pips.
+   *
+   * Optional, and absent is `[0, 0]` -- which is every surface today, because no
+   * round system exists until Story 12.7. The pips are drawn empty rather than
+   * not drawn (AC5), so the element that 12.7 fills is already in the layout and
+   * does not relay the HUD when it arrives.
+   */
+  readonly roundsWon?: readonly [number, number];
 }
 
 /**
@@ -85,12 +133,53 @@ export interface DrawFrameOptions {
  * fighting-game viewport is wide and short.
  */
 export const FLOOR_INSET = 40;
+
+/**
+ * ## The HUD band, laid out once (Story 12.6)
+ *
+ * Every row below is written down here rather than derived at a call site,
+ * because the two defects this story fixes were both *layout* defects that no
+ * unit test could see: `ULTIMATE READY` drawn at the gauge's own coordinates
+ * (unreadable on flat gold) and the `HP … MTR …` readout sharing rows with a
+ * bar. `hud-no-overlap` in `scripts/visual-gate.mjs` reads the same numbers from
+ * the other side, and `renderer.test.ts` pins that the two copies agree.
+ *
+ * The band is one column per side plus a centre column:
+ *
+ * ```
+ *  12..56   portrait plate                    timer plate       portrait plate
+ *  18..36   NAME                    pip pip  [ 63 ]  pip pip              NAME
+ *  40..58   health bar (ghost under)                       health bar
+ *  62..78   super gauge / armed bar                    super gauge
+ *  82..100  ULTIMATE READY                          ULTIMATE READY
+ * 106..121  HP nn  MTR nn                              HP nn  MTR nn
+ * 126..142  Token Bank                                    Token Bank
+ * ```
+ *
+ * The callout moved **off** the gauge and the readout moved **below** the
+ * gauge, which is what makes those two row spans disjoint. It costs 24px of
+ * band height, and that is the trade the story asks for: a HUD that is one row
+ * taller is worth a HUD whose two loudest elements are legible.
+ */
+/** Where the portrait plate and the timer plate sit, and how big they are. */
+const HUD_PORTRAIT_TOP = 12;
+const HUD_PORTRAIT_SIZE = 44;
+/** The portrait's distance from the frame's outer edge. */
+const HUD_PORTRAIT_INSET = 24;
 /** Health and meter bars live in this band at the top. */
-const HUD_TOP = 24;
-const HUD_BAR_HEIGHT = 20;
-const HUD_BAR_WIDTH = 320;
-const HUD_SIDE_INSET = 32;
+const HUD_TOP = 40;
+const HUD_BAR_HEIGHT = 18;
+const HUD_BAR_WIDTH = 328;
+/**
+ * Where a side's bar column starts, measured from the frame's outer edge.
+ *
+ * Wider than Story 4.1's 32 because the portrait now occupies the outer 24..68:
+ * the bars begin where the portrait plate ends, with an 8px gutter.
+ */
+const HUD_SIDE_INSET = 76;
 const METER_GAP = 8;
+/** The fighter's name, on the arcade face, beside the portrait and above the bar. */
+const HUD_NAME_BASELINE = 32;
 /**
  * Story 10.3. The Super Gauge's height, raised from the 10px it shipped at.
  *
@@ -102,8 +191,8 @@ const METER_GAP = 8;
  * being accumulated, not a second health bar, and it still leaves room for the
  * armed state's word at the mono face's real size.
  */
-const METER_HEIGHT = 18;
-const METER_TOP = HUD_TOP + HUD_BAR_HEIGHT + METER_GAP;
+const METER_HEIGHT = 16;
+const METER_TOP = HUD_TOP + HUD_BAR_HEIGHT + 4;
 /**
  * The Super Gauge's four skewed segments, and the gap between them.
  *
@@ -121,8 +210,24 @@ const METER_TOP = HUD_TOP + HUD_BAR_HEIGHT + METER_GAP;
  */
 const METER_SEGMENTS = 4;
 const METER_SEGMENT_GAP = 8;
-/** Baseline of the `HP … MTR …` readout under the two simulation bars. */
-const HUD_LABEL_BASELINE = METER_TOP + METER_HEIGHT + 20;
+/**
+ * Baseline of the armed callout, in its **own** rows under the gauge (Story 12.6).
+ *
+ * Story 11.3 drew `ULTIMATE READY` at `METER_TOP + METER_HEIGHT - borderWidth`,
+ * which is *inside* the gauge, and Story 12.1's gate photographed the result:
+ * `arcadeText` separates type from a dark ground by drawing a `hudPlate` shadow
+ * under it, and the armed gauge at pulse level 2 is flat arcade gold -- the one
+ * background that treatment cannot survive. The word was unreadable.
+ *
+ * Moving it below the gauge is the whole fix, and it also changes the callout's
+ * colour: on the arena ground, ground-coloured ink would be invisible, so the
+ * callout is now `ARENA_PALETTE.gold` on `--tb-bg` at a measured **13.74:1**
+ * (see this story's Visual check finding). The gauge under it is gold too, which
+ * is what keeps the callout reading as *that gauge's* word.
+ */
+const HUD_CALLOUT_BASELINE = METER_TOP + METER_HEIGHT + 18;
+/** Baseline of the `HP … MTR …` readout, in its own rows under the callout. */
+const HUD_LABEL_BASELINE = HUD_CALLOUT_BASELINE + 22;
 /**
  * Story 4.4. The Token Bank sits at the bottom of the same stack, under health,
  * meter and their readout -- the two resources a fighter spends, then the one
@@ -144,6 +249,35 @@ const BANK_TOP = HUD_LABEL_BASELINE + METER_GAP;
  * Bank that quietly got taller.
  */
 export const HUD_BOTTOM = BANK_TOP + BANK_HEIGHT;
+
+/**
+ * The centre column: the round timer and the round pips (Story 12.6).
+ *
+ * Sized to fit the gutter the two bar columns leave. At the 960px arena the left
+ * column ends at 404 and the right begins at 556, so the timer plate takes
+ * 450..510 and each side's pips take 30px of the 46px that remain beside it --
+ * the pips flank the timer the way the reference's diamonds do, and the fighter
+ * whose pips they are is the fighter on that side.
+ */
+const TIMER_WIDTH = 60;
+const TIMER_TOP = HUD_PORTRAIT_TOP;
+const TIMER_HEIGHT = HUD_PORTRAIT_SIZE;
+/** Baseline of the two digits inside the plate. */
+const TIMER_BASELINE = TIMER_TOP + 30;
+/**
+ * How many rounds a side must win, and therefore how many pips it shows.
+ *
+ * Two, which is best-of-three -- the set Story 12.7 will actually run. Drawing
+ * them here rather than there is deliberate: the HUD's layout is settled in one
+ * story, and a story that adds an element to a finished HUD relays it out.
+ */
+export const ROUND_PIPS_PER_SIDE = 2;
+const PIP_SIZE = 12;
+const PIP_GAP = 6;
+/** Gap between the timer plate and the nearest pip. */
+const PIP_INSET = 8;
+const PIP_GROUP_WIDTH = ROUND_PIPS_PER_SIDE * PIP_SIZE + (ROUND_PIPS_PER_SIDE - 1) * PIP_GAP;
+const PIP_TOP = TIMER_TOP + Math.floor((TIMER_HEIGHT - PIP_SIZE) / 2);
 
 /**
  * Interpolates one fighter's arena position between two simulated states, in
@@ -445,17 +579,25 @@ function drawSuperGauge(
   }
 
   if (armed) {
-    // Ground ink on the gold fill, not gold text on the ground: the same
-    // direction `docs/DESIGN.md` requires of every warn pairing, applied to the
-    // arena's brightest value for the same reason.
+    // **Under the gauge, not on it, and gold rather than ground ink** (Story
+    // 12.6). Story 11.3 put ground ink on the gold fill, which is the direction
+    // `docs/DESIGN.md` requires of a warn pairing -- and it was the wrong
+    // reading here, because `arcadeText` also draws a `hudPlate` hard shadow
+    // and flat gold is the one background that treatment cannot separate from.
+    // Story 12.1's gate photographed the result and called it unreadable.
+    //
+    // Off the bar the ground is `--tb-bg`, where gold measures 13.74:1 -- well
+    // clear of the 4.5:1 floor that `docs/DESIGN.md`'s "Two regimes" says canvas
+    // *text* keeps even though the arena's fills are released from it. The
+    // shadow now falls on the ground it was designed for.
     arcadeText(
       ctx,
       theme,
       'ULTIMATE READY',
-      x + METER_GAP,
-      METER_TOP + METER_HEIGHT - theme.borderWidth,
-      'left',
-      theme.bg,
+      mirror ? x + HUD_BAR_WIDTH : x,
+      HUD_CALLOUT_BASELINE,
+      mirror ? 'right' : 'left',
+      ARENA_PALETTE.gold,
     );
   }
 }
@@ -585,6 +727,43 @@ export function drawFrame(ctx: Canvas2D, frame: RenderFrame, options: DrawFrameO
     // panel drawn twice.
     const mirror = agentIndex === 1;
 
+    // --- Story 12.6: who this side is ------------------------------------
+    // Drawn before the bars, at the outer edge, so the reading order across the
+    // band is face, name, health -- the reference's order and the order a
+    // viewer glancing at the top of the screen needs it in.
+    const fighter = options.roster?.[agentIndex];
+    drawPortraitPlate(
+      ctx,
+      {
+        x: mirror
+          ? viewport.width - HUD_PORTRAIT_INSET - HUD_PORTRAIT_SIZE
+          : HUD_PORTRAIT_INSET,
+        y: HUD_PORTRAIT_TOP,
+        width: HUD_PORTRAIT_SIZE,
+        height: HUD_PORTRAIT_SIZE,
+        // The fighter's own aura, which is what makes the plate say *whose side*
+        // even on a surface whose portrait never decoded -- and on the hero
+        // raster, where `drawImage` throws, it is the whole plate.
+        fill: fighter === undefined ? ARENA_PALETTE.hudPlate : auraFor(fighter),
+      },
+      fighter === undefined ? undefined : options.ult?.portraitFor(fighter),
+    );
+
+    if (fighter !== undefined) {
+      // Ink on the ground at 18.1:1, the ratio `docs/DESIGN.md` already records
+      // for `--tb-ink` on `--tb-bg`. A name is type a visitor reads, so it
+      // answers to the 4.5:1 floor whatever the arena's fills are released from.
+      arcadeText(
+        ctx,
+        theme,
+        ROSTER_NAMES[fighter],
+        mirror ? x + HUD_BAR_WIDTH : x,
+        HUD_NAME_BASELINE,
+        mirror ? 'right' : 'left',
+        theme.ink,
+      );
+    }
+
     const health = levelBasisPoints(frame.to.health[agentIndex], config.initialHealth);
     drawArcadeBar(ctx, {
       x,
@@ -612,12 +791,19 @@ export function drawFrame(ctx: Canvas2D, frame: RenderFrame, options: DrawFrameO
     // kind of thing as a tick count or a bank level -- and `docs/DESIGN.md`
     // reserves Departure Mono for every number a visitor reads as data. Only
     // the callouts (TICK, ULTIMATE READY, REFLEX) take the arcade treatment.
+    //
+    // Story 12.6 moved it below the gauge and mirrored its alignment. It used
+    // to sit between the gauge and the Token Bank at a baseline 20px under the
+    // gauge, close enough that the two shared rows once the mono face's real
+    // ascent was accounted for -- which is the `HP 69 overlaps the bar below
+    // it` defect Story 12.1's gate recorded. It now has rows of its own,
+    // between the callout and the Bank, and `hud-no-overlap` measures that.
     ctx.fillStyle = theme.ink;
     ctx.font = theme.monoFont;
-    ctx.textAlign = 'left';
+    ctx.textAlign = mirror ? 'right' : 'left';
     ctx.fillText(
       `HP ${String(frame.to.health[agentIndex])}  MTR ${String(frame.to.meter[agentIndex])}`,
-      x,
+      mirror ? x + HUD_BAR_WIDTH : x,
       HUD_LABEL_BASELINE,
     );
 
@@ -630,12 +816,80 @@ export function drawFrame(ctx: Canvas2D, frame: RenderFrame, options: DrawFrameO
     }
   }
 
+  drawCentreColumn(ctx, theme, frame, options);
+}
+
+/**
+ * The round timer and the round pips (Story 12.6).
+ *
+ * Screen space, at the centre of the frame, outside Story 12.3's camera
+ * transform: the timer is a fact about the Match rather than about where the
+ * camera is pointed, and a set score that slid with the fight would be
+ * unreadable.
+ *
+ * **The timer is not a clock.** `timerLabel` maps `maxTicks - tick` onto two
+ * digits by integer arithmetic and reads nothing else -- no `Date`, no
+ * `performance.now()`, no frame rate. Scrubbing to a frame shows what playing to
+ * it shows, and how long a Deployment thought cannot reach it (INV-1, INV-3).
+ *
+ * `TICK` survives underneath as the data readout it always was. It moved off the
+ * bar row it shared with the health bars and onto the callout row, where it has
+ * the centre gutter to itself.
+ */
+function drawCentreColumn(
+  ctx: Canvas2D,
+  theme: Theme,
+  frame: RenderFrame,
+  options: DrawFrameOptions,
+): void {
+  const centre = Math.round(options.viewport.width / 2);
+  const timerLeft = centre - Math.floor(TIMER_WIDTH / 2);
+
+  drawArcadePlate(ctx, {
+    x: timerLeft,
+    y: TIMER_TOP,
+    width: TIMER_WIDTH,
+    height: TIMER_HEIGHT,
+    fill: ARENA_PALETTE.hudPlate,
+  });
+  // Gold on `hudPlate` at 13.73:1. The plate is the darkest value in the arena
+  // palette and the digits are the one number a viewer reads at a glance rather
+  // than measures, so they take the callout's colour rather than the readout's.
+  arcadeText(
+    ctx,
+    theme,
+    timerLabel(frame.from.tick, options.config.maxTicks),
+    centre,
+    TIMER_BASELINE,
+    'center',
+    ARENA_PALETTE.gold,
+  );
+
+  // A side's pips flank the timer on that side's own half, so "who is winning
+  // the set" is answered in the same left/right language the bars use.
+  const rounds = options.roundsWon ?? [0, 0];
+  for (const agentIndex of [0, 1] as const) {
+    const groupLeft =
+      agentIndex === 0
+        ? timerLeft - PIP_INSET - PIP_GROUP_WIDTH
+        : timerLeft + TIMER_WIDTH + PIP_INSET;
+    for (const pip of Array.from({ length: ROUND_PIPS_PER_SIDE }, (_unused, index) => index)) {
+      drawArcadePip(
+        ctx,
+        groupLeft + pip * (PIP_SIZE + PIP_GAP),
+        PIP_TOP,
+        PIP_SIZE,
+        pip < Math.max(0, Math.floor(rounds[agentIndex] ?? 0)),
+      );
+    }
+  }
+
   arcadeText(
     ctx,
     theme,
     `TICK ${String(frame.from.tick)}`,
-    viewport.width / 2,
-    HUD_TOP + HUD_BAR_HEIGHT,
+    centre,
+    HUD_CALLOUT_BASELINE,
     'center',
     theme.muted,
   );

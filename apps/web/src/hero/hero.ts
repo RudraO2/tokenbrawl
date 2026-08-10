@@ -5,6 +5,7 @@ import { buildReplayFilm, type RenderFrame } from '../replay/film';
 import { createBankReadout } from '../replay/token-bank';
 import { ARCADE_HUD_COLOURS } from '../render/hud';
 import { drawFrame } from '../render/renderer';
+import { DEFAULT_ROSTER } from '../render/roster';
 import { THEME } from '../render/theme';
 import { encodeAnimatedGif, type GifFrame } from './gif';
 import { GLYPH_SPACING, GLYPH_WIDTH } from './font';
@@ -289,6 +290,14 @@ export function renderHeroFrame(scene: HeroScene, frameIndex: number): Uint8Arra
   drawFrame(surface, frame, {
     config: DEFAULT_FIGHTER_CONFIG,
     viewport: { width: HERO_WIDTH, height: HERO_ARENA_HEIGHT },
+    // Story 12.6. The HUD names its fighters now, and `DEFAULT_ROSTER` is the
+    // pair a Match is drawn as when nobody has chosen -- which `render/roster.ts`
+    // names the hero raster as one of. No portrait sheet is passed and none can
+    // be: `raster.ts`'s `drawImage` throws, because decoding a PNG would need a
+    // Node built-in that file may not import. The plate falls back to the
+    // fighter's aura, which is why all four auras are in `ARCADE_HUD_COLOURS`
+    // and therefore in `heroPalette()` below.
+    roster: DEFAULT_ROSTER,
     banks: [0, 1].map((index) =>
       readout.tracked(index as 0 | 1) ? readout.at(frame.decisionPoint, index as 0 | 1) : null,
     ),

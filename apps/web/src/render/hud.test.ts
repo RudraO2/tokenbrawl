@@ -21,12 +21,18 @@ import {
   arcadeText,
   bandOf,
   drawArcadeBar,
+  drawArcadePip,
+  drawArcadePlate,
   drawArcadeSegments,
+  drawPortraitPlate,
   gradientBands,
   healthBands,
   pulseLevel,
   skewOffset,
+  timerLabel,
+  timerReading,
 } from './hud';
+import { ROSTER_IDS, auraFor } from './roster';
 import { THEME } from './theme';
 
 /**
@@ -622,6 +628,19 @@ describe('the colour set the hero has to hold (AC6)', () => {
           });
         }
       }
+    }
+
+    // Story 12.6's two new elements, swept the same way. A pip is the only
+    // thing in this module that paints flat `gold`, and a portrait plate is the
+    // only thing that paints an aura -- and the aura is drawn on *every* frame
+    // of the hero, where `drawImage` throws and the plate is all there is, so a
+    // fighter missing from this loop is a README build that dies on whoever
+    // happens to be on that side.
+    for (const won of [false, true]) {
+      drawArcadePip(ctx, 400, 26, 12, won);
+    }
+    for (const id of ROSTER_IDS) {
+      drawPortraitPlate(ctx, { x: 24, y: 12, width: 44, height: 44, fill: auraFor(id) });
     }
 
     const emitted = new Set(ctx.calls().map((call) => call.fillStyle));

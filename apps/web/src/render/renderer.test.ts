@@ -585,11 +585,15 @@ describe('the Token Bank meter (4.4)', () => {
  */
 describe('the Super Gauge (10.3)', () => {
   /** Renderer-local layout, mirrored rather than imported -- the constants are not exported. */
-  const GAUGE_WIDTH = 320;
-  const SEGMENT_WIDTH = 74;
-  const HEALTH_TOP = 24;
-  const METER_TOP = 52;
-  const BANK_TOP = 98;
+  // Story 12.6 relaid the band: the bars moved down to make room for the
+  // portrait and name above them, and they widened to 328 because the column
+  // now starts where the portrait plate ends.
+  const GAUGE_WIDTH = 328;
+  const SEGMENT_WIDTH = 76;
+  const HEALTH_TOP = 40;
+  const METER_TOP = 62;
+  const METER_HEIGHT = 16;
+  const BANK_TOP = 126;
   const FULL = DEFAULT_FIGHTER_CONFIG.maxMeter;
 
   /**
@@ -664,7 +668,14 @@ describe('the Super Gauge (10.3)', () => {
       .map((call) => String(call.args[0]));
   }
 
-  /** The legible copy of each callout: the top pass, not its `hudPlate` shadow. */
+  /**
+   * The legible copy of each callout: the top pass, not its `hudPlate` shadow.
+   *
+   * Selected on `gold` since Story 12.6. The callout used to be drawn in
+   * `THEME.bg` *on* the gold gauge; it is now drawn in gold on the ground,
+   * below the gauge, because `arcadeText`'s hard shadow cannot separate type
+   * from a flat gold ground and the visual gate photographed the result.
+   */
   function callouts(ctx: RecordingCanvas, word: string): readonly RecordedCall[] {
     return ctx
       .calls()
@@ -672,7 +683,7 @@ describe('the Super Gauge (10.3)', () => {
         (call) =>
           call.op === 'fillText' &&
           String(call.args[0]).includes(word) &&
-          call.fillStyle === THEME.bg,
+          call.fillStyle === ARENA_PALETTE.gold,
       );
   }
 
@@ -729,24 +740,34 @@ describe('the Super Gauge (10.3)', () => {
     expect(drawMeter(FULL).calls()).not.toStrictEqual(drawMeter(FULL - 1).calls());
   });
 
-  it('puts ground ink on the gold fill, never gold text on the ground (AC2)', () => {
-    // Story 10.3 armed the gauge with warn-as-fill because warn was the loudest
-    // value the flat palette allowed. 11.3 arms it in gold, which is what the
-    // reference does and what Story 11.1 made legal here -- but the *direction*
-    // of the pairing is unchanged and is the part that was measured: the ground
-    // colour goes on the bright fill, never the bright colour on the ground.
+  it('draws the callout off the gauge, in gold on the ground (12.6 AC2)', () => {
+    // **This assertion is the inverse of the one Story 11.3 wrote here, and the
+    // inversion is the story.** 11.3 put ground ink on the gold fill, which is
+    // the direction `docs/DESIGN.md` requires of a warn pairing on the page --
+    // and it was the wrong reading for a canvas callout, because `arcadeText`
+    // draws a `hudPlate` hard shadow under every string and flat arcade gold is
+    // the one ground that treatment cannot separate from. Story 12.1's gate
+    // photographed `ULTIMATE READY` on the armed gauge and called it
+    // unreadable, and Story 12.5's run recorded it a second time.
+    //
+    // So the pairing moved rather than flipped: gold type on `--tb-bg` at a
+    // measured 13.74:1, in rows the gauge does not occupy, with the shadow
+    // falling on the dark ground it was designed for.
     const armed = drawMeter(FULL);
+    const callout = callouts(armed, 'ULTIMATE');
+    expect(callout).toHaveLength(1);
+    expect(callout[0].fillStyle).toBe(ARENA_PALETTE.gold);
 
-    expect(callouts(armed, 'ULTIMATE')).toHaveLength(1);
-    for (const call of armed.calls()) {
-      if (call.op === 'fillText') {
-        expect(ARENA_PALETTE.gold).not.toBe(call.fillStyle);
-      }
-    }
+    // The rows the gauge claims, and the rows the callout claims, do not meet.
+    // Measured off the drawn baseline against the bar's own extent rather than
+    // off the layout constants, so a future edit that slides one back onto the
+    // other fails here as well as in the visual gate.
+    const baseline = callout[0].args[2] as number;
+    expect(baseline).toBeGreaterThan(METER_TOP + METER_HEIGHT);
 
-    // And the ground it sits on is unbroken. The word spans more than a quarter
-    // of the bar, so a segmented armed gauge would have gaps running through
-    // the letters -- which is exactly what the visual gate caught.
+    // And the gauge it describes is still an unbroken bar. The word spans more
+    // than a quarter of the bar, so a segmented armed gauge would have gaps
+    // running through the letters -- which is what the visual gate caught first.
     const goldFills = armed
       .calls()
       .filter(
@@ -821,7 +842,7 @@ describe('the Super Gauge (10.3)', () => {
 
     // health, gauge, bank -- still three bars, still in that order down the
     // column, and the gauge still does not overlap the row beneath it.
-    expect(ruleTops(ctx, GAUGE_WIDTH)).toStrictEqual([HEALTH_TOP, 42, BANK_TOP, 116]);
+    expect(ruleTops(ctx, GAUGE_WIDTH)).toStrictEqual([HEALTH_TOP, 56, BANK_TOP, 142]);
     const gaugeRules = ruleTops(ctx, SEGMENT_WIDTH);
     expect(gaugeRules[0]).toBe(METER_TOP);
     expect(BANK_TOP).toBeGreaterThanOrEqual(gaugeRules[1] + FRAME_THICKNESS);
@@ -945,7 +966,9 @@ describe('the damage-lag ghost (11.3 AC1)', () => {
       .filter(
         (call) =>
           call.op === 'fillRect' &&
-          call.args[1] === 24 &&
+          // The health bar's own top row. Story 12.6 moved the band down to
+          // make room for the portrait and the name above it.
+          call.args[1] === 40 &&
           (call.args[0] as number) < VIEWPORT.width / 2 &&
           call.fillStyle !== ARENA_PALETTE.hudPlate &&
           call.fillStyle !== ARENA_PALETTE.hudGhost &&

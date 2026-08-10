@@ -223,6 +223,16 @@ export const ARCADE_HUD_COLOURS: readonly string[] = Object.freeze([
     ARENA_PALETTE.hudGhost,
     ARENA_PALETTE.hudBevel,
     ARENA_PALETTE.hudFrame,
+    // Story 12.6. The armed callout's type and a won round's pip, both flat
+    // arcade gold -- which the armed gauge's top pulse step already resolves to,
+    // so this is a name for a value the set held rather than a new colour. It is
+    // listed explicitly all the same: a later story that retunes the pulse ramps
+    // must not silently take the callout's colour out of the hero's palette.
+    ARENA_PALETTE.gold,
+    // Story 12.6. The portrait plate's ground, which is the fighter's own aura
+    // for whichever fighter is on that side -- and on a surface with no decoded
+    // portrait it is the *whole* plate, so all four have to be reachable.
+    ...Object.values(ARENA_PALETTE.aura),
     ...HP_HIGH_BANDS,
     ...HP_MID_BANDS,
     ...HP_LOW_BANDS,
@@ -450,6 +460,159 @@ export function drawArcadeSegments(ctx: Canvas2D, meter: ArcadeSegments): void {
       bands: meter.bands,
     });
   }
+}
+
+/**
+ * A framed plate: the HUD's one surface that is not a bar (Story 12.6).
+ *
+ * The portrait sits in one and so does the round timer, because both are
+ * *boxes* rather than levels -- and a box drawn as a degenerate `ArcadeBar`
+ * would inherit the skew, which is the reference's language for a resource
+ * draining and says the wrong thing about a face or a number.
+ *
+ * Four `fillRect` edges rather than a `strokeRect`: stroking a box draws its
+ * outline centred on the path, so a 2px stroke lands one pixel outside the
+ * declared rectangle and the plate ends up 2px wider than the layout says it
+ * is. `renderer.ts` packs the portrait, the bars and the pips against measured
+ * gaps, and an edge that overhangs its own box is how a HUD element starts
+ * overlapping the one beside it -- the defect this story exists to remove.
+ */
+export interface ArcadePlate {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+  /** What fills it behind whatever is drawn on top. */
+  readonly fill: string;
+}
+
+export function drawArcadePlate(ctx: Canvas2D, plate: ArcadePlate): void {
+  const width = Math.max(0, Math.round(plate.width));
+  const height = Math.max(0, Math.round(plate.height));
+  if (width <= 0 || height <= 0) {
+    return;
+  }
+
+  ctx.fillStyle = plate.fill;
+  ctx.fillRect(plate.x, plate.y, width, height);
+
+  ctx.fillStyle = ARENA_PALETTE.hudFrame;
+  ctx.fillRect(plate.x, plate.y, width, Math.min(FRAME_THICKNESS, height));
+  ctx.fillRect(plate.x, plate.y + height - FRAME_THICKNESS, width, Math.min(FRAME_THICKNESS, height));
+  ctx.fillRect(plate.x, plate.y, Math.min(FRAME_THICKNESS, width), height);
+  ctx.fillRect(plate.x + width - FRAME_THICKNESS, plate.y, Math.min(FRAME_THICKNESS, width), height);
+}
+
+/**
+ * A portrait, as a sub-rectangle of an image the caller already decoded.
+ *
+ * Structural and narrow rather than `UltSheet`'s `UltFrame`, for `canvas2d.ts`'s
+ * reason: naming the sheet's type here would bind the HUD to the Ultimate's
+ * loader, and the HUD wants "somebody handed me a picture" and nothing else.
+ * `UltFrame` satisfies it, which is what lets the portrait the cinematic already
+ * fetches be the portrait the HUD draws -- the same file, fetched once.
+ */
+export interface HudPortrait {
+  readonly image: unknown;
+  readonly sx: number;
+  readonly sy: number;
+  readonly sw: number;
+  readonly sh: number;
+}
+
+/**
+ * The portrait plate: an aura-filled, framed box with the fighter's face in it.
+ *
+ * **The face is optional and its absence is a designed state, not a blank.**
+ * `hero/raster.ts` implements `Canvas2D` over a buffer of palette indices and
+ * its `drawImage` *throws* -- it cannot decode a PNG without a Node built-in
+ * `source-discipline.test.ts` forbids it -- so a HUD that drew the portrait
+ * unconditionally would take the README image down with it. Filling the plate
+ * with the fighter's own aura leaves a plate that still reads as *whose side
+ * this is* on every surface, and the browser paints the face over it.
+ *
+ * This is the same fail-soft ladder `juice-draw.ts` already uses for the
+ * cinematic's cut-in, and it is why `ARCADE_HUD_COLOURS` carries all four auras.
+ */
+export function drawPortraitPlate(
+  ctx: Canvas2D,
+  plate: ArcadePlate,
+  portrait?: HudPortrait,
+): void {
+  drawArcadePlate(ctx, plate);
+
+  const inner = FRAME_THICKNESS;
+  const width = Math.max(0, Math.round(plate.width) - inner * 2);
+  const height = Math.max(0, Math.round(plate.height) - inner * 2);
+  if (portrait === undefined || width <= 0 || height <= 0) {
+    return;
+  }
+
+  ctx.drawImage(
+    portrait.image,
+    portrait.sx,
+    portrait.sy,
+    portrait.sw,
+    portrait.sh,
+    plate.x + inner,
+    plate.y + inner,
+    width,
+    height,
+  );
+}
+
+/**
+ * One round-win pip.
+ *
+ * Drawn whether or not it is earned (AC5): an empty pip is a plate on the
+ * `hudPlate` ground, a won one is flat gold. A pip that appeared only once it
+ * was won would be a HUD element that moves under the viewer mid-set, and the
+ * viewer would have no way to know how many rounds the set is.
+ */
+export function drawArcadePip(
+  ctx: Canvas2D,
+  x: number,
+  y: number,
+  size: number,
+  won: boolean,
+): void {
+  drawArcadePlate(ctx, {
+    x,
+    y,
+    width: size,
+    height: size,
+    fill: won ? ARENA_PALETTE.gold : ARENA_PALETTE.hudPlate,
+  });
+}
+
+/** The highest number the two-digit round timer can show. */
+export const TIMER_MAX_READING = 99;
+
+/**
+ * The round timer's reading at a tick -- and it is not a clock (Story 12.6).
+ *
+ * The reference counts seconds. **We do not have seconds and must not acquire
+ * them.** What exists is `tick` against `config.maxTicks`, which is a pure
+ * function of the frame index: `maxTicks - tick` mapped onto 0..99 by integer
+ * arithmetic, with no frame rate anywhere in it. A scrub to a frame shows the
+ * same reading as playing to that frame, and a Match between two slow
+ * Deployments reads identically to one between two fast ones (INV-1, INV-3).
+ *
+ * Degenerate inputs clamp rather than divide: a hand-built config with
+ * `maxTicks <= 0` would otherwise put an `Infinity` through `String()` and print
+ * a timer nobody can read.
+ */
+export function timerReading(tick: number, maxTicks: number): number {
+  if (!Number.isFinite(tick) || !Number.isFinite(maxTicks) || maxTicks <= 0) {
+    return 0;
+  }
+  const elapsed = Math.max(0, Math.min(Math.floor(maxTicks), Math.floor(Math.max(0, tick))));
+  return Math.floor(((Math.floor(maxTicks) - elapsed) * TIMER_MAX_READING) / Math.floor(maxTicks));
+}
+
+/** The reading as the two digits the plate shows. */
+export function timerLabel(tick: number, maxTicks: number): string {
+  return String(timerReading(tick, maxTicks)).padStart(2, '0');
 }
 
 /**
