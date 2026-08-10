@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { inflateSync } from 'node:zlib';
 import { describe, expect, it } from 'vitest';
 import {
   COMMITTED_ATTACK,
@@ -404,17 +405,26 @@ describe('the hit flash (4.3, replaced by 12.8)', () => {
     readonly composite: string;
   }
 
+  /**
+   * The white cell of the strip, at its own geometry. `sx: 200` is the second
+   * cell -- the pure-white one -- and `anchorY 120` / `scale 3` are Martial
+   * Hero's own placement, drawn independently of whichever pack the struck
+   * fighter is. The offset is pinned against the real PNG below.
+   */
   const FLASH = Object.freeze({
     image: Object.freeze({ width: 800, height: 200 }),
+    sx: 200,
+    sy: 0,
     frameWidth: 200,
     frameHeight: 200,
-    frames: 4,
+    anchorY: 120,
+    scale: 3,
   });
 
   async function drawClip(
     clip: string,
-    options: { flash?: unknown; frame?: number } = { flash: FLASH },
-  ): Promise<readonly Call[]> {
+    options: { flash?: unknown } = { flash: FLASH },
+  ): Promise<{ calls: readonly Call[]; finalComposite: string }> {
     const { createSpriteArtist } = await import('./artist');
     const { THEME } = await import('./theme');
     const calls: Call[] = [];
@@ -437,6 +447,12 @@ describe('the hit flash (4.3, replaced by 12.8)', () => {
         composite: String(surface.globalCompositeOperation),
       });
     };
+    // `save`/`restore` are no-ops on this recording surface -- they push nothing
+    // and pop nothing -- so a composite mode left set survives to `finalComposite`
+    // below. That is exactly the property the restore-check needs: the real
+    // `Canvas2D` port `hero/raster.ts` also does not save `globalCompositeOperation`
+    // across save/restore, so the artist's own explicit restore is the only thing
+    // keeping a hit from tinting the next fighter additively.
     const ctx = new Proxy(surface, {
       get: (target, key: string) =>
         key in target
@@ -457,7 +473,8 @@ describe('the hit flash (4.3, replaced by 12.8)', () => {
       imageFor: () => ({ width: 200, height: 200 }),
     };
 
-    createSpriteArtist(sheet as never, options.flash as never).draw(
+    const flashSource = options.flash === undefined ? undefined : () => options.flash;
+    createSpriteArtist(sheet as never, flashSource as never).draw(
       ctx as never,
       {
         x: 480,
@@ -466,74 +483,132 @@ describe('the hit flash (4.3, replaced by 12.8)', () => {
         phase: 0,
         committedAction: 0,
         agentIndex: 0,
-        animation: { clip, frame: options.frame ?? 0 },
+        animation: { clip, frame: 0 },
       } as never,
       THEME,
     );
-    return calls;
+    return { calls, finalComposite: String(surface.globalCompositeOperation) };
   }
 
+  const flashDraw = (calls: readonly Call[]): Call | undefined =>
+    calls.find((call) => call.op === 'drawImage' && call.composite === 'lighter');
+
   it('issues no strokeRect on the hit path -- the debug bracket is gone', async () => {
-    const calls = await drawClip('hit');
+    const { calls } = await drawClip('hit');
     expect(calls.some((call) => call.op === 'strokeRect')).toBe(false);
   });
 
-  it('flashes the struck fighter with an additive silhouette composite', async () => {
-    const calls = await drawClip('hit');
+  it('flashes the struck fighter with the white cell, additive, at its own geometry', async () => {
+    const { calls } = await drawClip('hit');
     // Two draws: the sprite frame source-over, then the flash additive.
     const draws = calls.filter((call) => call.op === 'drawImage');
     expect(draws.length).toBe(2);
-    const flash = draws.find((call) => call.composite === 'lighter');
+    const flash = flashDraw(calls);
     expect(flash).toBeDefined();
-    // Over the fighter's own destination rectangle, not around it: same size
-    // the sprite was drawn at (200 * scale 3 = 600), top-anchored by anchorY.
-    const [, , , , dx, , dw, dh] = flash?.args ?? [];
+    // Recorded args are the numeric ones only (the image is dropped), so the
+    // 9-arg drawImage reads sx, sy, sw, sh, dx, dy, dw, dh.
+    const [sx, , , , dx, , dw, dh] = flash?.args ?? [];
+    // The white cell, not cell 0 (which is a coloured take-hit frame).
+    expect(sx).toBe(200);
+    // Its own geometry: 200 * scale 3 = 600, centred on the fighter, feet on
+    // the floor (top = -anchorY 120 * scale 3 = -360, dy below).
     expect(dw).toBe(600);
     expect(dh).toBe(600);
     expect(dx).toBe(-300);
+    const dy = (flash?.args ?? [])[5];
+    expect(dy).toBe(-360);
   });
 
-  it('puts the composite mode back to what it found', async () => {
-    const calls = await drawClip('hit');
-    // The last thing recorded runs at the restored mode: the artist leaves the
-    // surface as it was handed it, so the renderer's next fighter is not drawn
-    // additively.
-    const draws = calls.filter((call) => call.op === 'drawImage');
-    const sprite = draws.find((call) => call.composite === 'source-over');
-    expect(sprite).toBeDefined();
+  it('restores the composite mode, so the next fighter is not drawn additively', async () => {
+    const { calls, finalComposite } = await drawClip('hit');
+    // The flash draws under 'lighter'...
+    expect(flashDraw(calls)).toBeDefined();
+    // ...but the surface is handed back exactly as it was found. Deleting the
+    // artist's explicit restore leaves this 'lighter'.
+    expect(finalComposite).toBe('source-over');
   });
 
   it('draws the flash on the hit clip and on no other clip', async () => {
     for (const clip of ['idle', 'walk', 'attack-active', 'ko']) {
-      const draws = (await drawClip(clip)).filter(
-        (call) => call.op === 'drawImage' && call.composite === 'lighter',
-      );
-      expect(draws.length).toBe(0);
+      const { calls } = await drawClip(clip);
+      expect(flashDraw(calls)).toBeUndefined();
     }
   });
 
-  it('advances the flash cell with the hit clip frame, clamped to the strip', async () => {
-    const at = async (frame: number): Promise<number> => {
-      const flash = (await drawClip('hit', { flash: FLASH, frame })).find(
-        (call) => call.op === 'drawImage' && call.composite === 'lighter',
-      );
-      return Number((flash?.args ?? [])[0]);
-    };
-    // The source-x is `column * frameWidth`. Frame 2 reads cell 2; frame 99
-    // clamps to the last of four cells rather than reading past the strip.
-    expect(await at(0)).toBe(0);
-    expect(await at(2)).toBe(400);
-    expect(await at(99)).toBe(600);
-  });
-
-  it('draws the fighter un-flashed when no flash is supplied (the hero degrade)', async () => {
-    // `createSpriteArtist(sheet)` with no flash is the deliberate degrade the
-    // hero raster relies on: the struck fighter is still drawn, once, and
-    // nothing is composited over it.
-    const calls = await drawClip('hit', { flash: undefined });
+  it('draws the fighter un-flashed when no flash has loaded (the hero degrade)', async () => {
+    // A getter returning `undefined` -- a flash that has not decoded, or never
+    // will -- is the deliberate degrade the hero raster relies on: the struck
+    // fighter is still drawn, once, and nothing is composited over it.
+    const { calls } = await drawClip('hit', { flash: undefined });
     const draws = calls.filter((call) => call.op === 'drawImage');
     expect(draws.length).toBe(1);
     expect(draws[0].composite).toBe('source-over');
     expect(calls.some((call) => call.op === 'strokeRect')).toBe(false);
+  });
+
+  it('draws the offset that is actually white in the committed strip', () => {
+    // Story 9.7's lesson as a test: the artist trusts `sx: 200` to be the white
+    // cell, and this makes the tree agree. Only the second of the four cells is
+    // a pure-white silhouette; the others are coloured take-hit frames, and
+    // pointing the flash at one of them would draw a discoloured ghost that
+    // reads as nothing. Decoded straight from the IHDR + IDAT so the test needs
+    // no image decoder beyond `zlib`.
+    const png = readFileSync(
+      join(SPRITES_ROOT, 'martial-hero', 'take-hit---white-silhouette.png'),
+    );
+    const width = png.readUInt32BE(16);
+    const height = png.readUInt32BE(20);
+    expect(png[25]).toBe(6); // colour type 6 = RGBA, 8-bit
+    const idat: Buffer[] = [];
+    let at = 8;
+    while (at < png.length) {
+      const length = png.readUInt32BE(at);
+      const type = png.toString('ascii', at + 4, at + 8);
+      if (type === 'IDAT') idat.push(png.subarray(at + 8, at + 8 + length));
+      if (type === 'IEND') break;
+      at += 12 + length;
+    }
+    const raw = inflateSync(Buffer.concat(idat));
+    const stride = width * 4;
+    const image = Buffer.alloc(height * stride);
+    let pos = 0;
+    for (let y = 0; y < height; y += 1) {
+      const filter = raw[pos];
+      pos += 1;
+      for (let x = 0; x < stride; x += 1) {
+        const value = raw[pos];
+        pos += 1;
+        const a = x >= 4 ? image[y * stride + x - 4] : 0;
+        const b = y > 0 ? image[(y - 1) * stride + x] : 0;
+        const c = x >= 4 && y > 0 ? image[(y - 1) * stride + x - 4] : 0;
+        let recon = value;
+        if (filter === 1) recon = value + a;
+        else if (filter === 2) recon = value + b;
+        else if (filter === 3) recon = value + ((a + b) >> 1);
+        else if (filter === 4) {
+          const pa = Math.abs(b - c);
+          const pb = Math.abs(a - c);
+          const pc = Math.abs(a + b - 2 * c);
+          recon = value + (pa <= pb && pa <= pc ? a : pb <= pc ? b : c);
+        }
+        image[y * stride + x] = recon & 0xff;
+      }
+    }
+    const whiteIn = (cellX: number): number => {
+      let white = 0;
+      for (let y = 0; y < height; y += 1) {
+        for (let x = cellX; x < cellX + 200; x += 1) {
+          const i = y * stride + x * 4;
+          if (image[i + 3] > 8 && Math.min(image[i], image[i + 1], image[i + 2]) >= 248) {
+            white += 1;
+          }
+        }
+      }
+      return white;
+    };
+    // Cell 1 (sx 200) is pure white; the flanking cells are not.
+    expect(whiteIn(200)).toBeGreaterThan(500);
+    expect(whiteIn(0)).toBe(0);
+    expect(whiteIn(400)).toBe(0);
   });
 });

@@ -139,17 +139,24 @@ it always did. A fight with no impact art is worse-looking, never broken.
 |---|---|---|---|
 | `apps/web/public/sprites/martial-hero/take-hit---white-silhouette.png` | Martial Hero (LuizMelo) — the pack's own Take Hit frames as a white silhouette | **Creative Commons Zero (CC-0)** | 2026-08-10 |
 
-Story 12.8. An 800×200 strip of four 200×200 cells — the white hit-flash frame
-that ships under the (superseded) `martial-hero/` pack and, until this story,
-was **drawn nowhere**. It is now composited additively over a struck fighter for
-the hit clip's duration, in place of Story 4.3's hollow `--tb-warn` bracket that
-read as a debug hitbox. Loaded once by `loadHitFlash` in
-`apps/web/src/startup.ts` and shared across every fighter — it is the one flash,
-not a per-character pose — and handed to `createSpriteArtist` in
-`render/artist.ts`. Fail-soft on the same terms as everything else here: a
-decode failure is one warning, and the fighter is drawn un-flashed. The
-`hero/raster.ts` build takes that same degrade by construction, since it draws
-with the block artist and has no image loader.
+Story 12.8. An 800×200 strip of four 200×200 cells — the pack's Take Hit
+animation with its **second cell** (`sx 200`) replaced by a pure-white
+silhouette; the other three are the ordinary coloured take-hit frames. It ships
+under the (superseded) `martial-hero/` pack and, until this story, was **drawn
+nowhere**. The `hit` clip is a single frame, so only that white cell is ever
+used: it is composited additively over a struck fighter for the hit clip's
+duration, in place of Story 4.3's hollow `--tb-warn` bracket that read as a debug
+hitbox. It is drawn at the silhouette's **own** geometry (Martial Hero's
+`anchorY 120`, `scale 3`) rather than the struck fighter's, so it stands on the
+floor at roughly the fighter's height instead of floating at a foreign anchor.
+Loaded once by `loadHitFlash` in `apps/web/src/startup.ts` and shared across
+every fighter — it is the one flash, not a per-character pose — and read at draw
+time by `createSpriteArtist` in `render/artist.ts` through a getter, so a slow or
+failed decode never blocks the artist. `render/animation.test.ts` decodes this
+PNG and pins the white cell's offset, so a re-authored strip cannot point the
+flash at a coloured frame. Fail-soft: a decode failure is one warning and the
+fighter is drawn un-flashed — the same degrade `hero/raster.ts` takes by
+construction, since it draws with the block artist and has no image loader.
 
 ### Ultimate FX and portraits
 

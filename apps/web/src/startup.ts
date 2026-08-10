@@ -4,7 +4,12 @@ import { mountByokPanel, type ByokHost, type ByokPanel } from './byok/panel';
 import type { KeyStorage } from './byok/keys';
 import { escapeHtml, renderApp, type HostView, type MountPoint, type MountedApp } from './main';
 import { validateReasoningSidecar } from './replay/sidecar';
-import { createSpriteArtist, type FighterArtist, type HitFlash } from './render/artist';
+import {
+  createSpriteArtist,
+  type FighterArtist,
+  type HitFlash,
+  type HitFlashSource,
+} from './render/artist';
 import { createBackdrop, validateBackdropLayout, type Backdrop } from './render/backdrop';
 import type { AudioSink } from './render/audio';
 import { createAudioBus, type AudioContextLike, type AudioFetchResponse } from './render/audio-bus';
@@ -110,8 +115,23 @@ const ULT_LAYOUT_URL = '/fx/ult-layout.json';
  * decode failure costs the flash and nothing else.
  */
 const HIT_FLASH_URL = '/sprites/martial-hero/take-hit---white-silhouette.png';
+/**
+ * The white cell's source rectangle within the 800x200 strip. Only the *second*
+ * of its four 200x200 cells is a pure-white silhouette; the other three are the
+ * pack's ordinary coloured take-hit frames. `render/animation.test.ts` decodes
+ * the PNG and pins this offset, so a re-authored strip cannot silently point the
+ * flash at a coloured cell.
+ */
+const HIT_FLASH_SX = 200;
 const HIT_FLASH_FRAME_PX = 200;
-const HIT_FLASH_FRAMES = 4;
+/**
+ * The silhouette's own placement: Martial Hero's `anchorY` 120 at scale 3, the
+ * same numbers `martial-hero/layout.json` uses. Drawn at its own geometry rather
+ * than the struck fighter's, so it stands on the floor at roughly the fighter's
+ * height instead of floating at the wrong anchor -- see `render/artist.ts`.
+ */
+const HIT_FLASH_ANCHOR_Y = 120;
+const HIT_FLASH_SCALE = 3;
 
 interface LoadedImage {
   readonly width: number;
@@ -360,9 +380,12 @@ async function loadHitFlash(globals: BrowserGlobals): Promise<HitFlash | undefin
     await element.decode();
     return {
       image: element,
+      sx: HIT_FLASH_SX,
+      sy: 0,
       frameWidth: HIT_FLASH_FRAME_PX,
       frameHeight: HIT_FLASH_FRAME_PX,
-      frames: HIT_FLASH_FRAMES,
+      anchorY: HIT_FLASH_ANCHOR_Y,
+      scale: HIT_FLASH_SCALE,
     };
   } catch (error) {
     warn('Hit flash unavailable, hits will not flash the fighter', error);
@@ -378,18 +401,19 @@ async function loadHitFlash(globals: BrowserGlobals): Promise<HitFlash | undefin
  * that cannot decode a sheet should still show a replay whose hash verifies,
  * drawn by the block artist, rather than an error page.
  *
- * The `flash` is passed as a shared *promise* (Story 12.8): it is one shared
- * silhouette, not a per-pack asset, so it is decoded once by the caller and
- * handed to every artist. It is awaited **after** this pack's own fetch and
- * decode, never before -- gating the layout fetch on the flash would delay
- * every pack behind one image, and a slow flash would leave the fighters on the
- * block artist. `undefined` when it resolves is the same benign degrade the
- * flash loader's own failure produces: the pack still draws, un-flashed.
+ * The `flash` is a getter (Story 12.8), never awaited here: it is one shared
+ * silhouette handed to every artist, and it must not sit on any pack's critical
+ * path. The artist is built the moment this pack's own sprites decode and reads
+ * the flash from the getter at draw time, so a flash that is slow -- or never --
+ * to decode costs a hit its flash and nothing else, exactly as an un-decodable
+ * pack costs a fighter its sprites and nothing else. Gating the artist on the
+ * flash promise would instead strand all three surfaces on the block artist for
+ * the whole session behind one stalled image, with no warning.
  */
 async function loadArtist(
   globals: BrowserGlobals,
   layoutUrl: string,
-  flash: Promise<HitFlash | undefined>,
+  flash: HitFlashSource,
 ): Promise<FighterArtist | undefined> {
   try {
     if (globals.Image === undefined) {
@@ -403,7 +427,7 @@ async function loadArtist(
     // which reads as a fighter that failed to appear.
     const urls = [...new Set(Object.values(layout.clips).map((clip) => clip.image))];
     const sheet = createSpriteSheet(await decodeAll(globals, urls), layout);
-    return createSpriteArtist(sheet, await flash);
+    return createSpriteArtist(sheet, flash);
   } catch (error) {
     warn('Sprite sheet unavailable, falling back to the block artist', error);
     return undefined;
@@ -1054,20 +1078,31 @@ export async function startup(globals: BrowserGlobals): Promise<StartupResult | 
      * first resolves still share one fetch.
      */
     /**
-     * The one shared hit-flash silhouette (Story 12.8), decoded once here and
-     * threaded into every artist. Started alongside the sprite fetches rather
-     * than awaited before them, so a flash that is slow (or never) to decode
-     * costs a fighter its flash and nothing else -- `loadArtist` degrades to an
-     * un-flashed artist exactly as it degrades to the block artist.
+     * The one shared hit-flash silhouette (Story 12.8), decoded once and held in
+     * a box every artist reads through `flashSource` at draw time. A box rather
+     * than a value threaded in at construction, because the decode is a late
+     * upgrade like every sprite pack: the artists are built before it lands and
+     * pick it up whenever it does, and a decode that stalls or fails never keeps
+     * them on the block artist -- the getter simply keeps returning `undefined`.
+     * Fire-and-forget, and deliberately **not** in `upgrades`: the flash is read
+     * live through the getter, so nothing needs to await it, and awaiting it
+     * would be a foot-gun -- it decodes an `Image` rather than fetching JSON, so
+     * a test whose fetch fake fails every asset (to settle `dressed` fast) would
+     * hang on the flash's still-pending `decode()`. `loadHitFlash` swallows its
+     * own failure, so this promise never rejects.
      */
-    const hitFlash = loadHitFlash(globals);
+    const hitFlash: { current: HitFlash | undefined } = { current: undefined };
+    void loadHitFlash(globals).then((flash) => {
+      hitFlash.current = flash;
+    });
+    const flashSource: HitFlashSource = () => hitFlash.current;
     const artistCache = new Map<RosterId, Promise<FighterArtist | undefined>>();
     const artistFor = (id: RosterId): Promise<FighterArtist | undefined> => {
       const existing = artistCache.get(id);
       if (existing !== undefined) {
         return existing;
       }
-      const loading = loadArtist(globals, spriteLayoutUrlFor(id), hitFlash);
+      const loading = loadArtist(globals, spriteLayoutUrlFor(id), flashSource);
       artistCache.set(id, loading);
       return loading;
     };

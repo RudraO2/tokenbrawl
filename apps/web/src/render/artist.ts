@@ -43,19 +43,44 @@ export interface FighterArtist {
 /**
  * The white hit-flash frame composited over a struck fighter (Story 12.8).
  *
- * A `take-hit---white-silhouette` strip, laid out exactly like the sprite
- * sheet's own clips: one image, `frames` cells of `frameWidth`x`frameHeight`
- * side by side. It is optional on `createSpriteArtist`, and its absence is a
- * deliberate degrade -- the fighter is drawn un-flashed rather than the build
- * failing -- so the `hero/` raster, which draws with the block artist and has
- * no image loader at all (`raster.ts`: `drawImage` throws), is unaffected.
+ * One cell of `take-hit---white-silhouette.png`, and deliberately one: only the
+ * second of that strip's four cells (`sx = 200`) is a *pure white* silhouette
+ * -- the other three are the pack's ordinary coloured take-hit frames -- and the
+ * `hit` clip is a single frame (`CLIP_FRAME_COUNTS.hit === 1`), so there is no
+ * animation to index into. `loadHitFlash` in `startup.ts` picks the white cell
+ * by its offset, and `render/animation.test.ts` pins that offset against the
+ * decoded PNG so a re-authored strip cannot silently point this at a coloured
+ * frame.
+ *
+ * `sx/sy/frameWidth/frameHeight` are the source rectangle; `anchorY/scale` are
+ * the silhouette's **own** placement (its feet row and its drawn multiplier),
+ * not the struck fighter's. The frame is a Martial Hero pose whose proportions
+ * do not match the roster packs, so it is stood on the fighter's floor at its
+ * own scale -- a white form roughly the fighter's size, centred on them -- which
+ * reads as a flash where mapping it onto a different pack's dest rect would
+ * float it at the wrong height. See the Story 12.8 finding.
  */
 export interface HitFlash {
   readonly image: SpriteImage;
+  readonly sx: number;
+  readonly sy: number;
   readonly frameWidth: number;
   readonly frameHeight: number;
-  readonly frames: number;
+  readonly anchorY: number;
+  readonly scale: number;
 }
+
+/**
+ * How the artist reaches the flash: a getter, read at draw time, not a value
+ * captured at construction.
+ *
+ * The silhouette is a late upgrade like every sprite pack (`startup.ts`), and it
+ * must never sit on the artist's own critical path -- a flash that is slow, or
+ * never, to decode must not keep the fighters on the block artist. So the artist
+ * is built immediately with this getter and draws the flash from whenever it
+ * lands, exactly as the renderer swaps in a decoded backdrop mid-fight.
+ */
+export type HitFlashSource = () => HitFlash | undefined;
 
 /**
  * Body box, in pixels. Chunky on purpose -- this is a brutalist player, and
@@ -158,7 +183,7 @@ export function createBlockArtist(): FighterArtist {
  * same terms -- absent, the struck fighter is drawn un-flashed rather than the
  * build failing, which is the degrade `hero/raster.ts` relies on.
  */
-export function createSpriteArtist(sheet: SpriteSheet, flash?: HitFlash): FighterArtist {
+export function createSpriteArtist(sheet: SpriteSheet, flash?: HitFlashSource): FighterArtist {
   return Object.freeze({
     id: 'sprite-artist',
 
@@ -194,36 +219,41 @@ export function createSpriteArtist(sheet: SpriteSheet, flash?: HitFlash): Fighte
         height,
       );
 
-      if (fighter.animation.clip === 'hit' && flash !== undefined) {
-        // The white silhouette, over the same destination rectangle the sprite
-        // just filled, so the flash sits exactly on the fighter rather than
-        // around them. Additive, for the reason `juice-draw.ts` and
-        // `canvas2d.ts` give about `'lighter'`: a hit reads as light, and a
-        // white form composited additively drives the fighter's own pixels to
-        // white -- a flash -- while the transparent frame around the figure
-        // adds nothing. Story 4.3's opaque `--tb-warn` bracket is gone with it:
-        // the defect was never the colour, it was the empty interior.
+      const flashCell = flash?.();
+      if (fighter.animation.clip === 'hit' && flashCell !== undefined) {
+        // The white silhouette, stood on the fighter's own floor at its own
+        // scale and anchor -- not mapped onto the sprite's dest rect. The frame
+        // is a Martial Hero pose and the roster packs it plays over are a
+        // different size and anchor, so borrowing the sprite's placement would
+        // float a quarter-height blob at chest level (Story 12.8 finding); its
+        // own geometry stands a fighter-sized white form where the fighter is.
+        //
+        // Additive, for the reason `juice-draw.ts` and `canvas2d.ts` give about
+        // `'lighter'`: a hit reads as light, and a white form composited
+        // additively drives the pixels under it to white -- a flash -- while the
+        // transparent frame around the figure adds nothing. Story 4.3's opaque
+        // `--tb-warn` bracket is gone with it: the defect was never the colour,
+        // it was the empty interior.
         //
         // The composite mode is put back to whatever it was rather than to the
         // default it is usually handed, the same discipline `paintImpacts`
         // keeps: this artist is called inside the renderer's own transform and
         // must leave the surface as it found it.
-        const flashColumn = Math.max(
-          0,
-          Math.min(flash.frames - 1, Math.floor(fighter.animation.frame)),
-        );
+        const flashWidth = flashCell.frameWidth * flashCell.scale;
+        const flashHeight = flashCell.frameHeight * flashCell.scale;
+        const flashTop = -flashCell.anchorY * flashCell.scale;
         const priorComposite = ctx.globalCompositeOperation;
         ctx.globalCompositeOperation = 'lighter';
         ctx.drawImage(
-          flash.image,
-          flashColumn * flash.frameWidth,
-          0,
-          flash.frameWidth,
-          flash.frameHeight,
-          -width / 2,
-          top,
-          width,
-          height,
+          flashCell.image,
+          flashCell.sx,
+          flashCell.sy,
+          flashCell.frameWidth,
+          flashCell.frameHeight,
+          -flashWidth / 2,
+          flashTop,
+          flashWidth,
+          flashHeight,
         );
         ctx.globalCompositeOperation = priorComposite;
       }

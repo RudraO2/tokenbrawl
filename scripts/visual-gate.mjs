@@ -619,6 +619,142 @@ const SPRITE_INK_MIN = 160;
 const EDGE_COLUMNS = 4;
 
 /**
+ * Story 12.8: the hit flash and the debug-hitbox regression, measured.
+ *
+ * `FLASH_WHITE_MIN` is the *minimum* channel a pixel needs to count as the
+ * flash. The struck fighter's silhouette is composited additively in white, so
+ * a flashed pixel clamps to 255/255/255; the backdrop's brightest pixel in the
+ * arena band is 140 and the fighters' own colours (accent `#c8ff00`, warn
+ * `#ff3b30`) have a zero or near-zero channel, so a high *min* separates the
+ * additive-white flash from every bright thing that is not it. Sampled below
+ * `ARENA_TOP_PX` and above `FLOOR_INSET_PX`, so the near-white HUD name and the
+ * `#f5f5f0` floor rule are both out of frame.
+ *
+ * `FLASH_BLOB_MIN` is the size of the *largest contiguous* near-white region a
+ * hit frame must carry. A raw near-white *count* cannot serve: an independent
+ * review of this story proved a count-and-spread check passed unchanged on the
+ * parent commit -- no flash code at all -- because the pre-existing Story 11.2
+ * impact sparks composite additively too and scatter near-white spark cores
+ * across the band. What those sparks are *not* is one fighter-sized blob. The
+ * flash drives a whole contiguous silhouette to white; the sparks are a
+ * confetti of small components. So the check measures the single largest
+ * 4-connected near-white component, which the flash owns and the sparks cannot
+ * fake, and requires it to appear on a struck frame and be absent on an unstruck
+ * one. The threshold was calibrated against a flash-off baseline (see the story
+ * finding): sparks/KO cores top out well under it, the flash clears it severalfold.
+ *
+ * `WARN_RGB` is `--tb-warn` exactly; `no-debug-hitbox` fails a frame whose warn
+ * pixels form a bounding box with inked edges and an empty interior -- the
+ * hollow rectangle Story 4.3 drew and this story removed. `WARN_BOX_MIN` keeps a
+ * scatter of warn damage-number pixels from being read as a box.
+ */
+const FLASH_WHITE_MIN = 248;
+const FLASH_BLOB_MIN = 900;
+const WARN_RGB = [0xff, 0x3b, 0x30];
+const WARN_BOX_MIN = 60;
+
+/**
+ * Per visible arena canvas under `host`: the largest contiguous near-white
+ * region (the flash), and whether warn pixels form a hollow rectangle, in the
+ * arena band.
+ *
+ * One probe for both Story 12.8 checks, so `hit-reads-as-impact` and
+ * `no-debug-hitbox` describe the same frame. A cinematic (letterbox) frame is
+ * reported and excluded on the same terms `arenaInkProbe` uses: the plate's
+ * white slam would read as one enormous flash.
+ */
+const arenaHitProbe = (hostSelector) => `(() => {
+  const host = document.querySelector(${JSON.stringify(hostSelector)});
+  if (!host) return null;
+  const canvas = [...host.querySelectorAll('canvas')].find((c) => {
+    const rect = c.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+  });
+  if (!canvas) return null;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return null;
+
+  const lastRow = ctx.getImageData(0, canvas.height - 1, canvas.width, 1).data;
+  let black = 0;
+  for (let x = 0; x < canvas.width; x += 1) {
+    const i = x * 4;
+    if (lastRow[i] === 0 && lastRow[i + 1] === 0 && lastRow[i + 2] === 0) black += 1;
+  }
+  if (black >= Math.floor(canvas.width * 0.9)) return { cinematic: true, whiteBlob: 0, warnCount: 0, hollowWarn: false };
+
+  const top = ${ARENA_TOP_PX};
+  const bottom = canvas.height - ${FLOOR_INSET_PX};
+  if (bottom <= top) return { cinematic: false, whiteBlob: 0, warnCount: 0, hollowWarn: false };
+  const W = canvas.width;
+  const H = bottom - top;
+  const data = ctx.getImageData(0, top, W, H).data;
+  const warn = ${JSON.stringify(WARN_RGB)};
+
+  const near = new Uint8Array(W * H);
+  let warnCount = 0;
+  let minx = 1e9, miny = 1e9, maxx = -1, maxy = -1;
+  const warnSet = new Set();
+  for (let y = 0; y < H; y += 1) {
+    for (let x = 0; x < W; x += 1) {
+      const p = y * W + x;
+      const i = p * 4;
+      if (data[i + 3] <= 8) continue;
+      if (Math.min(data[i], data[i + 1], data[i + 2]) >= ${FLASH_WHITE_MIN}) near[p] = 1;
+      if (data[i] === warn[0] && data[i + 1] === warn[1] && data[i + 2] === warn[2]) {
+        warnCount += 1;
+        warnSet.add(p);
+        if (x < minx) minx = x;
+        if (x > maxx) maxx = x;
+        if (y < miny) miny = y;
+        if (y > maxy) maxy = y;
+      }
+    }
+  }
+
+  // Largest 4-connected near-white component, iterative flood fill.
+  let whiteBlob = 0;
+  const stack = [];
+  for (let p = 0; p < near.length; p += 1) {
+    if (near[p] !== 1) continue;
+    let size = 0;
+    stack.push(p);
+    near[p] = 2;
+    while (stack.length > 0) {
+      const q = stack.pop();
+      size += 1;
+      const qx = q % W;
+      const qy = (q - qx) / W;
+      if (qx > 0 && near[q - 1] === 1) { near[q - 1] = 2; stack.push(q - 1); }
+      if (qx < W - 1 && near[q + 1] === 1) { near[q + 1] = 2; stack.push(q + 1); }
+      if (qy > 0 && near[q - W] === 1) { near[q - W] = 2; stack.push(q - W); }
+      if (qy < H - 1 && near[q + W] === 1) { near[q + W] = 2; stack.push(q + W); }
+    }
+    if (size > whiteBlob) whiteBlob = size;
+  }
+
+  let hollowWarn = false;
+  if (warnCount >= ${WARN_BOX_MIN} && maxx - minx >= 8 && maxy - miny >= 8) {
+    const bw = maxx - minx + 1, bh = maxy - miny + 1;
+    let topEdge = 0, botEdge = 0, leftEdge = 0, rightEdge = 0;
+    for (let x = minx; x <= maxx; x += 1) {
+      if (warnSet.has(miny * W + x)) topEdge += 1;
+      if (warnSet.has(maxy * W + x)) botEdge += 1;
+    }
+    for (let y = miny; y <= maxy; y += 1) {
+      if (warnSet.has(y * W + minx)) leftEdge += 1;
+      if (warnSet.has(y * W + maxx)) rightEdge += 1;
+    }
+    const edgesInked = topEdge / bw >= 0.6 && botEdge / bw >= 0.6 && leftEdge / bh >= 0.6 && rightEdge / bh >= 0.6;
+    const perimeter = topEdge + botEdge + leftEdge + rightEdge;
+    const interior = warnCount - perimeter;
+    const interiorArea = Math.max(1, (bw - 2) * (bh - 2));
+    hollowWarn = edgesInked && interior / interiorArea <= 0.15;
+  }
+
+  return { cinematic: false, whiteBlob, warnCount, hollowWarn };
+})()`;
+
+/**
  * Where sprite ink falls across an arena canvas, per visible canvas.
  *
  * One probe, two checks. `fighters-inside-frame` reads `edgeInk`; the framing
@@ -1727,6 +1863,96 @@ async function main() {
           overlayAtEnd === null || overlayAtStart === null
             ? 'no visible canvas under #app'
             : `overlay gold frame 0: ${String(overlayAtStart.gold)} -> tail: ${String(overlayAtEnd.gold)}`,
+        );
+      }
+
+      // --- C4e hit-reads-as-impact + no-debug-hitbox (Story 12.8) ----------
+      //
+      // Two checks off one probe. `hit-reads-as-impact` requires the struck
+      // fighter's own pixels to differ from an unstruck frame by more than a
+      // threshold: the additive white silhouette drives a hit frame's arena to
+      // hundreds of near-white pixels an unstruck frame does not carry.
+      // `no-debug-hitbox` requires that no sampled frame draws a hollow
+      // warn-coloured rectangle -- the Story 4.3 bracket this story removed.
+      //
+      // Measured on the two surfaces the gate can bring to a landed hit without
+      // luck: `#app` by scrubbing a deterministic committed film, and
+      // `#spectate` by letting an autoplaying committed log (dense with hits)
+      // run. `no-debug-hitbox` additionally samples `#arcade`, so the
+      // regression guard covers all three even though the flash's presence is
+      // asserted on the two that can be driven deterministically. All three
+      // draw through the identical sprite-artist path (`animation.test.ts` pins
+      // the flash composite; `startup.ts` dresses every surface from the same
+      // `artistFor`).
+      if (!viewport.mobile) {
+        // A hit frame owns a large near-white blob; an unstruck one does not.
+        // `flashes` is true when the biggest blob crosses the threshold on some
+        // sampled frame and stays well under it on another -- the flash both
+        // appears and is absent, which no constant surface and no confetti of
+        // spark cores can satisfy.
+        const blobs = (samples) => samples.map((s) => s.whiteBlob);
+        const flashes = (samples) => {
+          const b = blobs(samples);
+          return b.length > 0 && Math.max(...b) >= FLASH_BLOB_MIN && Math.min(...b) < FLASH_BLOB_MIN / 2;
+        };
+        const describeBlob = (label, samples) => {
+          const b = blobs(samples);
+          return `${label} blob ${b.length ? `${Math.min(...b)}..${Math.max(...b)}` : 'none'}`;
+        };
+
+        await goto('/replay');
+        const appHit = [];
+        for (const pct of [0, 8, 16, 24, 32, 40, 48, 56, 64, 72, 80, 88, 96]) {
+          await cdp.evaluate(scrubTo(pct));
+          await sleep(180);
+          const sample = await cdp.evaluate(arenaHitProbe('#app'));
+          if (sample !== null && sample.cinematic !== true) appHit.push(sample);
+        }
+
+        await goto('/watch');
+        await cdp.evaluate(scrollIntoView('#spectate'));
+        await cdp.evaluate(clickIn('#spectate', '^play$'));
+        const specHit = [];
+        for (let sample = 0; sample < 16; sample += 1) {
+          await sleep(220);
+          const reading = await cdp.evaluate(arenaHitProbe('#spectate'));
+          if (reading !== null && reading.cinematic !== true) specHit.push(reading);
+        }
+
+        // `#arcade` for the regression sweep only. The Match resumes on /play;
+        // feed a few real inputs so it advances through Decision Points that
+        // draw fighters (and, when the CPU connects, a flash) rather than
+        // hanging on its first.
+        await goto('/play');
+        const arcadeHit = [];
+        for (let press = 0; press < 8; press += 1) {
+          await cdp.evaluate(dispatchKeydown('#arcade [data-arcade-keys]', press % 2 === 0 ? 'ArrowRight' : 'z'));
+          await sleep(160);
+          const reading = await cdp.evaluate(arenaHitProbe('#arcade'));
+          if (reading !== null && reading.cinematic !== true) arcadeHit.push(reading);
+        }
+
+        // Measured on the two surfaces a hit can be reached without luck: `#app`
+        // by scrubbing a deterministic committed film, `#spectate` by letting an
+        // autoplaying committed log (dense with hits) run. `#arcade` draws the
+        // identical flash (one shared `artistFor` dresses all three), but its
+        // Match hangs on the visitor and cannot be brought to a landed hit
+        // deterministically -- so it is covered by `no-debug-hitbox` below and
+        // by the shared-path unit test, not asserted here.
+        record(
+          'hit-reads-as-impact',
+          flashes(appHit) && flashes(specHit),
+          `${describeBlob('#app', appHit)} (min ${FLASH_BLOB_MIN}); ${describeBlob('#spectate', specHit)}`,
+        );
+
+        const allHit = [...appHit, ...specHit, ...arcadeHit];
+        const hollow = allHit.filter((s) => s.hollowWarn);
+        record(
+          'no-debug-hitbox',
+          allHit.length > 0 && hollow.length === 0,
+          allHit.length === 0
+            ? 'no arena frame could be sampled'
+            : `${allHit.length} arena frames sampled across #app/#spectate/#arcade, ${hollow.length} with a hollow warn box`,
         );
       }
 
