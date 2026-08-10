@@ -1,30 +1,39 @@
 import { describe, expect, it } from 'vitest';
-import type { Action, CommandLogV2 } from '@tokenbrawl/contracts';
+import type { CommandLogV2, TerminalResult } from '@tokenbrawl/contracts';
 import type { HostView } from '../main';
-import { runArcadeMatch } from './run';
+import type {
+  ArcadeRoundEnd,
+  ArcadeSessionConfig,
+  ArcadeSessionHandle,
+  ArcadeSetEnd,
+} from './session';
 import {
   arcadeMarkup,
   mountArcadePanel,
   type ArcadeHost,
   type ArcadeKeyEvent,
   type ArcadeNode,
-  type ArcadePanelDeps,
 } from './panel';
 
 /**
- * Story 9.2's surface, driven without a DOM -- same discipline as
- * `byok/panel.test.ts`: structural fakes under Vitest's default `node`
- * environment.
+ * Story 12.7's surface: an arcade set is best-of-three, driven without a DOM.
+ *
+ * The set flow is driven through a **fake session** injected as `runSession`, so
+ * "a round ends, the pips fill, the overlay holds, the set ends on its result
+ * screen" is a property of the panel rather than of one particular set of real
+ * Matches -- the same discipline Story 10.6 used for its `run` fake.
  */
 
 interface FakePanelHost extends ArcadeHost {
   readonly node: (selector: string) => ArcadeNode;
   readonly fire: (selector: string, type: 'click' | 'keydown', event?: ArcadeKeyEvent) => void;
+  readonly classOf: (selector: string) => string;
 }
 
 function createHost(): FakePanelHost {
   const nodes = new Map<string, ArcadeNode>();
   const listeners = new Map<string, ((event?: ArcadeKeyEvent) => void)[]>();
+  const classes = new Map<string, string>();
   const state = { html: '' };
 
   const child = (selector: string): ArcadeNode => {
@@ -35,7 +44,11 @@ function createHost(): FakePanelHost {
     const node: ArcadeNode = {
       innerHTML: '',
       disabled: false,
-      setAttribute: (): void => undefined,
+      setAttribute: (name, value): void => {
+        if (name === 'class') {
+          classes.set(selector, value);
+        }
+      },
       addEventListener: (type, listener): void => {
         const key = `${selector}:${type}`;
         listeners.set(key, [...(listeners.get(key) ?? []), listener]);
@@ -54,6 +67,7 @@ function createHost(): FakePanelHost {
     },
     querySelector: (selector: string): ArcadeNode | null => child(selector),
     node: child,
+    classOf: (selector: string): string => classes.get(selector) ?? '',
     fire: (selector: string, type: 'click' | 'keydown', event?: ArcadeKeyEvent): void => {
       for (const listener of listeners.get(`${selector}:${type}`) ?? []) {
         listener(event);
@@ -62,509 +76,382 @@ function createHost(): FakePanelHost {
   };
 }
 
-const KEYS = ['ArrowRight', 'z', 'x', 'c', 'ArrowLeft'] as const;
-
-/** Fires a rotating, legal keydown sequence until the Match settles. */
-async function driveByKeyboard(host: FakePanelHost, logs: CommandLogV2[], maxTicks = 5_000): Promise<void> {
-  let settled = false;
-  const before = logs.length;
-  let index = 0;
-  let iterations = 0;
-  while (logs.length === before && !settled && iterations < maxTicks) {
-    host.fire('[data-arcade-keys]', 'keydown', { key: KEYS[index % KEYS.length] });
-    index += 1;
-    iterations += 1;
-    await Promise.resolve();
-    settled = logs.length > before;
-  }
+function resultFor(outcome: 'p1' | 'p2' | 'draw', endReason: 'ko' | 'timeout' = 'timeout'): TerminalResult {
+  return { outcome, endTick: 1200, endReason, healthRemaining: [3, 100] };
 }
 
-describe('the panel shell (mount/unmount)', () => {
+function logFor(outcome: 'p1' | 'p2' | 'draw'): CommandLogV2 {
+  return {
+    schemaVersion: '2.0.0',
+    result: resultFor(outcome),
+    agents: [
+      { id: 'p1:human', kind: 'human' },
+      { id: 'p2:bot:random', kind: 'bot' },
+    ],
+  } as unknown as CommandLogV2;
+}
+
+/** A `runSession` a test drives by hand: it captures the config and records fed input. */
+interface FakeSession {
+  readonly runSession: (config: ArcadeSessionConfig) => ArcadeSessionHandle;
+  readonly config: () => ArcadeSessionConfig;
+  readonly starts: () => number;
+  readonly fed: readonly string[];
+  readonly cancelled: () => boolean;
+}
+
+function createFakeSession(): FakeSession {
+  const captured: { config?: ArcadeSessionConfig; cancelled: boolean; starts: number } = {
+    cancelled: false,
+    starts: 0,
+  };
+  const fed: string[] = [];
+  return {
+    runSession: (config): ArcadeSessionHandle => {
+      captured.config = config;
+      captured.starts += 1;
+      return {
+        feedInput: (raw: string): void => {
+          fed.push(raw);
+        },
+        roundsWon: (): readonly [number, number] => [0, 0],
+        cancel: (): void => {
+          captured.cancelled = true;
+        },
+      };
+    },
+    config: (): ArcadeSessionConfig => {
+      if (captured.config === undefined) {
+        throw new Error('runSession was never called');
+      }
+      return captured.config;
+    },
+    starts: (): number => captured.starts,
+    fed,
+    cancelled: (): boolean => captured.cancelled,
+  };
+}
+
+const roundEnd = (
+  round: number,
+  outcome: 'p1' | 'p2' | 'draw',
+  roundsWon: readonly [number, number],
+  setOver: boolean,
+): ArcadeRoundEnd => ({
+  round,
+  log: logFor(outcome),
+  result: resultFor(outcome),
+  roundsWon,
+  setOver,
+});
+
+const setEnd = (
+  roundsWon: readonly [number, number],
+  humanWon: boolean,
+  logs: readonly CommandLogV2[],
+): ArcadeSetEnd => ({ roundsWon, humanWon, logs });
+
+describe('the panel shell (mount)', () => {
   it('mounts a Play vs CPU button and an idle status', () => {
     const host = createHost();
-    const logs: CommandLogV2[] = [];
-    const panel = mountArcadePanel(host, { onLog: (log) => logs.push(log) });
+    const panel = mountArcadePanel(host, {});
 
     expect(host.innerHTML).toContain('Play vs CPU');
     expect(panel.state()).toBe('idle');
     expect(host.node('[data-arcade-status]').innerHTML).toContain('No key, no signup');
   });
 
-  it('produces the markup arcadeMarkup() describes', () => {
+  it('produces the markup arcadeMarkup() describes, including the set-result controls', () => {
     expect(arcadeMarkup()).toContain('data-arcade-play');
     expect(arcadeMarkup()).toContain('data-arcade-keys');
     for (const action of ['advance', 'retreat', 'attack', 'block', 'special']) {
       expect(arcadeMarkup()).toContain(`data-arcade-action="${action}"`);
     }
+    // Story 12.7's set-result screen: a result line and two keyboard-reachable
+    // `tb-button` controls (the `--tb-accent` focus outline comes with the class).
+    expect(arcadeMarkup()).toContain('data-arcade-setresult');
+    expect(arcadeMarkup()).toContain('data-arcade-rematch');
+    expect(arcadeMarkup()).toContain('data-arcade-select');
+    expect(arcadeMarkup()).toContain('best of three');
   });
 
   it('re-mounting into a fresh host does not throw and starts idle again', () => {
-    const first = createHost();
-    mountArcadePanel(first, { onLog: (): void => undefined });
-    const second = createHost();
-    const panel = mountArcadePanel(second, { onLog: (): void => undefined });
+    mountArcadePanel(createHost(), {});
+    const panel = mountArcadePanel(createHost(), {});
     expect(panel.state()).toBe('idle');
   });
 });
 
-describe('a scripted keyboard sequence completes a Match (AC1, AC4)', () => {
-  it('runs to a terminal state and hands the completed log to onLog', async () => {
+describe('a best-of-three set plays out on one screen (12.7)', () => {
+  it('starts a session on Play and forwards input to the round in play', () => {
     const host = createHost();
-    const logs: CommandLogV2[] = [];
-    const panel = mountArcadePanel(host, {
-      onLog: (log) => logs.push(log),
-      run: (config) => runArcadeMatch(config),
-      seed: 4_601,
-    });
+    const fake = createFakeSession();
+    const panel = mountArcadePanel(host, { runSession: fake.runSession, seed: 4_601 });
 
     host.fire('[data-arcade-play]', 'click');
     expect(panel.state()).toBe('running');
+    expect(fake.starts()).toBe(1);
+    expect(fake.config().seed).toBe(4_601);
 
-    await driveByKeyboard(host, logs);
+    host.fire('[data-arcade-keys]', 'keydown', { key: 'z' });
+    host.fire('[data-arcade-action="attack"]', 'click');
+    expect(fake.fed).toStrictEqual(['z', 'attack']);
+  });
 
-    expect(logs).toHaveLength(1);
-    expect(logs[0].schemaVersion).toBe('2.0.0');
-    expect(logs[0].agents[0].kind).toBe('human');
+  it('ends the set on its result screen and re-enables Play (a rematch)', () => {
+    const host = createHost();
+    const fake = createFakeSession();
+    const panel = mountArcadePanel(host, { runSession: fake.runSession });
+
+    host.fire('[data-arcade-play]', 'click');
+    fake.config().onSetEnd?.(setEnd([2, 0], true, [logFor('p1'), logFor('p1')]));
+
     expect(panel.state()).toBe('done');
-    expect(host.node('[data-arcade-status]').innerHTML).toContain('excluded from every rating');
-  });
-
-  it('disables nothing permanently: play button re-enables after the Match', async () => {
-    const host = createHost();
-    const logs: CommandLogV2[] = [];
-    mountArcadePanel(host, {
-      onLog: (log) => logs.push(log),
-      run: (config) => runArcadeMatch(config),
-      seed: 4_601,
-    });
-
-    host.fire('[data-arcade-play]', 'click');
-    expect(host.node('[data-arcade-play]').disabled).toBe(true);
-    await driveByKeyboard(host, logs);
     expect(host.node('[data-arcade-play]').disabled).toBe(false);
+    // The result screen is shown and names the win.
+    expect(host.classOf('[data-arcade-setresult]')).toContain('tb-arcade-setresult--shown');
+    expect(host.node('[data-arcade-setresult-text]').innerHTML).toContain('win');
   });
 
-  it('drives a Match to completion through the on-screen buttons too', async () => {
+  it('names a loss with the score the other way round', () => {
     const host = createHost();
+    const fake = createFakeSession();
+    mountArcadePanel(host, { runSession: fake.runSession });
+
+    host.fire('[data-arcade-play]', 'click');
+    fake.config().onSetEnd?.(setEnd([1, 2], false, [logFor('p2'), logFor('p1'), logFor('p2')]));
+
+    expect(host.node('[data-arcade-setresult-text]').innerHTML).toContain('lose');
+    expect(host.node('[data-arcade-setresult-text]').innerHTML).toContain('2-1');
+  });
+
+  it('a round that does not end the set holds and then resolves for the next round', async () => {
+    const host = createHost();
+    const fake = createFakeSession();
     const logs: CommandLogV2[] = [];
     mountArcadePanel(host, {
-      onLog: (log) => logs.push(log),
-      run: (config) => runArcadeMatch(config),
-      seed: 4_602,
+      runSession: fake.runSession,
+      onRoundLog: (log) => logs.push(log),
     });
 
     host.fire('[data-arcade-play]', 'click');
-
-    const buttons = ['advance', 'attack', 'block', 'special', 'retreat'] as const;
-    let index = 0;
-    let iterations = 0;
-    while (logs.length === 0 && iterations < 5_000) {
-      host.fire(`[data-arcade-action="${buttons[index % buttons.length]}"]`, 'click');
-      index += 1;
-      iterations += 1;
-      await Promise.resolve();
-    }
-
+    // A non-terminal round returns a hold that resolves at once with no view.
+    await fake.config().onRoundEnd?.(roundEnd(0, 'p1', [1, 0], false));
+    // The round's log was handed off, and the result screen is NOT shown mid-set.
     expect(logs).toHaveLength(1);
+    expect(host.classOf('[data-arcade-setresult]')).not.toContain('tb-arcade-setresult--shown');
+    expect(host.node('[data-arcade-setresult-text]').innerHTML).toBe('');
+  });
+
+  it('re-mounting the set from the result screen hides it and starts a fresh session', () => {
+    const host = createHost();
+    const fake = createFakeSession();
+    mountArcadePanel(host, { runSession: fake.runSession });
+
+    host.fire('[data-arcade-play]', 'click');
+    fake.config().onSetEnd?.(setEnd([2, 0], true, [logFor('p1'), logFor('p1')]));
+    expect(host.classOf('[data-arcade-setresult]')).toContain('tb-arcade-setresult--shown');
+
+    host.fire('[data-arcade-rematch]', 'click');
+    expect(fake.starts()).toBe(2);
+    expect(host.classOf('[data-arcade-setresult]')).not.toContain('tb-arcade-setresult--shown');
+  });
+
+  it('returns to character select through the callback the shell wired', () => {
+    const host = createHost();
+    const fake = createFakeSession();
+    let returned = 0;
+    mountArcadePanel(host, {
+      runSession: fake.runSession,
+      onReturnToSelect: () => {
+        returned += 1;
+      },
+    });
+
+    host.fire('[data-arcade-play]', 'click');
+    fake.config().onSetEnd?.(setEnd([0, 2], false, [logFor('p2'), logFor('p2')]));
+    host.fire('[data-arcade-select]', 'click');
+    expect(returned).toBe(1);
+  });
+
+  it('a second Play while a set is running is ignored', () => {
+    const host = createHost();
+    const fake = createFakeSession();
+    mountArcadePanel(host, { runSession: fake.runSession });
+
+    host.fire('[data-arcade-play]', 'click');
+    host.fire('[data-arcade-play]', 'click');
+    expect(fake.starts()).toBe(1);
   });
 });
 
-describe('an unmapped or illegal key is ignored, never reaching the Match (I/O matrix row 2)', () => {
-  it('never crashes on Escape, and the Match still completes once legal input resumes', async () => {
+describe('errors recover the panel rather than leaving it stuck (P1)', () => {
+  it('routes a session error to the failure state and re-enables Play', () => {
     const host = createHost();
-    const logs: CommandLogV2[] = [];
-    mountArcadePanel(host, {
-      onLog: (log) => logs.push(log),
-      run: (config) => runArcadeMatch(config),
-      seed: 4_601,
-    });
+    const fake = createFakeSession();
+    const panel = mountArcadePanel(host, { runSession: fake.runSession });
 
     host.fire('[data-arcade-play]', 'click');
-
-    expect(() => host.fire('[data-arcade-keys]', 'keydown', { key: 'Escape' })).not.toThrow();
-
-    let index = 0;
-    let iterations = 0;
-    while (logs.length === 0 && iterations < 5_000) {
-      host.fire('[data-arcade-keys]', 'keydown', { key: 'Escape' });
-      host.fire('[data-arcade-keys]', 'keydown', { key: KEYS[index % KEYS.length] });
-      index += 1;
-      iterations += 1;
-      await Promise.resolve();
-    }
-
-    expect(logs).toHaveLength(1);
-  });
-
-  it('does nothing before the Match has started (no handle to feed)', () => {
-    const host = createHost();
-    mountArcadePanel(host, { onLog: (): void => undefined });
-    expect(() => host.fire('[data-arcade-keys]', 'keydown', { key: 'z' })).not.toThrow();
-  });
-
-  it('ignores a keydown event with no key at all', async () => {
-    const host = createHost();
-    const logs: CommandLogV2[] = [];
-    mountArcadePanel(host, {
-      onLog: (log) => logs.push(log),
-      run: (config) => runArcadeMatch(config),
-      seed: 4_601,
-    });
-    host.fire('[data-arcade-play]', 'click');
-    expect(() => host.fire('[data-arcade-keys]', 'keydown', {})).not.toThrow();
-    await driveByKeyboard(host, logs);
-    expect(logs).toHaveLength(1);
-  });
-});
-
-describe('a rejected match promise recovers the panel rather than leaving it stuck (P1)', () => {
-  it('shows an error state and re-enables Play instead of a stuck "Fighting..." state', async () => {
-    const host = createHost();
-    let rejectLog: ((error: unknown) => void) | undefined;
-    const panel = mountArcadePanel(host, {
-      onLog: (): void => undefined,
-      run: () => ({
-        log: new Promise((_resolve, reject) => {
-          rejectLog = reject;
-        }),
-        feedInput: (): void => undefined,
-      }),
-    });
-
-    host.fire('[data-arcade-play]', 'click');
-    expect(panel.state()).toBe('running');
-    expect(host.node('[data-arcade-play]').disabled).toBe(true);
-
-    rejectLog?.(new Error('match blew up'));
-    await Promise.resolve();
-    await Promise.resolve();
+    fake.config().onError?.(new Error('match blew up'));
 
     expect(panel.state()).toBe('error');
     expect(host.node('[data-arcade-play]').disabled).toBe(false);
     expect(host.node('[data-arcade-status]').innerHTML).toContain('match blew up');
   });
 
-  it('never calls onLog when the match rejects', async () => {
-    const host = createHost();
-    const logs: CommandLogV2[] = [];
-    let rejectLog: ((error: unknown) => void) | undefined;
-    mountArcadePanel(host, {
-      onLog: (log) => logs.push(log),
-      run: () => ({
-        log: new Promise((_resolve, reject) => {
-          rejectLog = reject;
-        }),
-        feedInput: (): void => undefined,
-      }),
-    });
-
-    host.fire('[data-arcade-play]', 'click');
-    rejectLog?.(new Error('boom'));
-    await Promise.resolve();
-    await Promise.resolve();
-
-    expect(logs).toHaveLength(0);
-  });
-
-  it('recovers from a synchronous throw when starting the match', () => {
+  it('recovers from a synchronous throw when starting the set', () => {
     const host = createHost();
     const panel = mountArcadePanel(host, {
-      onLog: (): void => undefined,
-      run: () => {
+      runSession: () => {
         throw new Error('cannot start');
       },
     });
 
     host.fire('[data-arcade-play]', 'click');
-
     expect(panel.state()).toBe('error');
     expect(host.node('[data-arcade-play]').disabled).toBe(false);
   });
+
+  it('does nothing on a keydown before a set has started (no session to feed)', () => {
+    const host = createHost();
+    mountArcadePanel(host, {});
+    expect(() => host.fire('[data-arcade-keys]', 'keydown', { key: 'z' })).not.toThrow();
+  });
+
+  it('ignores a keydown event with no key at all', () => {
+    const host = createHost();
+    const fake = createFakeSession();
+    mountArcadePanel(host, { runSession: fake.runSession });
+    host.fire('[data-arcade-play]', 'click');
+    expect(() => host.fire('[data-arcade-keys]', 'keydown', {})).not.toThrow();
+    expect(fake.fed).toStrictEqual([]);
+  });
 });
 
-describe('the key-capture div receives focus when a Match starts (P3)', () => {
+describe('the key-capture div receives focus when a set starts (P3)', () => {
   it('calls .focus() on [data-arcade-keys] right when play() runs', () => {
     const host = createHost();
+    const fake = createFakeSession();
     let focusCalls = 0;
-    const keysNode = host.node('[data-arcade-keys]');
-    keysNode.focus = (): void => {
+    host.node('[data-arcade-keys]').focus = (): void => {
       focusCalls += 1;
     };
 
-    mountArcadePanel(host, {
-      onLog: (): void => undefined,
-      run: (config) => runArcadeMatch(config),
-      seed: 4_601,
-    });
-
+    mountArcadePanel(host, { runSession: fake.runSession });
     host.fire('[data-arcade-play]', 'click');
 
     expect(focusCalls).toBe(1);
   });
 
-  it('never throws when the host node has no focus method (structural optionality)', () => {
+  it('never throws when the host node has no focus method', () => {
     const host = createHost();
-    mountArcadePanel(host, {
-      onLog: (): void => undefined,
-      run: (config) => runArcadeMatch(config),
-      seed: 4_601,
-    });
-
+    const fake = createFakeSession();
+    mountArcadePanel(host, { runSession: fake.runSession });
     expect(() => host.fire('[data-arcade-play]', 'click')).not.toThrow();
   });
 });
 
 /**
- * Story 10.6.
- *
- * Two kinds of case here, and the split is deliberate.
- *
- * The messaging cases drive a **fake** `run` whose `onLegalActions` this file
- * calls by hand. That is the only way to state "when the gauge arms, the panel
- * says so" as a property of the panel rather than as a property of one
- * particular Match: a real Match arms on whichever Decision Point it happens to
- * arm on, and a test that waited for it would be asserting the balance table.
- *
- * The one case that must be about a real Match -- that a human can reach a full
- * bar at all -- lives in `run.test.ts`, where the log can be inspected.
+ * Story 10.6, carried forward to the set: the affordance is a property of the
+ * panel, driven by the session's `onLegalActions` the same way it was driven by
+ * the Match's.
  */
-
-interface FakeRun {
-  readonly fed: readonly string[];
-  readonly arm: (armed: boolean) => void;
-  readonly finish: (log: CommandLogV2) => void;
-}
-
-/** A `run` that never finishes on its own, so the panel can be poked at mid-Match. */
-function createFakeRun(): { readonly run: ArcadePanelDeps['run']; readonly handle: FakeRun } {
-  const fed: string[] = [];
-  const captured: {
-    onLegalActions?: (legalActions: readonly Action[]) => void;
-    resolve?: (log: CommandLogV2) => void;
-  } = {};
-
-  return {
-    run: (config) => {
-      captured.onLegalActions = config.onLegalActions;
-      return {
-        log: new Promise<CommandLogV2>((resolve) => {
-          captured.resolve = resolve;
-        }),
-        feedInput: (raw: string): void => {
-          fed.push(raw);
-        },
-      };
-    },
-    handle: {
-      get fed(): readonly string[] {
-        return fed;
-      },
-      arm: (armed: boolean): void => {
-        captured.onLegalActions?.(
-          armed ? ['advance', 'retreat', 'attack', 'block', 'special'] : ['advance', 'retreat', 'attack', 'block'],
-        );
-      },
-      finish: (log: CommandLogV2): void => {
-        captured.resolve?.(log);
-      },
-    },
-  };
-}
-
 describe('the panel tells the player the Ultimate is ready (Story 10.6, AC3)', () => {
-  it('shows nothing before a Match has started', () => {
+  it('shows nothing before a set has started', () => {
     const host = createHost();
-    mountArcadePanel(host, { onLog: (): void => undefined });
+    mountArcadePanel(host, {});
     expect(host.node('[data-arcade-ultimate]').innerHTML).toBe('');
   });
 
   it('surfaces the affordance the moment the gauge reports itself full', () => {
     const host = createHost();
-    const { run, handle } = createFakeRun();
-    mountArcadePanel(host, { onLog: (): void => undefined, run });
+    const fake = createFakeSession();
+    mountArcadePanel(host, { runSession: fake.runSession });
 
     host.fire('[data-arcade-play]', 'click');
     expect(host.node('[data-arcade-ultimate]').innerHTML).toBe('');
 
-    handle.arm(true);
-
-    // Named by the key, because the affordance exists for a player who never
-    // read the intro paragraph. "Ultimate ready" alone would tell them a fact
-    // and not what to do with it.
+    fake.config().onLegalActions?.(['advance', 'retreat', 'attack', 'block', 'special']);
     expect(host.node('[data-arcade-ultimate]').innerHTML).toContain('Ultimate ready');
     expect(host.node('[data-arcade-ultimate]').innerHTML).toContain('L');
   });
 
   it('clears it again when the bar is spent', () => {
     const host = createHost();
-    const { run, handle } = createFakeRun();
-    mountArcadePanel(host, { onLog: (): void => undefined, run });
+    const fake = createFakeSession();
+    mountArcadePanel(host, { runSession: fake.runSession });
 
     host.fire('[data-arcade-play]', 'click');
-    handle.arm(true);
+    fake.config().onLegalActions?.(['advance', 'retreat', 'attack', 'block', 'special']);
     expect(host.node('[data-arcade-ultimate]').innerHTML).not.toBe('');
-
-    handle.arm(false);
+    fake.config().onLegalActions?.(['advance', 'retreat', 'attack', 'block']);
     expect(host.node('[data-arcade-ultimate]').innerHTML).toBe('');
   });
 
-  it('clears it when the Match ends', async () => {
+  it('clears it when the set ends', () => {
     const host = createHost();
-    const { run, handle } = createFakeRun();
-    const logs: CommandLogV2[] = [];
-    mountArcadePanel(host, { onLog: (log) => logs.push(log), run });
+    const fake = createFakeSession();
+    mountArcadePanel(host, { runSession: fake.runSession });
 
     host.fire('[data-arcade-play]', 'click');
-    handle.arm(true);
-    handle.finish({ schemaVersion: '2.0.0' } as unknown as CommandLogV2);
-    await Promise.resolve();
-    await Promise.resolve();
-
-    expect(logs).toHaveLength(1);
-    expect(host.node('[data-arcade-ultimate]').innerHTML).toBe('');
-  });
-
-  it('does not carry a previous Match’s armed state into a new one', async () => {
-    const host = createHost();
-    const { run, handle } = createFakeRun();
-    mountArcadePanel(host, { onLog: (): void => undefined, run });
-
-    host.fire('[data-arcade-play]', 'click');
-    handle.arm(true);
-    handle.finish({ schemaVersion: '2.0.0' } as unknown as CommandLogV2);
-    await Promise.resolve();
-    await Promise.resolve();
-
-    host.fire('[data-arcade-play]', 'click');
+    fake.config().onLegalActions?.(['advance', 'retreat', 'attack', 'block', 'special']);
+    fake.config().onSetEnd?.(setEnd([2, 0], true, [logFor('p1'), logFor('p1')]));
     expect(host.node('[data-arcade-ultimate]').innerHTML).toBe('');
   });
 });
 
 describe('pressing L below a full gauge says why (Story 10.6, AC2)', () => {
-  it('explains the drop instead of doing nothing visible', () => {
+  it('explains the drop, and still forwards the press so the Agent remains the one thing that drops it', () => {
     const host = createHost();
-    const { run, handle } = createFakeRun();
-    mountArcadePanel(host, { onLog: (): void => undefined, run });
+    const fake = createFakeSession();
+    mountArcadePanel(host, { runSession: fake.runSession });
 
     host.fire('[data-arcade-play]', 'click');
-    handle.arm(false);
+    fake.config().onLegalActions?.(['advance', 'retreat', 'attack', 'block']);
     host.fire('[data-arcade-keys]', 'keydown', { key: 'l' });
 
-    // A silent no-op is indistinguishable from a broken key -- the same failure
-    // Story 9.3's picker guard exists to prevent.
     expect(host.node('[data-arcade-status]').innerHTML).toContain('Ultimate not ready');
-    expect(host.node('[data-arcade-status]').innerHTML).toContain('Super Gauge');
-  });
-
-  it('still forwards the press, so the Agent remains the only thing that drops it', () => {
-    // The load-bearing one. If the panel had started refusing to forward the
-    // key, the legality rule would now live in two places and could drift.
-    const host = createHost();
-    const { run, handle } = createFakeRun();
-    mountArcadePanel(host, { onLog: (): void => undefined, run });
-
-    host.fire('[data-arcade-play]', 'click');
-    handle.arm(false);
-    host.fire('[data-arcade-keys]', 'keydown', { key: 'l' });
-
-    expect(handle.fed).toStrictEqual(['l']);
+    expect(fake.fed).toStrictEqual(['l']);
   });
 
   it('says nothing of the sort when the gauge is full', () => {
     const host = createHost();
-    const { run, handle } = createFakeRun();
-    mountArcadePanel(host, { onLog: (): void => undefined, run });
+    const fake = createFakeSession();
+    mountArcadePanel(host, { runSession: fake.runSession });
 
     host.fire('[data-arcade-play]', 'click');
-    handle.arm(true);
+    fake.config().onLegalActions?.(['advance', 'retreat', 'attack', 'block', 'special']);
     host.fire('[data-arcade-keys]', 'keydown', { key: 'l' });
 
     expect(host.node('[data-arcade-status]').innerHTML).not.toContain('Ultimate not ready');
-    expect(handle.fed).toStrictEqual(['l']);
+    expect(fake.fed).toStrictEqual(['l']);
   });
 
   it('gives the on-screen Special button the identical explanation', () => {
-    // Touch and keyboard go through one path. A player on a phone getting
-    // silence where a player on a laptop gets a sentence is the same defect
-    // AC2 names, wearing a different input device.
     const host = createHost();
-    const { run, handle } = createFakeRun();
-    mountArcadePanel(host, { onLog: (): void => undefined, run });
+    const fake = createFakeSession();
+    mountArcadePanel(host, { runSession: fake.runSession });
 
     host.fire('[data-arcade-play]', 'click');
-    handle.arm(false);
+    fake.config().onLegalActions?.(['advance', 'retreat', 'attack', 'block']);
     host.fire('[data-arcade-action="special"]', 'click');
 
     expect(host.node('[data-arcade-status]').innerHTML).toContain('Ultimate not ready');
-    expect(handle.fed).toStrictEqual(['special']);
-  });
-
-  it('leaves every other key silent, however unmapped', () => {
-    const host = createHost();
-    const { run, handle } = createFakeRun();
-    mountArcadePanel(host, { onLog: (): void => undefined, run });
-
-    host.fire('[data-arcade-play]', 'click');
-    handle.arm(false);
-    for (const key of ['z', 'x', 'ArrowLeft', 'ArrowRight', 'Escape']) {
-      host.fire('[data-arcade-keys]', 'keydown', { key });
-    }
-
-    expect(host.node('[data-arcade-status]').innerHTML).not.toContain('Ultimate not ready');
-  });
-
-  it('treats C exactly as it treats L, since both ask for the same Action', () => {
-    const host = createHost();
-    const { run, handle } = createFakeRun();
-    mountArcadePanel(host, { onLog: (): void => undefined, run });
-
-    host.fire('[data-arcade-play]', 'click');
-    handle.arm(false);
-    host.fire('[data-arcade-keys]', 'keydown', { key: 'c' });
-
-    expect(host.node('[data-arcade-status]').innerHTML).toContain('Ultimate not ready');
+    expect(fake.fed).toStrictEqual(['special']);
   });
 });
 
 describe('the controls are documented where a player will read them (Story 10.6, AC5)', () => {
   it('names L in the panel’s own help text', () => {
-    // A binding nobody is told about is not a feature.
     expect(arcadeMarkup()).toContain('L throws the Ultimate');
     expect(arcadeMarkup()).toContain('data-arcade-ultimate');
-  });
-
-  it('keeps the on-screen Special button, which is the touch path (AC1)', () => {
-    expect(arcadeMarkup()).toContain('data-arcade-action="special"');
-  });
-});
-
-describe('a second play click while one is in flight is ignored', () => {
-  it('does not start a second Match', async () => {
-    const host = createHost();
-    const logs: CommandLogV2[] = [];
-    mountArcadePanel(host, {
-      onLog: (log) => logs.push(log),
-      run: (config) => runArcadeMatch(config),
-      seed: 4_601,
-    });
-
-    host.fire('[data-arcade-play]', 'click');
-    host.fire('[data-arcade-play]', 'click');
-
-    await driveByKeyboard(host, logs);
-    expect(logs).toHaveLength(1);
   });
 });
 
 /**
- * Story 12.2: the live canvas is on screen, drawing, while the Match is played.
- *
- * The load-bearing property is timing: the fighters must be painted *before* the
- * first Decision Point resolves, because the first Decision Point does not
- * resolve until the visitor presses a key and a blank canvas until then is the
- * defect this story exists to remove. A recording canvas proves it with no DOM.
+ * Story 12.2, carried forward: the live canvas is on screen and drawing the
+ * instant the set's first Match reaches its reset state -- before any key.
  */
-/** A host whose `canvas` selector returns a recording 2D surface, and that records the stage's class. */
 function createLiveHost(): FakePanelHost & {
   readonly canvasOps: () => readonly string[];
   readonly stageClass: () => string;
@@ -630,56 +517,24 @@ function createStubView(): HostView {
 describe('the live canvas draws the fight while it is played (Story 12.2)', () => {
   it('paints the fighters the instant Play runs, before the first key', () => {
     const host = createLiveHost();
-    mountArcadePanel(host, {
-      onLog: (): void => undefined,
-      view: createStubView(),
-      seed: 4_601,
-    });
+    // No injected session: the real best-of-three runs, and its first Match's
+    // reset state is reported synchronously by `runArcadeMatch`.
+    mountArcadePanel(host, { view: createStubView(), seed: 4_601 });
 
-    // Nothing is drawn while the panel sits idle, and the stage is hidden.
     expect(host.canvasOps()).toHaveLength(0);
     expect(host.stageClass()).toBe('tb-arcade-stage');
 
     host.fire('[data-arcade-play]', 'click');
 
-    // The reset state is reported synchronously by `runArcadeMatch` (env.reset
-    // runs before the loop's first await), so by the time the click handler
-    // returns the fighters are on the canvas -- no key pressed, no Decision
-    // Point resolved. The stage is now revealed.
     expect(host.canvasOps()).toContain('clearRect');
     expect(host.canvasOps()).toContain('fillRect');
     expect(host.stageClass()).toBe('tb-arcade-stage tb-arcade-stage--live');
   });
 
-  it('hides the live canvas again when the Match ends and the replay re-mounts', async () => {
-    const host = createLiveHost();
-    const logs: CommandLogV2[] = [];
-    mountArcadePanel(host, {
-      onLog: (log) => logs.push(log),
-      view: createStubView(),
-      seed: 4_601,
-    });
-
-    host.fire('[data-arcade-play]', 'click');
-    expect(host.stageClass()).toBe('tb-arcade-stage tb-arcade-stage--live');
-
-    await driveByKeyboard(host, logs);
-
-    // The Match resolved; the live canvas gives way to the replay rather than
-    // both being on screen at once.
-    expect(logs).toHaveLength(1);
-    expect(host.stageClass()).toBe('tb-arcade-stage');
-  });
-
   it('keeps its pre-12.2 behaviour when there is no view to drive a clock', () => {
     const host = createLiveHost();
-    // No `view`: the live arena cannot mount, and the panel must still run.
-    expect(() =>
-      mountArcadePanel(host, { onLog: (): void => undefined, seed: 4_601 }),
-    ).not.toThrow();
+    expect(() => mountArcadePanel(host, { seed: 4_601 })).not.toThrow();
     host.fire('[data-arcade-play]', 'click');
-    // No live canvas, so nothing is drawn and the stage stays hidden -- exactly
-    // as the panel behaved before this story.
     expect(host.canvasOps()).toHaveLength(0);
     expect(host.stageClass()).toBe('tb-arcade-stage');
   });

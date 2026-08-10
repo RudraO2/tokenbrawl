@@ -931,6 +931,34 @@ body {
   image-rendering: pixelated;
 }
 
+/*
+ * Story 12.7. The set-result controls, hidden until a set ends.
+ *
+ * Hidden by class rather than the `hidden` attribute, matching `.tb-arcade-stage`
+ * -- the panel toggles a class through the same non-`lib.dom` `setAttribute` it
+ * uses for the stage, and a class the CSS owns keeps the show/hide rule in one
+ * place. The buttons inside are `.tb-button`, so they carry the `--tb-accent`
+ * focus outline the AC asks for with no rule of their own.
+ */
+.tb-arcade-setresult {
+  display: none;
+  margin: var(--tb-space-2) 0 0;
+}
+
+.tb-arcade-setresult--shown {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--tb-space-2);
+  align-items: center;
+}
+
+.tb-arcade-setresult-text {
+  flex: 1 1 100%;
+  margin: 0;
+  font-family: var(--tb-font-display);
+  font-weight: 800;
+}
+
 /* The BYOK badge on a Match run in this tab. Says why it will never be ranked. */
 .tb-chip--byok {
   border-color: var(--tb-accent);

@@ -36,7 +36,7 @@ import {
   type ShellView,
 } from './shell/router';
 import { mountSelectPanel, type SelectHost, type SelectPanel } from './shell/select';
-import { ROUTE_BYOK, ROUTE_PLAY, ROUTE_REPLAY, ROUTE_WATCH, SCREENS } from './shell/screens';
+import { ROUTE_BYOK, ROUTE_PLAY, ROUTE_REPLAY, ROUTE_SELECT, ROUTE_WATCH, SCREENS } from './shell/screens';
 
 /**
  * Story 4.2: the bootstrap, and the order it does things in.
@@ -456,9 +456,10 @@ function mountByok(
  */
 function mountArcade(
   globals: BrowserGlobals,
-  mount: (log: CommandLog) => MountedApp,
   /** Story 12.2. The page's view, for the live arena's animation-frame clock. */
   view: HostView,
+  /** Story 12.7. The set-result screen's "Return to character select", wired to the router. */
+  returnToSelect: () => void,
 ): ArcadePanel | null {
   const host = globals.document?.querySelector('#arcade');
   if (host == null) {
@@ -470,17 +471,11 @@ function mountArcade(
       // through the same `drawJuicedFrame` the replay player uses. Handed the
       // page's view so its clock can count animation-frame callbacks.
       view,
-      onLog: (log) => {
-        // `mount` routes through `buildReplayFilm`, which can throw (e.g. an
-        // unrecognised schema version). Left unwrapped, that throw escaped
-        // `onLog` as an unhandled rejection instead of reaching the page's
-        // usual failure card (P1).
-        try {
-          mount(log as unknown as CommandLog);
-        } catch (error) {
-          warn('Arcade Match could not be replayed', error);
-        }
-      },
+      // Story 12.7. An arcade set is best-of-three on this one screen, so a round
+      // finishing no longer re-mounts the replay player -- the set plays out here
+      // and ends on its own result screen. "Return to character select" is the
+      // one navigation it offers, handed to the router.
+      onReturnToSelect: returnToSelect,
     });
   } catch (error) {
     warn('Arcade panel unavailable', error);
@@ -1108,7 +1103,7 @@ export async function startup(globals: BrowserGlobals): Promise<StartupResult | 
       );
     }
 
-    const arcadePanel = mountArcade(globals, mount, view);
+    const arcadePanel = mountArcade(globals, view, () => shell.router?.go(ROUTE_SELECT));
     panels.arcade = arcadePanel;
     // Adopt whatever already landed, for the reason the Spectate block below
     // gives: the upgrades started before this mount, so on a warm cache a pack

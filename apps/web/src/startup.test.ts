@@ -1372,16 +1372,15 @@ describe('the arcade panel and the player it replaces (Story 9.2)', () => {
   });
 
   /**
-   * A completed arcade Match's Command Log is schema v2 (`AgentIdentityV2`
-   * carries `kind: 'human'`, which the frozen v1 `AgentIdentity` cannot
-   * express). `buildReplayFilm` (`replay/film.ts`) now dispatches on
-   * `schemaVersion`, routing a v2 document to `packages/core`'s
-   * `replayCommandLogV2` -- added alongside `replayCommandLog` rather than
-   * replacing it -- so this Match replays through the very same
-   * `renderApp`/`mountPlayer` call any other Match does, with no
-   * arcade-specific branch in either.
+   * Story 12.7 changed what an arcade set does when it plays: it is best-of-three
+   * on the `#arcade` screen now, so a round finishing no longer re-mounts the
+   * replay player. The demo player on `#app` is left exactly where it was, and
+   * the set ends on its own result screen. Each round still produces a full,
+   * unmodified `CommandLogV2` -- that these carry the human identity and verify
+   * their own hash is proved in `arcade/run.test.ts` and `arcade/session.test.ts`,
+   * where the log can be inspected; here the wiring is what is under test.
    */
-  it('replays a completed arcade Match through the same player, hash verified (AC1, AC4)', async () => {
+  it('plays the set on its own screen without replacing the demo player', async () => {
     const { log } = await buildDemoBundle();
     const harness = createHarness(log);
     const result = await startup(harness.globals);
@@ -1389,150 +1388,44 @@ describe('the arcade panel and the player it replaces (Story 9.2)', () => {
 
     harness.arcadeHost.fire('[data-arcade-play]', 'click');
 
-    let index = 0;
-    let iterations = 0;
-    while (result?.current() === demo && iterations < 5_000) {
-      fireKey(harness.arcadeHost, '[data-arcade-keys]', KEYS[index % KEYS.length]);
-      index += 1;
-      iterations += 1;
-      await Promise.resolve();
-    }
-
-    const mounted = result?.current();
-    expect(mounted).not.toBe(demo);
-    expect(mounted?.film.matchesRecordedHash).toBe(true);
-    expect(mounted?.clock.isRunning()).toBe(true);
+    // The set is running on `#arcade`, and the replay player on `#app` is
+    // untouched -- no re-mount, no navigation away from the fight in progress.
+    expect(result?.arcade?.state()).toBe('running');
+    expect(result?.current()).toBe(demo);
+    expect(harness.arcadeHost.innerHTML).toContain('best of three');
   });
 
-  it('stops the previous clock, so two fights never run at once', async () => {
-    const { log } = await buildDemoBundle();
-    const harness = createHarness(log);
-    const result = await startup(harness.globals);
-    const demo = result?.mounted;
-
-    harness.arcadeHost.fire('[data-arcade-play]', 'click');
-    let index = 0;
-    let iterations = 0;
-    while (result?.current() === demo && iterations < 5_000) {
-      fireKey(harness.arcadeHost, '[data-arcade-keys]', KEYS[index % KEYS.length]);
-      index += 1;
-      iterations += 1;
-      await Promise.resolve();
-    }
-
-    expect(demo?.clock.isRunning()).toBe(false);
-    expect(result?.current().clock.isRunning()).toBe(true);
-  });
-
-  it('marks the arcade Match as excluded from ratings, the same as BYOK (AD-11, AD-14)', async () => {
+  it('never re-mounts a rated-or-not chip into the player from an arcade set', async () => {
+    // Before 12.7 the arcade re-mounted the replay of its Match, which carried
+    // the exclusion chip. The set now stays on its own screen, so the player's
+    // shell never gains that chip from arcade play at all.
     const { log } = await buildDemoBundle();
     const harness = createHarness(log);
     const result = await startup(harness.globals);
     const demo = result?.mounted;
 
     expect(harness.root.html()).not.toContain('not rated');
-
     harness.arcadeHost.fire('[data-arcade-play]', 'click');
-    let index = 0;
-    let iterations = 0;
-    while (result?.current() === demo && iterations < 5_000) {
-      fireKey(harness.arcadeHost, '[data-arcade-keys]', KEYS[index % KEYS.length]);
-      index += 1;
-      iterations += 1;
-      await Promise.resolve();
-    }
-
-    expect(harness.root.html()).toContain('not rated');
+    expect(result?.current()).toBe(demo);
+    expect(harness.root.html()).not.toContain('not rated');
   });
 
-  it('catches a mount() throw during onLog and reports it rather than leaving an unhandled rejection (P1)', async () => {
-    // `mount`'s remount path (`renderApp`) requests an animation frame as
-    // part of starting the new player's clock. Failing precisely that second
-    // request -- the first belongs to the demo player mounted by `startup`
-    // itself -- reaches `mount` with a real, generically-caused throw, which
-    // is exactly what P1's wrapping must catch regardless of its cause.
-    const { log } = await buildDemoBundle();
-    const harness = createHarness(log);
-    let rafCalls = 0;
-    const globals = {
-      ...harness.globals,
-      window: {
-        ...harness.globals.window,
-        requestAnimationFrame: (callback: () => void): number => {
-          rafCalls += 1;
-          if (rafCalls > 1) {
-            throw new Error('remount blew up');
-          }
-          return harness.globals.window?.requestAnimationFrame(callback) ?? 0;
-        },
-      },
-    } as unknown as BrowserGlobals;
-
-    const consoleWarn = console.warn;
-    const warnings: unknown[][] = [];
-    console.warn = (...args: unknown[]): void => {
-      warnings.push(args);
-    };
-
-    try {
-      const result = await startup(globals);
-      const demo = result?.mounted;
-
-      expect(() => {
-        harness.arcadeHost.fire('[data-arcade-play]', 'click');
-      }).not.toThrow();
-
-      let index = 0;
-      let iterations = 0;
-      // Drive the real Match to completion; onLog fires when it does, and the
-      // throw above happens inside it rather than escaping as an unhandled
-      // rejection.
-      while (iterations < 5_000) {
-        (
-          harness.arcadeHost.fire as unknown as (
-            selector: string,
-            type: string,
-            event?: { key?: string },
-          ) => void
-        )('[data-arcade-keys]', 'keydown', { key: KEYS[index % KEYS.length] });
-        index += 1;
-        iterations += 1;
-        await Promise.resolve();
-        if (warnings.length > 0) {
-          break;
-        }
-      }
-
-      // The demo player is still the one on screen: the throw was caught
-      // before it could replace it, and reported through the usual `warn`
-      // path rather than left unhandled.
-      expect(result?.current()).toBe(demo);
-      expect(warnings.some((args) => String(args[0]).includes('remount blew up'))).toBe(true);
-    } finally {
-      console.warn = consoleWarn;
-    }
-  });
-
-  it('never crashes on an unmapped key mid-Match, and the Match still completes and replays', async () => {
+  it('never crashes on an unmapped key mid-set, and the demo player is untouched', async () => {
     const { log } = await buildDemoBundle();
     const harness = createHarness(log);
     const result = await startup(harness.globals);
     const demo = result?.mounted;
 
     harness.arcadeHost.fire('[data-arcade-play]', 'click');
-    let index = 0;
-    let iterations = 0;
-    while (result?.current() === demo && iterations < 5_000) {
-      fireKey(harness.arcadeHost, '[data-arcade-keys]', 'Escape');
-      fireKey(harness.arcadeHost, '[data-arcade-keys]', KEYS[index % KEYS.length]);
-      index += 1;
-      iterations += 1;
-      await Promise.resolve();
+    for (let index = 0; index < 12; index += 1) {
+      expect(() => fireKey(harness.arcadeHost, '[data-arcade-keys]', 'Escape')).not.toThrow();
+      expect(() =>
+        fireKey(harness.arcadeHost, '[data-arcade-keys]', KEYS[index % KEYS.length]),
+      ).not.toThrow();
     }
 
-    const mounted = result?.current();
-    expect(mounted).not.toBe(demo);
-    expect(mounted?.film.matchesRecordedHash).toBe(true);
+    expect(result?.arcade?.state()).toBe('running');
+    expect(result?.current()).toBe(demo);
   });
 });
 

@@ -6,7 +6,14 @@ import type { RosterPair } from '../render/roster';
 import type { UltSheet } from '../render/ult-sheet';
 import type { VfxSheet } from '../render/vfx-sheet';
 import { createLiveArena, type LiveArena } from './live';
-import { defaultKeyMap, runArcadeMatch, type ArcadeMatchHandle, type ArcadeRunConfig } from './run';
+import { defaultKeyMap, type ArcadeMatchHandle, type ArcadeRunConfig } from './run';
+import {
+  runArcadeSession,
+  type ArcadeRoundEnd,
+  type ArcadeSessionConfig,
+  type ArcadeSessionHandle,
+  type ArcadeSetEnd,
+} from './session';
 
 /**
  * Story 9.2: the Play-vs-CPU panel.
@@ -103,10 +110,26 @@ export interface ArcadeHost {
 export type ArcadeState = 'idle' | 'running' | 'done' | 'error';
 
 export interface ArcadePanelDeps {
-  /** Handed the log of a completed Match. `startup.ts` re-mounts the player with it. */
-  readonly onLog: (log: CommandLogV2) => void;
+  /**
+   * Story 12.7. Handed each round's completed log, in order, as the set plays.
+   *
+   * Optional and non-navigating: an arcade set is now three Matches on this one
+   * screen (AC: no return to a menu between rounds), so unlike the single Match
+   * before it, a round finishing does not re-mount the replay player. A consumer
+   * that wants the logs can collect them here; `startup.ts` needs nothing.
+   */
+  readonly onRoundLog?: (log: CommandLogV2, round: number) => void;
+  /**
+   * Story 12.7. Take the visitor back to character select from the set-result
+   * screen. Page chrome, wired by `startup.ts` to the router; absent leaves the
+   * button a no-op, which is the same warn-not-throw degrade the rest of the
+   * panel takes.
+   */
+  readonly onReturnToSelect?: () => void;
   /** Injectable so a test drives a whole Match with no real timers. */
   readonly run?: (config: ArcadeRunConfig) => ArcadeMatchHandle;
+  /** Injectable so a test drives a whole set without real Matches. Defaults to `runArcadeSession`. */
+  readonly runSession?: (config: ArcadeSessionConfig) => ArcadeSessionHandle;
   /** Which side the visitor plays. Defaults to side 0. */
   readonly humanSide?: 0 | 1;
   /** Same seed default philosophy as BYOK: a constant, not a random draw. */
@@ -159,6 +182,17 @@ export interface ArcadePanel {
 const DEFAULT_SEED = 9_201;
 
 /**
+ * How long the KO / TIME OVER overlay holds between rounds, in animation frames
+ * (Story 12.7).
+ *
+ * Counted, never timed: the panel counts `deps.view`'s callbacks, so the hold is
+ * the same number of frames on every machine rather than a wall-clock duration
+ * (INV-1). Ninety is a beat and a half at the film's 60fps -- long enough to read
+ * the ending, short enough not to stall the set.
+ */
+const ROUND_END_HOLD_FRAMES = 90;
+
+/**
  * The Action the Ultimate is thrown as, and the key Story 10.6 binds to it.
  *
  * Named here rather than written as `'special'` at three call sites: the panel
@@ -205,9 +239,9 @@ export function arcadeMarkup(): string {
   return `
     <h2 class="tb-arcade-heading">Play vs CPU</h2>
     <p class="tb-arcade-intro">
-      Fight a Baseline Bot yourself, right here in the tab. Arrow keys or Z/X/C, or the buttons below
-      on a touch screen. ${escapeHtml(ULTIMATE_KEY)} throws the Ultimate once the Super Gauge is full.
-      No key, no signup, no server -- and this Match is never rated.
+      Fight a Baseline Bot yourself, right here in the tab -- best of three. Arrow keys or Z/X/C, or
+      the buttons below on a touch screen. ${escapeHtml(ULTIMATE_KEY)} throws the Ultimate once the
+      Super Gauge is full. No key, no signup, no server -- and this set is never rated.
     </p>
     <button class="tb-button tb-arcade-play" type="button" data-arcade-play>Play vs CPU</button>
     <div class="tb-arcade-stage" data-arcade-stage>
@@ -215,6 +249,11 @@ export function arcadeMarkup(): string {
     </div>
     <div class="tb-arcade-keys" data-arcade-keys tabindex="0">${onScreenButtonsMarkup()}</div>
     <p class="tb-arcade-ultimate" data-arcade-ultimate role="status" aria-live="polite"></p>
+    <div class="tb-arcade-setresult" data-arcade-setresult role="status" aria-live="polite">
+      <p class="tb-arcade-setresult-text" data-arcade-setresult-text></p>
+      <button class="tb-button tb-arcade-rematch" type="button" data-arcade-rematch>Rematch</button>
+      <button class="tb-button tb-arcade-select" type="button" data-arcade-select>Return to character select</button>
+    </div>
     <p class="tb-arcade-status" data-arcade-status role="status" aria-live="polite"></p>
   `;
 }
@@ -237,8 +276,17 @@ export function mountArcadePanel(host: ArcadeHost, deps: ArcadePanelDeps): Arcad
   const keysHost = host.querySelector('[data-arcade-keys]');
   const status = host.querySelector('[data-arcade-status]');
   const ultimate = host.querySelector('[data-arcade-ultimate]');
+  const setResult = host.querySelector('[data-arcade-setresult]');
+  const setResultText = host.querySelector('[data-arcade-setresult-text]');
 
-  if (playButton === null || keysHost === null || status === null || ultimate === null) {
+  if (
+    playButton === null ||
+    keysHost === null ||
+    status === null ||
+    ultimate === null ||
+    setResult === null ||
+    setResultText === null
+  ) {
     throw new Error('mountArcadePanel: the panel did not mount.');
   }
 
@@ -246,7 +294,9 @@ export function mountArcadePanel(host: ArcadeHost, deps: ArcadePanelDeps): Arcad
   const keysNode = keysHost;
   const statusNode = status;
   const ultimateNode = ultimate;
-  const runMatch = deps.run ?? runArcadeMatch;
+  const setResultNode = setResult;
+  const setResultTextNode = setResultText;
+  const startSession = deps.runSession ?? runArcadeSession;
   const humanSide = deps.humanSide ?? 0;
   const seed = deps.seed ?? DEFAULT_SEED;
 
@@ -291,14 +341,23 @@ export function mountArcadePanel(host: ArcadeHost, deps: ArcadePanelDeps): Arcad
     stageNode?.setAttribute?.('class', live ? 'tb-arcade-stage tb-arcade-stage--live' : 'tb-arcade-stage');
   };
 
+  /** Shows or hides the set-result controls. Hidden by a class, the way the stage is. */
+  const showSetResult = (shown: boolean, text = ''): void => {
+    setResultTextNode.innerHTML = escapeHtml(text);
+    setResultNode.setAttribute?.(
+      'class',
+      shown ? 'tb-arcade-setresult tb-arcade-setresult--shown' : 'tb-arcade-setresult',
+    );
+  };
+
   const panelState: {
     value: ArcadeState;
-    handle: ArcadeMatchHandle | null;
+    session: ArcadeSessionHandle | null;
     /** Whether the environment last reported the Ultimate as legal, i.e. the gauge full. */
     armed: boolean;
   } = {
     value: 'idle',
-    handle: null,
+    session: null,
     armed: false,
   };
 
@@ -344,11 +403,11 @@ export function mountArcadePanel(host: ArcadeHost, deps: ArcadePanelDeps): Arcad
    * silence.
    */
   const feed = (raw: string): void => {
-    if (panelState.handle === null) {
+    if (panelState.session === null) {
       return;
     }
     const asksForUltimate = mapInput(raw) === ULTIMATE_ACTION;
-    panelState.handle.feedInput(raw);
+    panelState.session.feedInput(raw);
     if (asksForUltimate && !panelState.armed) {
       say('running', ULTIMATE_NOT_READY);
     }
@@ -356,14 +415,78 @@ export function mountArcadePanel(host: ArcadeHost, deps: ArcadePanelDeps): Arcad
 
   /** Recovers the panel from any failure on the match-running path (P1): re-enables Play, never leaves "Fighting..." stuck. */
   const fail = (error: unknown): void => {
-    panelState.handle = null;
+    panelState.session?.cancel();
+    panelState.session = null;
     playNode.disabled = false;
     setArmed(false);
     // The live view stops with the Match: a stalled fight left drawing on screen
     // would be as misleading as a stuck "Fighting...".
     liveArena?.stop();
     showStage(false);
+    showSetResult(false);
     say('error', `Could not run the Match: ${String(error instanceof Error ? error.message : error)}`);
+  };
+
+  /**
+   * Holds the current frame for a counted number of animation frames (Story 12.7).
+   *
+   * The KO / TIME OVER overlay's hold: `deps.view`'s callbacks are counted, so
+   * the pause is the same on every machine rather than a wall-clock duration
+   * (INV-1). With no view -- a test, or a page with no `requestAnimationFrame` --
+   * it resolves at once, so the set still runs, just without the pause.
+   */
+  const holdFrames = (count: number): Promise<void> => {
+    const view = deps.view;
+    if (view === undefined || count <= 0) {
+      return Promise.resolve();
+    }
+    return new Promise<void>((resolve) => {
+      const step = (remaining: number): void => {
+        if (remaining <= 0) {
+          resolve();
+          return;
+        }
+        view.requestAnimationFrame(() => step(remaining - 1));
+      };
+      step(count);
+    });
+  };
+
+  /**
+   * A round ended (Story 12.7). Fill the winner's pip, hold the ending on the
+   * canvas for a counted number of frames, then -- if the set is not over --
+   * clear the overlay and reset the arena for the next round. Returning the hold
+   * is what pauses the session before it starts the next Match.
+   */
+  const onRoundEnd = async (event: ArcadeRoundEnd): Promise<void> => {
+    deps.onRoundLog?.(event.log, event.round);
+    liveArena?.setRoundsWon(event.roundsWon);
+    liveArena?.showMatchEnd({ endReason: event.result.endReason, outcome: event.result.outcome });
+    if (event.setOver) {
+      // The set-result screen keeps the final overlay up; `onSetEnd` takes over.
+      return;
+    }
+    await holdFrames(ROUND_END_HOLD_FRAMES);
+    liveArena?.showMatchEnd(null);
+    // A fresh round on the same screen: health restored (a new Match resets it),
+    // the pips retained (`begin` keeps them), the fighters unchanged.
+    liveArena?.begin();
+  };
+
+  /** The set ended (Story 12.7): draw the result and offer a rematch and a way back. */
+  const onSetEnd = (event: ArcadeSetEnd): void => {
+    panelState.session = null;
+    playNode.disabled = false;
+    setArmed(false);
+    const [side0, side1] = event.roundsWon;
+    const score = `${String(event.roundsWon[humanSide])}-${String(event.roundsWon[humanSide === 0 ? 1 : 0])}`;
+    showSetResult(
+      true,
+      event.humanWon
+        ? `You win the set ${score}. Rematch, or pick another fighter. Never rated.`
+        : `You lose the set ${String(Math.max(side0, side1))}-${String(Math.min(side0, side1))}. Rematch, or pick another fighter. Never rated.`,
+    );
+    say('done', 'Set over. Every Match in it is excluded from every rating.');
   };
 
   const play = (): void => {
@@ -371,63 +494,59 @@ export function mountArcadePanel(host: ArcadeHost, deps: ArcadePanelDeps): Arcad
       return;
     }
     playNode.disabled = true;
-    // Cleared before the Match starts, not after the last one ended: a panel
-    // that opened a new fight still showing the previous one's "Ultimate ready"
-    // would be telling the player something about a Match that no longer exists.
+    // Cleared before the set starts, not after the last one ended: a panel that
+    // opened a new set still showing the previous one's "Ultimate ready" or its
+    // result would be telling the player about a set that no longer exists.
     setArmed(false);
-    say('running', `Fighting. Arrow keys or Z/X/C, ${ULTIMATE_KEY} for the Ultimate, or the buttons below.`);
+    showSetResult(false);
+    // A fresh set starts with empty pips (AC5): a pip retained from the previous
+    // set would say the visitor is already ahead of a fight that has not begun.
+    liveArena?.setRoundsWon([0, 0]);
+    liveArena?.showMatchEnd(null);
+    say(
+      'running',
+      `Best of three. Arrow keys or Z/X/C, ${ULTIMATE_KEY} for the Ultimate, or the buttons below.`,
+    );
 
-    // Arm the live view and reveal its canvas before the Match starts, so the
-    // reset state (reported synchronously the instant `runMatch` reaches
+    // Arm the live view and reveal its canvas before the set starts, so the
+    // reset state (reported synchronously the instant the first Match reaches
     // `env.reset`) has a canvas to land on and the first frame is drawn without
     // waiting for the visitor's first key.
     liveArena?.begin();
     showStage(liveArena !== null);
 
     try {
-      const handle = runMatch({
+      const session = startSession({
         seed,
         humanSide,
         mapInput,
+        // The single-Match `run` is passed straight through, so a test can drive
+        // a real set with a fake Match while the session logic stays the default.
+        run: deps.run,
         onLegalActions: (legalActions) => {
           setArmed(legalActions.includes(ULTIMATE_ACTION));
         },
-        // Story 12.2. Every state the Match passes through, drawn as it is
+        // Story 12.2. Every state each round passes through, drawn as it is
         // produced. A no-op when there is no live arena.
         onState: (state) => {
           liveArena?.pushState(state);
         },
+        onRoundEnd,
+        onSetEnd,
+        onError: fail,
       });
-      panelState.handle = handle;
-      // Right when the Match starts, so keyboard input is captured without
+      panelState.session = session;
+      // Right when the set starts, so keyboard input is captured without
       // requiring a visitor to click into the key-capture div first (P3).
       keysNode.focus?.();
-
-      handle.log
-        .then((log) => {
-          // Only announced/handed off once the Match has actually resolved
-          // successfully (P1): a rejection below is routed to `fail`, never here.
-          panelState.handle = null;
-          playNode.disabled = false;
-          // The Match is over, so there is no gauge to be full any more.
-          setArmed(false);
-          // The live view gives way to the replay rather than both being on
-          // screen at once: stop the live clock and hide its canvas here, before
-          // `onLog` re-mounts the replay player on `#app`.
-          liveArena?.stop();
-          showStage(false);
-          say('done', 'Done. Your Match is playing above. It is excluded from every rating.');
-          deps.onLog(log);
-        })
-        .catch(fail);
     } catch (error) {
-      // A synchronous throw from starting the match (e.g. `assertSeed`).
+      // A synchronous throw from starting the first Match (e.g. `assertSeed`).
       fail(error);
     }
   };
 
   keysNode.addEventListener('keydown', (event) => {
-    if (panelState.handle === null || event?.key === undefined) {
+    if (panelState.session === null || event?.key === undefined) {
       return;
     }
     feed(event.key);
@@ -444,9 +563,21 @@ export function mountArcadePanel(host: ArcadeHost, deps: ArcadePanelDeps): Arcad
     play();
   });
 
+  // Story 12.7. The set-result controls. Both are `tb-button`, which carries the
+  // `--tb-accent` focus outline (`styles/`), so both are keyboard-reachable with
+  // the outline the AC asks for. Rematch starts a fresh set on this screen;
+  // Return-to-select hands off to the router without this panel knowing one.
+  host.querySelector('[data-arcade-rematch]')?.addEventListener('click', () => {
+    play();
+  });
+  host.querySelector('[data-arcade-select]')?.addEventListener('click', () => {
+    deps.onReturnToSelect?.();
+  });
+
   setArmed(false);
   showStage(false);
-  say('idle', 'Fight a Baseline Bot. No key, no signup.');
+  showSetResult(false);
+  say('idle', 'Fight a Baseline Bot, best of three. No key, no signup.');
 
   return Object.freeze({
     play,
