@@ -382,24 +382,39 @@ describe('the strike is actually reachable (regression)', () => {
 });
 
 /**
- * Story 4.3 found this by opening the page: the hit marker.
+ * Story 4.3 found the hit marker by opening the page; Story 12.8 replaced it.
  *
  * Story 4.1 drew it as `globalAlpha = 0.55` over the whole 600x600 sprite
- * frame. That is a translucent surface, which docs/DESIGN.md bans outright, and
- * at three-times scale over a character occupying roughly 80 of its 200 source
- * pixels it painted a red pane across a third of the arena rather than a flash
- * on the fighter who was hit. Neither the unit suite nor the CSS style sweep
- * could see it -- one is a canvas call, the other reads declarations.
+ * frame -- a red pane over a third of the arena -- and Story 4.3 boxed that in
+ * an opaque 4px `--tb-warn` bracket. The bracket read as a debug hitbox: a
+ * hollow rectangle is the universal language for developer instrumentation. So
+ * a hit now composites a white silhouette over the struck fighter, additively,
+ * for the hit clip's duration -- a solid flash where the fighter is -- and no
+ * `strokeRect` is issued on the hit path at all. Neither the unit suite nor the
+ * CSS style sweep could see the old marker -- one is a canvas call, the other
+ * reads declarations -- so this suite pins the new one by call sequence, and
+ * `no-debug-hitbox` in `scripts/visual-gate.mjs` pins it by pixels.
  */
-describe('the hit marker (4.3)', () => {
+describe('the hit flash (4.3, replaced by 12.8)', () => {
   interface Call {
     readonly op: string;
     readonly args: readonly number[];
     readonly strokeStyle: string;
     readonly alpha: number;
+    readonly composite: string;
   }
 
-  async function drawHit(clip: string): Promise<readonly Call[]> {
+  const FLASH = Object.freeze({
+    image: Object.freeze({ width: 800, height: 200 }),
+    frameWidth: 200,
+    frameHeight: 200,
+    frames: 4,
+  });
+
+  async function drawClip(
+    clip: string,
+    options: { flash?: unknown; frame?: number } = { flash: FLASH },
+  ): Promise<readonly Call[]> {
     const { createSpriteArtist } = await import('./artist');
     const { THEME } = await import('./theme');
     const calls: Call[] = [];
@@ -411,6 +426,7 @@ describe('the hit marker (4.3)', () => {
       textAlign: '',
       imageSmoothingEnabled: true,
       globalAlpha: 1,
+      globalCompositeOperation: 'source-over',
     };
     const record = (op: string, args: readonly number[]): void => {
       calls.push({
@@ -418,6 +434,7 @@ describe('the hit marker (4.3)', () => {
         args,
         strokeStyle: String(surface.strokeStyle),
         alpha: Number(surface.globalAlpha),
+        composite: String(surface.globalCompositeOperation),
       });
     };
     const ctx = new Proxy(surface, {
@@ -440,7 +457,7 @@ describe('the hit marker (4.3)', () => {
       imageFor: () => ({ width: 200, height: 200 }),
     };
 
-    createSpriteArtist(sheet as never).draw(
+    createSpriteArtist(sheet as never, options.flash as never).draw(
       ctx as never,
       {
         x: 480,
@@ -449,40 +466,74 @@ describe('the hit marker (4.3)', () => {
         phase: 0,
         committedAction: 0,
         agentIndex: 0,
-        animation: { clip, frame: 0 },
+        animation: { clip, frame: options.frame ?? 0 },
       } as never,
       THEME,
     );
     return calls;
   }
 
-  it('marks a hit with an opaque hard-edged stroke, never a translucent wash', async () => {
-    const { THEME } = await import('./theme');
-    const calls = await drawHit('hit');
-
-    const stroke = calls.find((call) => call.op === 'strokeRect');
-    expect(stroke?.strokeStyle).toBe(THEME.warn);
-    // Opaque. This is the assertion the old implementation fails.
-    expect(stroke?.alpha).toBe(1);
-    expect(calls.every((call) => call.alpha === 1)).toBe(true);
-    expect(calls.some((call) => call.op === 'fillRect')).toBe(false);
+  it('issues no strokeRect on the hit path -- the debug bracket is gone', async () => {
+    const calls = await drawClip('hit');
+    expect(calls.some((call) => call.op === 'strokeRect')).toBe(false);
   });
 
-  it('sizes the marker to the fighter, not to the sprite frame', async () => {
-    const calls = await drawHit('hit');
-    const stroke = calls.find((call) => call.op === 'strokeRect');
-
-    // The frame is 200x200 at 3x = 600x600. A marker that size covers a third
-    // of a 960-wide arena, which is what made the old wash unusable.
-    const [, , width, height] = stroke?.args ?? [];
-    expect(width).toBeLessThan(600 / 2);
-    expect(height).toBeLessThan(600 / 2);
-    expect(width).toBeGreaterThan(0);
-    expect(height).toBeGreaterThan(0);
+  it('flashes the struck fighter with an additive silhouette composite', async () => {
+    const calls = await drawClip('hit');
+    // Two draws: the sprite frame source-over, then the flash additive.
+    const draws = calls.filter((call) => call.op === 'drawImage');
+    expect(draws.length).toBe(2);
+    const flash = draws.find((call) => call.composite === 'lighter');
+    expect(flash).toBeDefined();
+    // Over the fighter's own destination rectangle, not around it: same size
+    // the sprite was drawn at (200 * scale 3 = 600), top-anchored by anchorY.
+    const [, , , , dx, , dw, dh] = flash?.args ?? [];
+    expect(dw).toBe(600);
+    expect(dh).toBe(600);
+    expect(dx).toBe(-300);
   });
 
-  it('draws no marker at all when the fighter was not hit', async () => {
-    const calls = await drawHit('idle');
+  it('puts the composite mode back to what it found', async () => {
+    const calls = await drawClip('hit');
+    // The last thing recorded runs at the restored mode: the artist leaves the
+    // surface as it was handed it, so the renderer's next fighter is not drawn
+    // additively.
+    const draws = calls.filter((call) => call.op === 'drawImage');
+    const sprite = draws.find((call) => call.composite === 'source-over');
+    expect(sprite).toBeDefined();
+  });
+
+  it('draws the flash on the hit clip and on no other clip', async () => {
+    for (const clip of ['idle', 'walk', 'attack-active', 'ko']) {
+      const draws = (await drawClip(clip)).filter(
+        (call) => call.op === 'drawImage' && call.composite === 'lighter',
+      );
+      expect(draws.length).toBe(0);
+    }
+  });
+
+  it('advances the flash cell with the hit clip frame, clamped to the strip', async () => {
+    const at = async (frame: number): Promise<number> => {
+      const flash = (await drawClip('hit', { flash: FLASH, frame })).find(
+        (call) => call.op === 'drawImage' && call.composite === 'lighter',
+      );
+      return Number((flash?.args ?? [])[0]);
+    };
+    // The source-x is `column * frameWidth`. Frame 2 reads cell 2; frame 99
+    // clamps to the last of four cells rather than reading past the strip.
+    expect(await at(0)).toBe(0);
+    expect(await at(2)).toBe(400);
+    expect(await at(99)).toBe(600);
+  });
+
+  it('draws the fighter un-flashed when no flash is supplied (the hero degrade)', async () => {
+    // `createSpriteArtist(sheet)` with no flash is the deliberate degrade the
+    // hero raster relies on: the struck fighter is still drawn, once, and
+    // nothing is composited over it.
+    const calls = await drawClip('hit', { flash: undefined });
+    const draws = calls.filter((call) => call.op === 'drawImage');
+    expect(draws.length).toBe(1);
+    expect(draws[0].composite).toBe('source-over');
     expect(calls.some((call) => call.op === 'strokeRect')).toBe(false);
   });
 });

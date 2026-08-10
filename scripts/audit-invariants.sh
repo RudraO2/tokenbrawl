@@ -706,6 +706,34 @@ if [ -f docs/contracts/command-log.schema.json ]; then
   fi
 fi
 
+# --- Story 12.8: the hit indicator is a flash, not a debug hitbox -----------
+#
+# The struck fighter flashes white; it is no longer bracketed in a hollow
+# `--tb-warn` rectangle. `no-debug-hitbox` in `scripts/visual-gate.mjs` catches
+# the picture -- a hollow warn box on a hit frame -- but only on the frames it
+# samples. This catches the *pattern* coming back anywhere in the arena, in a
+# place the pixel gate does not look: a warn-coloured stroke is the only way a
+# warn-coloured rectangle outline reaches the canvas, so a shipped `render/`
+# file that assigns `strokeStyle` the warn token is the bracket returning.
+#
+# Scope is `apps/web/src/render` shipped source only. Test files are exempt:
+# `animation.test.ts` names the old marker in prose to record what it replaced.
+echo
+echo "Story 12.8  no warn-coloured stroke (debug hitbox) in the arena"
+render_dir="apps/web/src/render"
+if [ ! -d "$render_dir" ]; then
+  skip "no arena render directory yet"
+else
+  hits=$(grep -rnE --include='*.ts' --exclude='*.test.ts' --exclude='*.spec.ts' \
+    'strokeStyle[[:space:]]*=[[:space:]]*(theme|THEME)\.warn' "$render_dir" 2>/dev/null)
+  if [ -n "$hits" ]; then
+    fail "warn-coloured stroke in the arena -- the hit indicator must be a flash on the fighter, not a hollow bracket:"
+    echo "$hits" | sed 's/^/          /'
+  else
+    pass "no warn-coloured stroke in $render_dir (the hit flash replaced the debug bracket)"
+  fi
+fi
+
 # --- Not yet mechanisable ---------------------------------------------------
 cat <<'EOF'
 

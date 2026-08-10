@@ -133,6 +133,24 @@ malformed layout, a remote image URL, a pose that overruns the image, or an
 undecodable PNG — and `juice-draw.ts` then paints the Story 9.5 square sparks
 it always did. A fight with no impact art is worse-looking, never broken.
 
+#### Hit-flash silhouette
+
+| Asset | Source | Licence | Checked |
+|---|---|---|---|
+| `apps/web/public/sprites/martial-hero/take-hit---white-silhouette.png` | Martial Hero (LuizMelo) — the pack's own Take Hit frames as a white silhouette | **Creative Commons Zero (CC-0)** | 2026-08-10 |
+
+Story 12.8. An 800×200 strip of four 200×200 cells — the white hit-flash frame
+that ships under the (superseded) `martial-hero/` pack and, until this story,
+was **drawn nowhere**. It is now composited additively over a struck fighter for
+the hit clip's duration, in place of Story 4.3's hollow `--tb-warn` bracket that
+read as a debug hitbox. Loaded once by `loadHitFlash` in
+`apps/web/src/startup.ts` and shared across every fighter — it is the one flash,
+not a per-character pose — and handed to `createSpriteArtist` in
+`render/artist.ts`. Fail-soft on the same terms as everything else here: a
+decode failure is one warning, and the fighter is drawn un-flashed. The
+`hero/raster.ts` build takes that same degrade by construction, since it draws
+with the block artist and has no image loader.
+
 ### Ultimate FX and portraits
 
 | Asset | Source | Licence | Checked |

@@ -1,6 +1,6 @@
 import type { AnimationState } from './animation';
 import type { Canvas2D } from './canvas2d';
-import type { SpriteSheet } from './sprite-sheet';
+import type { SpriteImage, SpriteSheet } from './sprite-sheet';
 import { phaseFill, type Theme } from './theme';
 
 /**
@@ -38,6 +38,23 @@ export interface DrawnFighter {
 export interface FighterArtist {
   readonly id: string;
   draw(ctx: Canvas2D, fighter: DrawnFighter, theme: Theme): void;
+}
+
+/**
+ * The white hit-flash frame composited over a struck fighter (Story 12.8).
+ *
+ * A `take-hit---white-silhouette` strip, laid out exactly like the sprite
+ * sheet's own clips: one image, `frames` cells of `frameWidth`x`frameHeight`
+ * side by side. It is optional on `createSpriteArtist`, and its absence is a
+ * deliberate degrade -- the fighter is drawn un-flashed rather than the build
+ * failing -- so the `hero/` raster, which draws with the block artist and has
+ * no image loader at all (`raster.ts`: `drawImage` throws), is unaffected.
+ */
+export interface HitFlash {
+  readonly image: SpriteImage;
+  readonly frameWidth: number;
+  readonly frameHeight: number;
+  readonly frames: number;
 }
 
 /**
@@ -118,24 +135,34 @@ export function createBlockArtist(): FighterArtist {
  * - **Facing is a horizontal flip**, done with `scale(-1, 1)` about the
  *   fighter's own x. A pack holds one direction only, which halves the art and
  *   guarantees the two directions can never drift apart.
- * - **A hit brackets the fighter** in an opaque 4px `--tb-warn` box. The
+ * - **A hit flashes the fighter white** with the `take-hit` silhouette frame
+ *   composited over the sprite, additively, for the hit clip's duration. The
  *   simulation says damage landed at this Decision Point and the viewer needs
  *   to see it land; a flinch pose alone is easy to miss at five Decision Points
- *   per second. Opaque and hard-edged rather than a translucent wash, because
- *   the house style bans translucency and because a wash over the whole sprite
- *   frame covered a third of the arena.
+ *   per second. This replaced Story 4.1's `globalAlpha = 0.55` wash over the
+ *   whole 600x600 frame -- a red pane over a third of the arena -- which Story
+ *   4.3 boxed in an opaque 4px `--tb-warn` bracket. The bracket fixed the wash
+ *   under the rules of its day, but a hollow rectangle is the universal visual
+ *   language for a debug overlay, and the 2026-08-07 ruling released the arena
+ *   from the no-translucency and no-additive rules the bracket was working
+ *   around (docs/DESIGN.md, "Two regimes"). A solid form where the fighter is,
+ *   which is what a fighting game draws, is now available and is what this
+ *   draws. `no-debug-hitbox` in `scripts/visual-gate.mjs` fails the build if a
+ *   hollow warn rectangle comes back.
  *
  * `imageSmoothingEnabled` is forced off. This is pixel art drawn at twice its
  * source size, and smoothing is the difference between a sprite and a smear.
  *
  * A missing image is skipped rather than thrown on: one un-decodable file
- * should cost that clip, not the whole replay.
+ * should cost that clip, not the whole replay. The `flash` is optional on the
+ * same terms -- absent, the struck fighter is drawn un-flashed rather than the
+ * build failing, which is the degrade `hero/raster.ts` relies on.
  */
-export function createSpriteArtist(sheet: SpriteSheet): FighterArtist {
+export function createSpriteArtist(sheet: SpriteSheet, flash?: HitFlash): FighterArtist {
   return Object.freeze({
     id: 'sprite-artist',
 
-    draw(ctx: Canvas2D, fighter: DrawnFighter, theme: Theme): void {
+    draw(ctx: Canvas2D, fighter: DrawnFighter, _theme: Theme): void {
       const source = sheet.frameFor(fighter.animation.clip, fighter.animation.frame);
       const image = sheet.imageFor(source.image);
       if (image === undefined) {
@@ -167,24 +194,38 @@ export function createSpriteArtist(sheet: SpriteSheet): FighterArtist {
         height,
       );
 
-      if (fighter.animation.clip === 'hit') {
-        // A hard warn-coloured bracket around the fighter, opaque and 4px, in
-        // the same language as every other edge on the page.
+      if (fighter.animation.clip === 'hit' && flash !== undefined) {
+        // The white silhouette, over the same destination rectangle the sprite
+        // just filled, so the flash sits exactly on the fighter rather than
+        // around them. Additive, for the reason `juice-draw.ts` and
+        // `canvas2d.ts` give about `'lighter'`: a hit reads as light, and a
+        // white form composited additively drives the fighter's own pixels to
+        // white -- a flash -- while the transparent frame around the figure
+        // adds nothing. Story 4.3's opaque `--tb-warn` bracket is gone with it:
+        // the defect was never the colour, it was the empty interior.
         //
-        // This replaced a `globalAlpha = 0.55` fill over the whole 600x600
-        // frame, which was wrong twice. It was translucency, which the house
-        // style bans outright (docs/DESIGN.md: "no glassmorphism, no
-        // translucency, no glow") -- and `style-discipline.test.ts` never saw
-        // it, because that sweep reads CSS and this is a canvas call. And a
-        // frame-sized fill for a character occupying about 80 of its 200
-        // source pixels painted a red pane across a third of the arena rather
-        // than a flash on the fighter who was hit. Found by looking at the
-        // page during Story 4.3, not by any test.
-        const markWidth = Math.floor(width / 3);
-        const markHeight = Math.floor((sheet.anchorY * sheet.scale * 2) / 3);
-        ctx.strokeStyle = theme.warn;
-        ctx.lineWidth = theme.borderWidth;
-        ctx.strokeRect(-Math.floor(markWidth / 2), -markHeight, markWidth, markHeight);
+        // The composite mode is put back to whatever it was rather than to the
+        // default it is usually handed, the same discipline `paintImpacts`
+        // keeps: this artist is called inside the renderer's own transform and
+        // must leave the surface as it found it.
+        const flashColumn = Math.max(
+          0,
+          Math.min(flash.frames - 1, Math.floor(fighter.animation.frame)),
+        );
+        const priorComposite = ctx.globalCompositeOperation;
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.drawImage(
+          flash.image,
+          flashColumn * flash.frameWidth,
+          0,
+          flash.frameWidth,
+          flash.frameHeight,
+          -width / 2,
+          top,
+          width,
+          height,
+        );
+        ctx.globalCompositeOperation = priorComposite;
       }
 
       ctx.restore();
