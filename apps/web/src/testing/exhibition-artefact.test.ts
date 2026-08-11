@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
@@ -124,6 +124,34 @@ describe('the shipped exhibition replay is a real Deployment-vs-Deployment Match
     }
   });
 
+  /**
+   * Story 4.2's first-frame payload budget, moved onto the document that now
+   * blocks (Story 12.12).
+   *
+   * `demo-log.test.ts` asserts the same 32 KB against `demo.command-log.json`,
+   * which was the preloaded, blocking document until this story repointed
+   * `DEMO_REPLAY_URL`. An independent review caught that the budget was left
+   * guarding a file no longer on the critical path: regenerate the exhibition
+   * against a longer Match and the first frame silently blows past it with a green
+   * suite. The constant is restated rather than imported because 32 KB is a fact
+   * about the *critical path*, not about either document, and both files should
+   * fail independently if either grows.
+   *
+   * The sidecar is deliberately NOT budgeted. It is 125 KB of real deliberation
+   * and it is sheddable by design (AD-10): playback never waits for it, and Story
+   * 4.2's whole point was moving it off this path. A budget on it would be a
+   * budget on how much a model is allowed to think.
+   */
+  it('fits the first-frame payload budget it is now on the critical path of', () => {
+    const budgetBytes = 32 * 1024;
+    const size = statSync(join(REPLAYS, LOG_NAME)).size;
+
+    expect(size).toBeLessThan(budgetBytes);
+    // Reported so a regeneration that lands close to the ceiling is visible in
+    // the run rather than only in a failure.
+    expect(size).toBeGreaterThan(0);
+  });
+
   it('is what the page opens on, and what the page preloads', () => {
     expect(DEMO_REPLAY_URL).toBe(`/replays/${LOG_NAME}`);
 
@@ -227,21 +255,81 @@ describe('what a visitor reads on the flagship replay', () => {
   });
 });
 
+/**
+ * Story 12.12, AC5, and the finding an independent review of this story made.
+ *
+ * The exhibition is excluded from the leaderboard today, and the reason is worth
+ * stating precisely because it is *not* the reason the AC implies:
+ *
+ *  - `configs/exhibition.config.json`'s `"ranked": false` does **nothing** here. It
+ *    feeds `validateTournamentConfig`'s shared-quota warning and is never written
+ *    into a Command Log, so the corpus reader cannot see it. The config's own
+ *    comment calls it "a statement rather than a formality"; it is a statement.
+ *  - `ratingEligibility` reports the Match **eligible**, correctly: its two
+ *    exclusions are `byok` (a visitor's own key) and `human` (an arcade Match) and
+ *    this is neither. Writing either into the log to buy an exclusion would be a
+ *    false statement about how the Match was run, in the one document this project
+ *    asks to be trusted.
+ *  - What actually excludes it is `packages/cli/src/leaderboard.ts`'s `loadCorpus`,
+ *    which validates every candidate with the **v1** `validateCommandLog` and files
+ *    a throw under `unreadable`. This log is v2 and lives in the tournament's own
+ *    `outputDir`, so it is excluded the same way the six v2 Spectate logs beside it
+ *    already are.
+ *
+ * That is incidental protection, and the review is right that it is one obvious
+ * refactor from breaking: the whole replay corpus is v2 now, so making `loadCorpus`
+ * v2-capable is a natural next change, and on the day it lands the exhibition
+ * becomes a rated single-Match observation between two Groq Deployments sharing one
+ * quota, with nothing failing. So the mechanism is pinned here, at the layer that
+ * decides, with the ratchet stated in the failure message rather than in a comment
+ * nobody reads.
+ */
 describe('the exhibition is not a ranked result (AC5)', () => {
-  it('is excluded from the leaderboard by the corpus reader that builds it', async () => {
-    // `packages/cli/src/leaderboard.ts`'s `loadCorpus` validates every candidate
-    // in the output directory with the **v1** `validateCommandLog` and files a
-    // throw under `unreadable`, which is never rated. This log lives in that
-    // directory -- `configs/exhibition.config.json`'s `outputDir` is the same one
-    // the tournament writes to -- and is v2, so it is excluded by construction,
-    // the same way the six v2 Spectate logs beside it already are.
-    //
-    // `ratingEligibility` itself reports this Match *eligible*, and that is the
-    // honest answer: its two exclusions are `byok` and `human`, and this is
-    // neither. See the story file's AC5 reading -- writing `provider: "byok"` into
-    // the log to buy an exclusion would be a false statement about how the Match
-    // was run.
+  it('is excluded by the corpus reader, and says what to do if that ever changes', async () => {
     const { validateCommandLog } = await import('../../../../packages/core/src/command-log');
-    expect(() => validateCommandLog(log as unknown as CommandLogV2)).toThrow();
+
+    let excluded = false;
+    try {
+      validateCommandLog(log as unknown as CommandLogV2);
+    } catch {
+      excluded = true;
+    }
+
+    expect(
+      excluded,
+      'The leaderboard corpus reader now accepts this document, so the exhibition Match ' +
+        'is about to enter the published ratings. It must not: a single exhibition ' +
+        'between two Deployments sharing one provider quota is not a rating ' +
+        'observation. `ratingEligibility` will NOT stop it -- it reports this Match ' +
+        'eligible, because its only exclusions are `byok` and `human`. Give the rule ' +
+        'somewhere real to live (an exclusion `ratingEligibility` can see, or a ' +
+        'corpus-reader rule that skips this log by name) before landing the v2 reader.',
+    ).toBe(true);
+  });
+
+  it('reaches the ratings through the directory the tournament reads, so the exclusion is load-bearing', async () => {
+    // The half that makes the above matter. If this log lived somewhere the
+    // leaderboard never looks, the exclusion would be geography rather than a rule
+    // and the case above would be theatre.
+    const config = JSON.parse(
+      readFileSync(join(REPLAYS, '..', '..', '..', '..', 'configs', 'exhibition.config.json'), 'utf8'),
+    ) as { readonly outputDir: string };
+    const tournament = JSON.parse(
+      readFileSync(join(REPLAYS, '..', '..', '..', '..', 'configs', 'tournament.config.json'), 'utf8'),
+    ) as { readonly outputDir: string };
+
+    expect(config.outputDir).toBe(tournament.outputDir);
+    expect(config.outputDir).toBe('apps/web/public/replays');
+  });
+
+  it('declares itself unranked in its config, even though nothing downstream reads it', () => {
+    // Pinned so the declaration cannot quietly flip to `true` and read as
+    // authorisation. It grants nothing today -- see this block's docblock -- and a
+    // future story that gives `ranked` teeth should find this already saying no.
+    const config = JSON.parse(
+      readFileSync(join(REPLAYS, '..', '..', '..', '..', 'configs', 'exhibition.config.json'), 'utf8'),
+    ) as { readonly agents: readonly { readonly ranked?: boolean }[] };
+
+    expect(config.agents.every((agent) => agent.ranked === false)).toBe(true);
   });
 });

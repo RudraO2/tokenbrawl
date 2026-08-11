@@ -1441,14 +1441,16 @@ const bankBandProbe = (hostSelector) => `(() => {
   const frame = ${JSON.stringify(HUD_FRAME_RGB)};
   const boxes = ${JSON.stringify(bankBoxes())}.map((box) => {
     if (box.x + box.width > canvas.width || box.y + box.height > canvas.height) {
-      return { id: box.id, frame: -1 };
+      return { id: box.id, frame: -1, hash: 0 };
     }
     const data = ctx.getImageData(box.x, box.y, box.width, box.height).data;
     let count = 0;
+    let hash = 0;
     for (let i = 0; i < data.length; i += 4) {
       if (data[i] === frame[0] && data[i + 1] === frame[1] && data[i + 2] === frame[2]) count += 1;
+      hash = (hash * 31 + data[i] + data[i + 1] * 3 + data[i + 2] * 7) | 0;
     }
-    return { id: box.id, frame: count };
+    return { id: box.id, frame: count, hash };
   });
   return { cinematic: false, boxes };
 })()`;
@@ -2381,37 +2383,84 @@ async function main() {
         // `endpoint: "bot"`, which is non-empty and attributes nothing.
         const attributed =
           card !== null && card.provider.length > 0 && card.endpoint.includes('://');
+        // The card selected is the fighter that was hovered. An independent review
+        // of this story found the first version reporting `card.agent` in its
+        // message and never asserting it, so a regression in which hovering side 0
+        // selected side 1's card passed -- and both fighters in this log are the
+        // same provider at the same endpoint, so the attribution assertion above
+        // cannot tell them apart either.
+        const rightCard = card !== null && card.agent === '0';
 
         record(
           'reasoning-panel-shows-text',
-          hovered.ok === true && showsText && attributed,
+          hovered.ok === true && showsText && attributed && rightCard,
           hovered.ok !== true
             ? `could not hover a fighter: ${hovered.why ?? 'unknown'}`
             : panel.ok !== true
             ? `could not read the panel: ${panel.why ?? 'unknown'}`
             : card === null
             ? `hover selected no card (${panel.cards} drawn) — the pointer handlers did not run`
+            : !rightCard
+            ? `hovering [data-agent="0"] selected agent ${card.agent}'s card`
             : `agent ${card.agent}: body ${card.bodyText.length} chars as ${card.bodyClass.replace('tb-reasoning-body ', '')} (min ${REASONING_TEXT_MIN} as tb-reasoning--text), provider "${card.provider}", endpoint "${card.endpoint}"`,
         );
 
         // --- C4i token-bank-hud-draws (Story 12.12) ------------------------
+        //
         // The other half of "the flagship is a Deployment Match": a Baseline Bot
-        // has no `bankRemaining` and `renderer.ts` correctly draws no meter, so
-        // this reads zero on the corpus this story replaced.
-        const bank = await cdp.evaluate(bankBandProbe('#app'));
-        const drew =
-          bank !== null &&
-          bank.cinematic !== true &&
-          bank.boxes.length === 2 &&
-          bank.boxes.every((box) => box.frame >= HUD_REGION_INK_MIN);
+        // has no `bankRemaining` and `renderer.ts` never calls `drawTokenBank` for
+        // one, so both halves of this read zero on the corpus this story replaced.
+        //
+        // More than one scrub position, and that is the review's correction. The
+        // first version required only bar-frame ink in the bank's rows -- but
+        // `drawArcadeBar` closes with the `hudFrame` outline at *any* fill,
+        // including an exhausted bank, so a log whose `bankRemaining` never moved
+        // would have passed. The AC asks for "a real budget rather than the empty
+        // meter a Baseline Bot produces", and a budget is something that *falls*.
+        // So each bank box must be inked wherever it is read, and must take at
+        // least two distinct values across the Match.
+        //
+        // A **ladder** rather than two fixed positions, because the first two-point
+        // version picked 85% and landed inside the Ultimate cinematic -- the
+        // shipped replay throws one at tick 1170 of 1200, and the cinematic freeze
+        // pushes it well down the clock track. Two fixed points make the check a
+        // hostage to where the Ultimate happens to fall in whatever the flagship is
+        // next; a ladder reads whichever positions are fight frames and needs two
+        // of them. A run that found fewer than two fails as a failure to *measure*,
+        // never as a skip.
+        //
+        // Every scrub is pure in the frame (Story 4.5), so this is a statement
+        // about the log rather than about anything that has been counting since the
+        // page loaded.
+        const BANK_SCRUB_POINTS = [20, 35, 50, 65];
+        const bankReadings = [];
+        for (const percent of BANK_SCRUB_POINTS) {
+          await cdp.evaluate(scrubTo(percent));
+          await sleep(500);
+          const reading = await cdp.evaluate(bankBandProbe('#app'));
+          if (reading !== null && reading.cinematic !== true && reading.boxes.length === 2) {
+            bankReadings.push({ percent, boxes: reading.boxes });
+          }
+        }
+
+        const inked = bankReadings.every((reading) =>
+          reading.boxes.every((box) => box.frame >= HUD_REGION_INK_MIN),
+        );
+        const distinctPerBox = [0, 1].map(
+          (index) => new Set(bankReadings.map((reading) => reading.boxes[index].hash)).size,
+        );
+        const drained = bankReadings.length >= 2 && distinctPerBox.every((count) => count >= 2);
+
         record(
           'token-bank-hud-draws',
-          drew,
-          bank === null
-            ? 'no visible canvas under #app'
-            : bank.cinematic === true
-            ? 'a cinematic frame was on screen; the bank was not judged this run'
-            : `${bank.boxes.map((box) => `${box.id}:${box.frame}`).join(' ')} bar-frame pixels (min ${HUD_REGION_INK_MIN} each)`,
+          bankReadings.length >= 2 && inked && drained,
+          bankReadings.length < 2
+            ? `only ${bankReadings.length} of ${BANK_SCRUB_POINTS.length} scrub positions were readable fight frames, so the bank could NOT be judged — this is a failure to measure, not a skip`
+            : !inked
+            ? `a bank box came back under ${HUD_REGION_INK_MIN} bar-frame pixels: ${bankReadings.map((r) => `${r.percent}% ${r.boxes.map((b) => `${b.id}:${b.frame}`).join('/')}`).join(', ')}`
+            : !drained
+            ? `the meter drew at ${bankReadings.length} positions but took only ${distinctPerBox.join('/')} distinct value(s) per side — a bank that never falls is not a budget`
+            : `read at ${bankReadings.map((r) => `${r.percent}%`).join(', ')}: ${bankReadings[0].boxes.map((b) => `${b.id}:${b.frame}`).join(' ')} bar-frame pixels, ${distinctPerBox.join('/')} distinct levels per side`,
         );
       }
 

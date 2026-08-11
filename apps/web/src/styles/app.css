@@ -329,7 +329,7 @@ body {
  * endpoint still sits on one line.
  */
 .tb-reasoning-served {
-  margin: var(--tb-space-2) 0 0;
+  margin: 0 0 var(--tb-space-2);
 }
 
 .tb-reasoning-served-value {

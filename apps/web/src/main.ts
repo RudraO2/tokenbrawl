@@ -874,6 +874,18 @@ export function renderApp(
     // attribute rather than by position, so a layout change cannot silently take
     // the check with it.
     //
+    // Rendered **above** the body, and that ordering is the fix for a defect an
+    // independent review of this story caught in the capture. Below the body its
+    // visibility was a function of how much the model happened to say: the
+    // deliberation runs from 270 to 2,954 characters in the shipped replay, and at
+    // 1440x900 the ENDPOINT value sat off the bottom of the frame -- a page where
+    // INV-6's attribution was in the DOM and not on the screen, which is this
+    // repository's signature defect. Capping the body's height (see
+    // `styles/app.css`) shortened the overflow without removing the dependency;
+    // putting the fixed-size block first removes it. The attribution is also the
+    // shorter and more scannable of the two, which is the ordinary reason to lead
+    // with it.
+    //
     // Deliberately NOT a description list. `<dt>` would be the right element and
     // is unavailable: `source-discipline.test.ts` bans the token `dt` anywhere in
     // shipped source, because `deltaTime`/`dt` is how an ordinary animation loop
@@ -904,8 +916,8 @@ export function renderApp(
           ${panelView.tickLabel === '' ? '' : `<span class="tb-chip tb-chip--tick">${escapeHtml(panelView.tickLabel)}</span>`}
           ${chips}
         </div>
-        <p class="tb-reasoning-body ${panelView.bodyModifier}" data-panel-body>${escapeHtml(panelView.body)}</p>
         ${attribution}
+        <p class="tb-reasoning-body ${panelView.bodyModifier}" data-panel-body>${escapeHtml(panelView.body)}</p>
         ${raw}
       </article>
     `;
