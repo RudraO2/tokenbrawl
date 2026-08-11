@@ -1322,6 +1322,141 @@ const hudBandProbe = (hostSelector) => `(() => {
 })()`;
 
 /**
+ * Story 12.12: the reasoning panel, hovered, read off the page.
+ *
+ * The check `reasoning-panel-shows-text` exists because the *centrepiece* feature
+ * of this product -- Story 4.3's hover reasoning, called that in
+ * `docs/stories/README.md` -- had no committed replay in which it had anything to
+ * show. Every log in the corpus was Baseline Bot versus Baseline Bot with
+ * `reasoning: null` on all 379 submissions, so a visitor hovering a Decision
+ * Point got "No reasoning recorded for this Decision Point." and the whole path
+ * was green in every gate.
+ *
+ * Three things are read, and each one is a different way the feature can be
+ * present in the DOM and absent to a visitor:
+ *
+ *  1. The body's **modifier class**, not merely its length. `tb-reasoning--absent`
+ *     and `tb-reasoning--loading` both carry perfectly non-empty text ("No
+ *     reasoning recorded…", "Fetching reasoning…"), so a length check alone passes
+ *     on exactly the two states this check exists to fail on. Only
+ *     `tb-reasoning--text` is a model's own words.
+ *  2. The **provider and endpoint**, by their own `data-` attributes. A Baseline
+ *     Bot log records `provider: "bot"`, `endpoint: "bot"`, so requiring a scheme
+ *     in the endpoint is what separates a real served call from a scripted one --
+ *     and INV-6 is about attribution being *visible*, not merely logged.
+ *  3. That the hover **selected** the card it read. `renderPanel` draws both
+ *     fighters' cards every frame whether or not anything is hovered, so reading
+ *     the first card on the page would pass on a page whose pointer handlers were
+ *     never bound at all.
+ */
+const hoverFighterPanel = (agentIndex) => `(() => {
+  const target = document.querySelector('#app [data-agent="${String(agentIndex)}"]');
+  if (!target) return { ok: false, why: 'no fighter target under #app' };
+  // A real PointerEvent on the element a visitor's cursor lands on, not a call
+  // into the panel: the handler is bound to this button and reading
+  // \`pointerType\` is how the shell tells a mouse leaving from a touch lifting.
+  target.dispatchEvent(new PointerEvent('pointerenter', { bubbles: true, pointerType: 'mouse' }));
+  return { ok: true };
+})()`;
+
+const READ_PANEL_PROBE = `(() => {
+  const panel = document.querySelector('#app [data-reasoning]');
+  if (!panel) return { ok: false, why: 'no reasoning panel under #app' };
+  const cards = [...panel.querySelectorAll('[data-panel-card]')];
+  if (cards.length === 0) return { ok: false, why: 'the panel drew no cards' };
+  const selected = cards.find((card) => card.className.includes('tb-reasoning-card--selected'));
+  const read = (card) => {
+    const body = card.querySelector('[data-panel-body]');
+    const provider = card.querySelector('[data-panel-provider]');
+    const endpoint = card.querySelector('[data-panel-endpoint]');
+    return {
+      agent: card.getAttribute('data-panel-card'),
+      bodyClass: body ? String(body.className) : '',
+      bodyText: body ? (body.textContent || '').trim() : '',
+      provider: provider ? (provider.textContent || '').trim() : '',
+      endpoint: endpoint ? (endpoint.textContent || '').trim() : '',
+    };
+  };
+  const announce = document.querySelector('#app [data-announce]');
+  return {
+    ok: true,
+    cards: cards.length,
+    selected: selected === undefined ? null : read(selected),
+    all: cards.map(read),
+    announcement: announce ? (announce.textContent || '').trim() : '',
+  };
+})()`;
+
+/**
+ * Story 12.12: whether the Token Bank meter drew, per side.
+ *
+ * The bank is the one HUD element that is *correctly absent* on two of the three
+ * arena surfaces -- a Baseline Bot consumes nothing and a human has no budget, so
+ * `renderer.ts` draws no meter for either -- which is why it is not in
+ * `HUD_BAND.regions` and not swept by `hud-has-all-five`. It is asked of `#app`
+ * alone, where the flagship replay is two Deployments and a missing meter means
+ * either the log stopped carrying `bankRemaining` or the flagship reverted to
+ * bots.
+ *
+ * The box is *derived* rather than written down: the y span is the `bank` row of
+ * `HUD_BAND.rows` and the x span is each side's `-health` region, because
+ * `renderer.ts` draws all three bars at one `HUD_BAR_WIDTH` in one column. So a
+ * layout change that moved the stack moves this sample with it, and
+ * `renderer.test.ts` already pins both of those literals to the shipped
+ * constants.
+ */
+const BANK_ROW = HUD_BAND.rows.find((row) => row.id === 'bank');
+const bankBoxes = () =>
+  ['p1', 'p2'].map((side) => {
+    const bar = HUD_BAND.regions.find((region) => region.id === `${side}-health`);
+    return {
+      id: `${side}-bank`,
+      x: bar.x,
+      y: BANK_ROW.top,
+      width: bar.width,
+      height: BANK_ROW.bottom - BANK_ROW.top,
+    };
+  });
+
+/** Frame-coloured pixels in each bank box of the one visible canvas under `host`. */
+const bankBandProbe = (hostSelector) => `(() => {
+  const host = document.querySelector(${JSON.stringify(hostSelector)});
+  if (!host) return null;
+  const canvas = [...host.querySelectorAll('canvas')].find((c) => {
+    const rect = c.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+  });
+  if (!canvas) return null;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return null;
+
+  const lastRow = ctx.getImageData(0, canvas.height - 1, canvas.width, 1).data;
+  let black = 0;
+  for (let x = 0; x < canvas.width; x += 1) {
+    const i = x * 4;
+    if (lastRow[i] === 0 && lastRow[i + 1] === 0 && lastRow[i + 2] === 0) black += 1;
+  }
+  if (black >= Math.floor(canvas.width * 0.9)) return { cinematic: true, boxes: [] };
+
+  const frame = ${JSON.stringify(HUD_FRAME_RGB)};
+  const boxes = ${JSON.stringify(bankBoxes())}.map((box) => {
+    if (box.x + box.width > canvas.width || box.y + box.height > canvas.height) {
+      return { id: box.id, frame: -1 };
+    }
+    const data = ctx.getImageData(box.x, box.y, box.width, box.height).data;
+    let count = 0;
+    for (let i = 0; i < data.length; i += 4) {
+      if (data[i] === frame[0] && data[i + 1] === frame[1] && data[i + 2] === frame[2]) count += 1;
+    }
+    return { id: box.id, frame: count };
+  });
+  return { cinematic: false, boxes };
+})()`;
+
+/** Characters of model reasoning below which the panel is not showing a deliberation. */
+const REASONING_TEXT_MIN = 60;
+
+/**
  * Drives the replay player's timeline to a percentage of its own length.
  *
  * The range input a visitor drags, dispatching the same `input` event their
@@ -2214,6 +2349,72 @@ async function main() {
         );
       }
 
+      // --- C4h reasoning-panel-shows-text (Story 12.12) --------------------
+      //
+      // The centrepiece feature, on the surface a visitor lands on. Desktop only
+      // for the reason every panel check here is: the phone capture is of a
+      // scrolled canvas and the panel sits below it, and hovering is not what a
+      // touch visitor does -- the tap path is covered by `main.test.ts`.
+      //
+      // Driven on `#app` because that is the only surface with a reasoning panel
+      // at all, and at a *scrubbed* position rather than wherever autoplay
+      // happens to be: the panel follows playback five times a second, and a
+      // check that read a random frame would pass or fail on which Decision Point
+      // it caught.
+      if (!viewport.mobile) {
+        await goto('/replay');
+        // 20%, and past frame 0 deliberately. At the very start one fighter can
+        // legitimately have "not acted yet", which is a correct panel state and
+        // not the one this check is about.
+        await cdp.evaluate(scrubTo(20));
+        await sleep(600);
+        const hovered = await cdp.evaluate(hoverFighterPanel(0));
+        await sleep(400);
+        const panel = await cdp.evaluate(READ_PANEL_PROBE);
+
+        const card = panel.ok === true ? panel.selected : null;
+        const showsText =
+          card !== null &&
+          card.bodyClass.includes('tb-reasoning--text') &&
+          card.bodyText.length >= REASONING_TEXT_MIN;
+        // A scheme, not merely a non-empty string: a Baseline Bot log records
+        // `endpoint: "bot"`, which is non-empty and attributes nothing.
+        const attributed =
+          card !== null && card.provider.length > 0 && card.endpoint.includes('://');
+
+        record(
+          'reasoning-panel-shows-text',
+          hovered.ok === true && showsText && attributed,
+          hovered.ok !== true
+            ? `could not hover a fighter: ${hovered.why ?? 'unknown'}`
+            : panel.ok !== true
+            ? `could not read the panel: ${panel.why ?? 'unknown'}`
+            : card === null
+            ? `hover selected no card (${panel.cards} drawn) — the pointer handlers did not run`
+            : `agent ${card.agent}: body ${card.bodyText.length} chars as ${card.bodyClass.replace('tb-reasoning-body ', '')} (min ${REASONING_TEXT_MIN} as tb-reasoning--text), provider "${card.provider}", endpoint "${card.endpoint}"`,
+        );
+
+        // --- C4i token-bank-hud-draws (Story 12.12) ------------------------
+        // The other half of "the flagship is a Deployment Match": a Baseline Bot
+        // has no `bankRemaining` and `renderer.ts` correctly draws no meter, so
+        // this reads zero on the corpus this story replaced.
+        const bank = await cdp.evaluate(bankBandProbe('#app'));
+        const drew =
+          bank !== null &&
+          bank.cinematic !== true &&
+          bank.boxes.length === 2 &&
+          bank.boxes.every((box) => box.frame >= HUD_REGION_INK_MIN);
+        record(
+          'token-bank-hud-draws',
+          drew,
+          bank === null
+            ? 'no visible canvas under #app'
+            : bank.cinematic === true
+            ? 'a cinematic frame was on screen; the bank was not judged this run'
+            : `${bank.boxes.map((box) => `${box.id}:${box.frame}`).join(' ')} bar-frame pixels (min ${HUD_REGION_INK_MIN} each)`,
+        );
+      }
+
       // --- C4e hit-reads-as-impact + no-debug-hitbox (Story 12.8) ----------
       //
       // Two checks off one probe. `hit-reads-as-impact` requires the struck
@@ -2387,6 +2588,26 @@ async function main() {
       // that only scrolled would photograph whichever screen was showing.
       for (const surface of SURFACES) {
         await goto(surface.route);
+        // Story 12.12. `#arcade`'s stage is `display: none` until a Match is
+        // running, and by the time this loop runs the desktop pass has reloaded
+        // the page several times (`every-stage-draws` loads once per stage). So
+        // the desktop arcade capture was a screenshot of the idle Play screen --
+        // which is, pixel for pixel, the picture Story 12.1's audit published as
+        // "the single most damaging defect in the audit". `arcade-live-canvas`
+        // above proves the canvas exists while playing; the capture has to *show*
+        // it, or a later reader takes the PNG for a regression. This file already
+        // states the rule for `scrollSurfaceIntoView`: a capture that does not
+        // show the thing it is named after is not evidence.
+        //
+        // Conditional and therefore idempotent: the mobile pass leaves a Match
+        // running from the overflow section and must not have it restarted.
+        if (surface.id === 'arcade') {
+          const live = await cdp.evaluate(hostCanvasProbe('#arcade'));
+          if (live.hostPresent === true && live.visible === 0) {
+            await cdp.evaluate(clickIn('#arcade', '^play vs cpu$'));
+            await sleep(1800);
+          }
+        }
         const present = await cdp.evaluate(scrollSurfaceIntoView(surface.selector));
         await sleep(250);
         const shot = await cdp.send('Page.captureScreenshot', { format: 'png' });

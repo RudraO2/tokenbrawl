@@ -274,10 +274,29 @@ body {
   color: var(--tb-ink);
 }
 
+/*
+ * Story 12.12 capped this, and it took real data to find out why.
+ *
+ * A Baseline Bot's "reasoning" was one line (`aggressive:advance`), so for eight
+ * epics the card was short whatever it held. The shipped exhibition replay carries
+ * 270 to 2,954 characters per Decision Point, and at 17px in a half-width column
+ * that is taller than a 900px viewport -- the first capture of it showed the
+ * 120B's card running off the bottom of the frame with its PROVIDER and ENDPOINT
+ * below the fold, on a page whose whole claim is that the call is attributable.
+ *
+ * So the deliberation scrolls in its own box and everything under it stays put.
+ * 19em is roughly the arena's own height at this line-height, which keeps the card
+ * and the fight the same size object on the page rather than one dwarfing the
+ * other. The scroll container is `overflow-x`'s counterpart on
+ * `.tb-reasoning-raw` -- the established shape here for content whose length is
+ * the provider's to decide, not ours.
+ */
 .tb-reasoning-body {
   margin: 0;
   line-height: 1.4;
   font-size: 17px;
+  max-height: 19em;
+  overflow-y: auto;
 }
 
 /*
