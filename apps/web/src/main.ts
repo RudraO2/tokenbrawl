@@ -28,6 +28,7 @@ import {
   buildAudioTrack,
   createAudioDirector,
   type AudioSink,
+  type AudioTrack,
 } from './render/audio';
 import './styles/app.css';
 
@@ -166,6 +167,17 @@ export interface MountedPlayer {
    * finished playback would otherwise never draw a frame that used it.
    */
   readonly setRoster: (roster: RosterPair) => void;
+  /**
+   * Story 12.9. Starts the music bed again from wherever playback is, without
+   * moving it.
+   *
+   * The verb Story 12.4 recorded as missing and named this story as the owner
+   * of. The bed is a looping cue on clock frame 0, so hiding the replay screen
+   * (which stops the graph) or muting the page leaves a returning visitor with
+   * hits over silence for the rest of the Match. `startup.ts` calls this when
+   * the screen comes back and when the sound control is switched on.
+   */
+  readonly rearmAudio: () => void;
   readonly repaint: () => void;
   /** The Decision Point currently on screen. `0` before the first frame is drawn. */
   readonly decisionPoint: () => number;
@@ -358,8 +370,30 @@ export function mountPlayer(
    * on an ordinary forward advance, so scrubbing across a KO re-states the duck
    * correctly and fires nothing.
    */
+  /**
+   * Story 12.9. The cue names now depend on who is fighting, and who is
+   * fighting can change *after* mount (`setRoster`), so the track is held in a
+   * box and rebuilt when the pair changes.
+   *
+   * The director is handed a thin facade over that box rather than a new
+   * director per pair, and the difference is the one that matters: a fresh
+   * director's `last` is `-1`, which it reads as "the first frame ever
+   * presented" and answers by firing that frame's cues -- so re-selecting a
+   * fighter mid-Match would fire whatever cue sat on the frame on screen, and on
+   * frame 0 would start a second music bed. Swapping the table under a director
+   * that keeps its position changes only which samples the *next* cue names.
+   *
+   * `frameCount` is a constant across the swap because every pair is built from
+   * the same juice track, which is what makes one facade honest.
+   */
+  const audio: { track: AudioTrack } = {
+    track: buildAudioTrack(track, DEFAULT_AUDIO_TUNING, dressing.roster),
+  };
   const director = createAudioDirector({
-    track: buildAudioTrack(track, DEFAULT_AUDIO_TUNING),
+    track: {
+      frameCount: audio.track.frameCount,
+      at: (clockIndex: number) => audio.track.at(clockIndex),
+    },
     sink,
   });
 
@@ -475,7 +509,15 @@ export function mountPlayer(
     },
     setRoster: (roster: RosterPair): void => {
       dressing.roster = roster;
+      // Story 12.9. The sound follows the pick as well as the picture: a
+      // visitor who chose grokk and then heard clawde take the hits would be
+      // looking at exactly the half-wired defect Story 9.7 shipped, an epic
+      // later and one sense over.
+      audio.track = buildAudioTrack(track, DEFAULT_AUDIO_TUNING, roster);
       repaint();
+    },
+    rearmAudio: (): void => {
+      director.rearm();
     },
     repaint,
     decisionPoint: (): number =>

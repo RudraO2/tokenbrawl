@@ -55,13 +55,28 @@ import { createSpectateWalk, type SpectateWalkHandle } from './walk';
  * replay player. Nothing here draws anything of its own -- the whole story is
  * that two surfaces call one drawing layer.
  *
- * ### Why the sound starts off
+ * ### Why the sound started off, and why Story 12.9 reversed it
  *
- * Spectate begins playing the moment it mounts, with no visitor action at all,
- * and the page's audio context is unlocked by *any* gesture anywhere on the page
- * -- including one aimed at Arcade. An ambient surface that starts making noise
- * because a visitor pressed something else is a defect, so the default is
- * silence and the toggle below is the only thing that lifts it.
+ * Story 11.6's reasoning, kept because it was right for the page it was written
+ * against: Spectate begins playing the moment it mounts, with no visitor action
+ * at all, and the page's audio context is unlocked by *any* gesture anywhere on
+ * the page -- including one aimed at Arcade. An ambient surface that starts
+ * making noise because a visitor pressed something else is a defect, so the
+ * default was silence and this toggle was the only thing that lifted it.
+ *
+ * What changed is the page, not the principle. Story 12.4 made it a cabinet:
+ * one screen shows and a hidden one is idle, so a visitor whose sound this
+ * surface takes over is a visitor who navigated to *this screen* to watch. The
+ * default is therefore owned by the shell's page-wide control (`shell/sound.ts`)
+ * and pushed in through `setAudioEnabled`, which the router already calls on
+ * every show and hide. This panel keeps its own button -- it is the control
+ * within arm's reach of the thing making the noise -- and reports a press back
+ * through `onAudioToggle` so the two cannot disagree.
+ *
+ * The field below still initialises to `false` and that is deliberate: mount
+ * order puts this panel on screen before the router exists, and a surface that
+ * assumed sound-on would be making noise for the few milliseconds before
+ * anything had asked it to.
  *
  * It also settles an ownership question this panel is the first to raise. The
  * sink is built once per *page* (Story 9.6) and Spectate is the first surface
@@ -120,6 +135,17 @@ export interface SpectatePanelDeps {
    * is its own documented no-op path, the same one `mountPlayer` relies on.
    */
   readonly sink?: AudioSink | null;
+  /**
+   * Story 12.9. Called when the visitor works *this panel's* sound button, so
+   * the shell's page-wide control can follow it.
+   *
+   * Deliberately fired from the click handler and not from `setAudioEnabled`,
+   * which the router also calls: leaving the watch screen mutes this surface
+   * (that is what "a hidden screen makes no sound" means), and reporting that
+   * as a visitor's choice would silently flip the page's control to off every
+   * time somebody navigated away.
+   */
+  readonly onAudioToggle?: (enabled: boolean) => void;
 }
 
 export interface SpectatePanel {
@@ -547,7 +573,11 @@ export function mountSpectatePanel(host: SpectateHost, deps: SpectatePanelDeps):
   // said otherwise would be a lie about the only control it has.
   renderSound();
   soundButton.addEventListener('click', () => {
-    setAudioEnabled(!audio.enabled);
+    const next = !audio.enabled;
+    setAudioEnabled(next);
+    // Story 12.9. The visitor's own press, reported to the shell so the page's
+    // control agrees with the one they just used. See `onAudioToggle`.
+    deps.onAudioToggle?.(next);
   });
 
   renderPlay();
@@ -595,7 +625,12 @@ export function mountSpectatePanel(host: SpectateHost, deps: SpectatePanelDeps):
           // track its clock runs on -- `buildAudioTrack` takes the juice track
           // rather than the film precisely so the two layers cannot each own a
           // timer source (Story 9.6's constraint, unchanged here).
-          audio.track = buildAudioTrack(track, DEFAULT_AUDIO_TUNING);
+          // Story 12.9. `DEFAULT_ROSTER`, and the same pair the paint above
+          // draws with -- never the visitor's pick. The fighters in this stream
+          // are a property of its committed logs (Story 12.5's finding), so
+          // taking the page's chosen pair here would put grokk's voice on a
+          // Match drawn as somebody else, which is that defect with sound on.
+          audio.track = buildAudioTrack(track, DEFAULT_AUDIO_TUNING, DEFAULT_ROSTER);
           resetDirector();
           if (audio.enabled) {
             // The outgoing entry's sources, the looping bed included. Only when

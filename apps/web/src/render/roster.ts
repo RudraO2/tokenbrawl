@@ -77,6 +77,82 @@ export const ROSTER_NAMES: Readonly<Record<RosterId, string>> = Object.freeze({
 });
 
 /**
+ * Story 12.9: the cues that belong to *this* fighter.
+ *
+ * Five names per fighter, and every one of them a written-out literal rather
+ * than a template. `` `sfx_${id}_hit_l` `` would read the same on this screen and
+ * would resolve a name with no file behind it the moment a fifth fighter joined
+ * the roster with no audio pack -- which is silence with nothing on screen to
+ * say so, the exact failure mode `audio-cues-resolve` exists to catch. A table
+ * of literals is a table the suite can compare against the committed directory.
+ *
+ * Beside `ROSTER_NAMES` for the reason that table is here: this is art keyed by
+ * a fighter, and `render/roster.ts` is where an `agentIndex` becomes a fighter.
+ * The audio layer reads it; it does not own it.
+ */
+export interface RosterAudioCues {
+  /** SFX, on the struck fighter, for a `hit`. */
+  readonly hit: string;
+  /** SFX, on the struck fighter, for a `heavy`. */
+  readonly heavy: string;
+  /**
+   * Voice, on the struck fighter, for a `heavy` and never for a `hit`.
+   *
+   * There is no shared fallback for this one, and that is deliberate: the only
+   * hurt lines that exist are per-character, so a fighter with no pack says
+   * nothing rather than borrowing somebody else's voice.
+   */
+  readonly hurt: string;
+  /** Voice, on the struck fighter, for a `ko`. Replaces the shared `vo_ko`. */
+  readonly ko: string;
+  /** Voice, on the *caster*, for the Ultimate. Replaces the shared `vo_ultimate`. */
+  readonly ultimate: string;
+}
+
+export const ROSTER_AUDIO: Readonly<Record<RosterId, RosterAudioCues>> = Object.freeze({
+  clawde: Object.freeze({
+    hit: 'sfx_clawde_hit_l',
+    heavy: 'sfx_clawde_hit_h',
+    hurt: 'vo_clawde_hurt',
+    ko: 'vo_clawde_ko',
+    ultimate: 'vo_clawde_transform',
+  }),
+  chatty: Object.freeze({
+    hit: 'sfx_chatty_hit_l',
+    heavy: 'sfx_chatty_hit_h',
+    hurt: 'vo_chatty_hurt',
+    ko: 'vo_chatty_ko',
+    ultimate: 'vo_chatty_transform',
+  }),
+  gemini: Object.freeze({
+    hit: 'sfx_gemini_hit_l',
+    heavy: 'sfx_gemini_hit_h',
+    hurt: 'vo_gemini_hurt',
+    ko: 'vo_gemini_ko',
+    ultimate: 'vo_gemini_transform',
+  }),
+  grokk: Object.freeze({
+    hit: 'sfx_grokk_hit_l',
+    heavy: 'sfx_grokk_hit_h',
+    hurt: 'vo_grokk_hurt',
+    ko: 'vo_grokk_ko',
+    ultimate: 'vo_grokk_transform',
+  }),
+});
+
+/**
+ * This fighter's cues, or `undefined` for anything that is not a fighter this
+ * project ships audio for.
+ *
+ * The `undefined` branch is what makes the shared `sfx_hit_l`/`sfx_hit_h`/
+ * `vo_ko`/`vo_ultimate` fallback reachable: a roster id with no pack falls back
+ * to a cue that exists rather than resolving a name that does not.
+ */
+export function audioCuesFor(id: RosterId): RosterAudioCues | undefined {
+  return ROSTER_AUDIO[id];
+}
+
+/**
  * Whether an arbitrary value names a fighter in this roster.
  *
  * Used at the layout boundary, where the id arrives as a key of a fetched JSON

@@ -1,5 +1,6 @@
 import { BASIS_POINTS_FULL } from '../replay/film';
 import type { JuiceKind, JuiceTrack } from './juice';
+import { audioCuesFor, type RosterPair } from './roster';
 
 /**
  * Story 9.6: the audio layer, as an indexed table rather than as a scheduler.
@@ -79,7 +80,38 @@ import type { JuiceKind, JuiceTrack } from './juice';
  *
  * It changes one thing structurally. The voice bus now has two sources,
  * `juiceTrack.events` and `juiceTrack.cinematics`, and there is exactly one rate
- * limiter and one duck between them. Emitting each stream's lines in its own
+ * limiter and one duck between them.
+ *
+ * ## The fighters get their own voices, in Story 12.9
+ *
+ * Until this story every fighter was struck with the same two samples and every
+ * fighter died with the same cry -- four packs shipped, two cues wired, which is
+ * the Story 9.7 defect shape in the mix instead of on the canvas. So
+ * `buildAudioTrack` now takes the `RosterPair` the surface is drawing with, and
+ * four of the cues it places are resolved *through* it: the struck fighter's own
+ * hit and heavy SFX, the struck fighter's own KO line and a **hurt** line on a
+ * heavy hit that no fighter had before, and the *caster's* own Ultimate line.
+ *
+ * Two properties this keeps that a call site building `sfx_<id>_hit_l` would
+ * not. The names live in one frozen table in `render/roster.ts` beside
+ * `ROSTER_NAMES` (`ROSTER_AUDIO`), so a fighter with no audio pack falls back to
+ * the shared cue rather than resolving a name with no file behind it -- silence
+ * with nothing on screen to say so is the failure mode `audio-cues-resolve`
+ * exists to catch. And the roster is a *parameter*, never a module binding: a
+ * surface drawing `DEFAULT_ROSTER` (Spectate's committed logs) and one drawing
+ * the visitor's pick (the player) build two tracks from one function, which is
+ * what stops the sound and the sprites disagreeing about who is fighting.
+ *
+ * The hurt line is the key `AudioTuning.voice`'s docblock predicted -- "a later
+ * story adds a kind by adding a key, with no call site to find" -- with one
+ * difference recorded here rather than left to be discovered: it is added to the
+ * *roster* table and not to `voice`, because the only hurt samples that exist
+ * are per-character. A shared `vo_hurt` would be a name with no file behind it,
+ * and a fighter borrowing another fighter's voice is worse than one that takes a
+ * hit silently. `voice` therefore stays `{ ko: 'vo_ko' }`: the fallback, for a
+ * surface with no roster at all.
+ *
+ * Emitting each stream's lines in its own
  * loop would have let an Ultimate and the KO it caused -- one clock frame, two
  * different `agentIndex` meanings, since a `CinematicEvent`'s names the *caster*
  * and a `JuiceEvent`'s names the *struck* fighter -- each see an empty limiter
@@ -283,6 +315,58 @@ const VOICE_RANK_LINE = 1;
 /** Both fighters, for the announcement's claim. Frozen and shared -- it is a constant, not state. */
 const BOTH_AGENTS: readonly (0 | 1)[] = Object.freeze([0, 1]);
 
+/**
+ * The SFX a struck fighter makes, hers if she has one (Story 12.9).
+ *
+ * `ko` is deliberately *not* per-character on this bus: the KO **voice** is the
+ * fighter's (below), and the KO impact is the stage's -- the reference ships one
+ * `sfx_ko` and four `vo_<id>_ko`, and splitting them the other way would give
+ * four fighters one death cry and four thuds, which is exactly backwards.
+ */
+function sfxNameFor(
+  kind: JuiceKind,
+  tuning: AudioTuning,
+  roster: RosterPair | undefined,
+  agentIndex: 0 | 1,
+): string | undefined {
+  const shared = tuning.sfx[kind];
+  if (roster === undefined || kind === 'ko') {
+    return shared;
+  }
+  const cues = audioCuesFor(roster[agentIndex]);
+  if (cues === undefined) {
+    return shared;
+  }
+  return kind === 'heavy' ? cues.heavy : cues.hit;
+}
+
+/**
+ * The voice line a struck fighter says, or nothing (Story 12.9).
+ *
+ * The asymmetry between `heavy` and `hit` is the whole point and is an
+ * acceptance criterion: a hurt line on every chip hit is how a fighting game
+ * becomes unlistenable in thirty seconds, which is what `AudioTuning.voice`'s
+ * own docblock says and why that table is partial. A `hit` returns `undefined`
+ * here whether or not the struck fighter has a pack.
+ */
+function voiceNameFor(
+  kind: JuiceKind,
+  tuning: AudioTuning,
+  roster: RosterPair | undefined,
+  agentIndex: 0 | 1,
+): string | undefined {
+  const cues = roster === undefined ? undefined : audioCuesFor(roster[agentIndex]);
+  if (cues !== undefined) {
+    if (kind === 'heavy') {
+      return cues.hurt;
+    }
+    if (kind === 'ko') {
+      return cues.ko;
+    }
+  }
+  return tuning.voice[kind];
+}
+
 /** The frame a film with no frames at all resolves to: base gains, nothing playing. */
 function neutralFrame(tuning: AudioTuning): AudioFrame {
   return Object.freeze({
@@ -307,6 +391,12 @@ function neutralFrame(tuning: AudioTuning): AudioFrame {
 export function buildAudioTrack(
   juiceTrack: JuiceTrack,
   tuning: AudioTuning = DEFAULT_AUDIO_TUNING,
+  /**
+   * Who is fighting, for the per-character cues (Story 12.9). Optional, and
+   * absent means the shared cue set exactly as it was before this story -- which
+   * is what every existing caller and every existing test gets.
+   */
+  roster?: RosterPair,
 ): AudioTrack {
   const frameCount = juiceTrack.frameCount;
   if (frameCount <= 0) {
@@ -348,12 +438,15 @@ export function buildAudioTrack(
       continue;
     }
 
-    const sfxName = tuning.sfx[event.kind];
+    // Story 12.9. `event.agentIndex` is the *struck* fighter, which is whose
+    // sound a hit is: the cue is placed where the damage landed, exactly as the
+    // spark and the damage number already are.
+    const sfxName = sfxNameFor(event.kind, tuning, roster, event.agentIndex);
     if (sfxName !== undefined) {
       cuesByClock[clockIndex].push(Object.freeze({ bus: 'sfx', name: sfxName, loop: false }));
     }
 
-    const voiceName = tuning.voice[event.kind];
+    const voiceName = voiceNameFor(event.kind, tuning, roster, event.agentIndex);
     if (voiceName === undefined) {
       continue;
     }
@@ -399,9 +492,15 @@ export function buildAudioTrack(
       continue;
     }
     announcedClocks.push(clockIndex);
+    // Story 12.9. The caster's own line, and `cinematic.agentIndex` is the
+    // caster -- unlike a `JuiceEvent`'s, which names the struck fighter. It
+    // still claims *both* rate-limit slots: whose voice it is and whose moment
+    // it is are different questions, and the announcement is still the stage's
+    // moment (see `VoiceRequest.agents`).
+    const casterCues = roster === undefined ? undefined : audioCuesFor(roster[cinematic.agentIndex]);
     voiceRequests.push({
       clockIndex,
-      name: tuning.ultimateVoice,
+      name: casterCues?.ultimate ?? tuning.ultimateVoice,
       agents: BOTH_AGENTS,
       rank: VOICE_RANK_ANNOUNCE,
     });
@@ -511,6 +610,20 @@ export interface AudioDirector {
    * only on an ordinary forward advance.
    */
   readonly atFrame: (clockIndex: number) => void;
+  /**
+   * Starts the music bed again from wherever playback happens to be. Story 12.9.
+   *
+   * The verb Story 12.4 said was missing and named this story as the owner of.
+   * The bed is a looping cue on clock frame 0, so every way of *stopping* the
+   * graph mid-Match -- hiding the replay screen, muting the page -- silences it
+   * with no way back short of a Replay, and a visitor who turned sound on
+   * halfway through a fight got the hits and no music underneath them.
+   *
+   * Position is deliberately untouched: this re-states the loop, it does not
+   * seek. And it stops the graph first, so pressing it twice cannot stack two
+   * beds -- the same discipline `mountPlayer` follows on every re-mount.
+   */
+  readonly rearm: () => void;
 }
 
 /**
@@ -573,6 +686,79 @@ export function createAudioDirector(config: AudioDirectorConfig): AudioDirector 
       for (const cue of frame.cues) {
         sink.play(cue);
       }
+    },
+    rearm: (): void => {
+      const sink = config.sink ?? null;
+      if (sink === null) {
+        return;
+      }
+      // Everything this graph had running, the outgoing bed included. Without
+      // it a second press would layer a second loop that nothing could stop.
+      sink.stopAll();
+      // Only the looping cues of frame 0. A one-shot from frame 0 -- there are
+      // none today, and a later tuning could add one -- describes a moment that
+      // is long past, and firing it here would sound like the fight restarting.
+      for (const cue of config.track.at(0).cues) {
+        if (cue.loop) {
+          sink.play(cue);
+        }
+      }
+      // The mix as it is *now*, not as it was at frame 0: re-arming inside a
+      // duck window must not put the bed back to full for the rest of it.
+      const frame = config.track.at(Math.max(0, state.last));
+      sink.setGains(
+        frame.musicGainBasisPoints,
+        frame.sfxGainBasisPoints,
+        frame.voiceGainBasisPoints,
+      );
+    },
+  });
+}
+
+/**
+ * A sink that only passes sound through while `enabled()` answers true. Story
+ * 12.9.
+ *
+ * The page has one graph (Story 9.6) and, since Story 12.4, one screen at a
+ * time; the sound control in the shell is a property of the *page*, so muting
+ * has to hold for whichever surface is driving the buses rather than being
+ * re-implemented per panel. Wrapping the sink is what makes that one decision:
+ * every director above it keeps running -- position, duck windows and gains all
+ * stay correct -- and nothing reaches the speakers.
+ *
+ * Three of the four verbs are gated and one is not:
+ *
+ * - `play` and `setGains` are what make noise, and both are dropped while muted.
+ *   Dropping `setGains` too matters: a muted page must not be writing a duck
+ *   into buses another surface may own.
+ * - `stopAll` always passes through. It is the verb that *ends* sound, and a
+ *   mute that could not stop the looping bed already playing would be a mute
+ *   that does nothing to the one cue a visitor most wants stopped.
+ * - `unlock` always passes through. Resuming a suspended context makes no sound
+ *   on its own, and a visitor who arrives muted, gestures, and then unmutes
+ *   should not need a second gesture to be heard.
+ */
+export function createGatedSink(sink: AudioSink, enabled: () => boolean): AudioSink {
+  return Object.freeze({
+    play: (cue: AudioCue): void => {
+      if (enabled()) {
+        sink.play(cue);
+      }
+    },
+    stopAll: (): void => {
+      sink.stopAll();
+    },
+    setGains: (
+      musicBasisPoints: number,
+      sfxBasisPoints: number,
+      voiceBasisPoints: number,
+    ): void => {
+      if (enabled()) {
+        sink.setGains(musicBasisPoints, sfxBasisPoints, voiceBasisPoints);
+      }
+    },
+    unlock: (): void => {
+      sink.unlock();
     },
   });
 }
