@@ -26,6 +26,21 @@ import {
 const HERE = dirname(fileURLToPath(import.meta.url));
 const PUBLIC = join(HERE, '..', '..', 'public');
 const STAGES_DIR = join(PUBLIC, 'stages');
+const GATE = join(HERE, '..', '..', '..', '..', 'scripts', 'visual-gate.mjs');
+
+describe("the visual gate's duplicated stage list stays pinned to this module", () => {
+  it('lists exactly the same stages, in the same order', () => {
+    // The gate is dependency-free ESM run straight by Node and cannot import this
+    // `.ts`, so it keeps its own copy of the list -- pinned here the way the gate
+    // pins its `HUD_BAND` copy against `renderer.ts`. A stage added to the module
+    // and forgotten in the gate (or vice versa) fails this, not just at runtime.
+    const source = readFileSync(GATE, 'utf8');
+    const match = /const STAGE_IDS = (\[[^\]]*\]);/.exec(source);
+    expect(match).not.toBeNull();
+    const gateStages = JSON.parse((match?.[1] ?? '[]').replace(/'/g, '"'));
+    expect(gateStages).toStrictEqual([...STAGE_IDS]);
+  });
+});
 
 describe('the stage list', () => {
   it('names six stages, with a deterministic default from the list', () => {

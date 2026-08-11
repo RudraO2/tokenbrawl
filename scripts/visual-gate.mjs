@@ -102,6 +102,20 @@ const SCREEN_ROUTES = ['/', '/play', '/select', '/watch', '/replay', '/byok'];
 const ARENA_ROUTES = ['/replay', '/play', '/watch'];
 
 /**
+ * Every stage, in list order. Mirrors `apps/web/src/render/stages.ts` (Story
+ * 12.10).
+ *
+ * Duplicated for this file's standing reason -- dependency-free ESM run straight
+ * by Node cannot import a `.ts` module -- the same as `SCREEN_ROUTES` and
+ * `HUD_BAND`. `stages.test.ts` reads this literal off disk and pins it to
+ * `STAGE_IDS`, so a stage added there and forgotten here fails the suite; and
+ * `every-stage-draws` below compares this list's length against the number of
+ * `[data-select-stage]` cards the page renders, so a stage wired on one side and
+ * not the other shows up as a drift reading rather than an unchecked stage.
+ */
+const STAGE_IDS = ['stage-1', 'stage-2', 'stage-3', 'stage-4', 'stage-5', 'stage-6'];
+
+/**
  * Console lines that are environmental rather than defects.
  *
  * Deliberately a short, commented allowlist rather than a severity filter: the
@@ -972,6 +986,90 @@ const hostArenaHashProbe = (hostSelector) => `(() => {
 })()`;
 
 /**
+ * Story 12.10: the arena split into a far strip and a near strip, for
+ * `stage-parallax-has-depth`.
+ *
+ * The backdrop has depth if, when the camera pans, the near (lower) part of the
+ * frame shifts by more pixels than the far (upper) part. The far strip sits just
+ * below the HUD, above where the fighters ever reach, so what changes there is
+ * the backdrop and only the backdrop -- a flat, non-parallaxed backdrop would
+ * not move it at all. The near strip sits just above the floor, where the near
+ * layer (and the fighters) live. Each strip is returned as a coarse grid of
+ * `r+g+b` samples; the two are diffed in Node between a before-pan and an
+ * after-pan reading.
+ *
+ * Same cinematic guard as the ink probes: a letterboxed frame (the Ultimate) is
+ * reported so the check can skip it rather than read the plate's slam as motion.
+ */
+const PARALLAX_STRIP_HEIGHT = 48;
+const PARALLAX_SAMPLE_STEP_X = 12;
+const PARALLAX_SAMPLE_STEP_Y = 4;
+const arenaStripsProbe = (hostSelector) => `(() => {
+  const host = document.querySelector(${JSON.stringify(hostSelector)});
+  if (!host) return null;
+  const canvas = [...host.querySelectorAll('canvas')].find((c) => {
+    const rect = c.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+  });
+  if (!canvas) return null;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return null;
+
+  const lastRow = ctx.getImageData(0, canvas.height - 1, canvas.width, 1).data;
+  let black = 0;
+  for (let x = 0; x < canvas.width; x += 1) {
+    const i = x * 4;
+    if (lastRow[i] === 0 && lastRow[i + 1] === 0 && lastRow[i + 2] === 0) black += 1;
+  }
+  if (black >= Math.floor(canvas.width * 0.9)) return { cinematic: true, upper: [], lower: [] };
+
+  const stripH = ${PARALLAX_STRIP_HEIGHT};
+  const stepX = ${PARALLAX_SAMPLE_STEP_X};
+  const stepY = ${PARALLAX_SAMPLE_STEP_Y};
+  const sampleStrip = (top) => {
+    const out = [];
+    const data = ctx.getImageData(0, top, canvas.width, stripH).data;
+    for (let y = 0; y < stripH; y += stepY) {
+      for (let x = 0; x < canvas.width; x += stepX) {
+        const i = (y * canvas.width + x) * 4;
+        out.push(data[i] + data[i + 1] + data[i + 2]);
+      }
+    }
+    return out;
+  };
+
+  const upperTop = ${ARENA_TOP_PX};
+  const lowerTop = canvas.height - ${FLOOR_INSET_PX} - stripH;
+  if (upperTop + stripH > lowerTop) return { cinematic: false, upper: [], lower: [] };
+  return { cinematic: false, upper: sampleStrip(upperTop), lower: sampleStrip(lowerTop) };
+})()`;
+
+/** How far two samples must differ to count as changed -- a little slack for antialiasing. */
+const PARALLAX_SAMPLE_DELTA = 24;
+/** Samples that changed between two strip readings. */
+const stripDiff = (before, after) => {
+  if (!Array.isArray(before) || !Array.isArray(after) || before.length !== after.length) {
+    return -1;
+  }
+  let changed = 0;
+  for (let i = 0; i < before.length; i += 1) {
+    if (Math.abs(before[i] - after[i]) > PARALLAX_SAMPLE_DELTA) changed += 1;
+  }
+  return changed;
+};
+
+/** Clicks the character-select card for stage `id` (Story 12.10). */
+const pickStage = (id) => `(() => {
+  const card = document.querySelector('[data-select-stage="' + ${JSON.stringify(id)} + '"]');
+  if (!card) return { ok: false, why: 'no card for ' + ${JSON.stringify(id)} };
+  card.click();
+  return { ok: true, pressed: card.getAttribute('aria-pressed') };
+})()`;
+
+/** How many stage cards the character-select screen renders, for the drift guard. */
+const STAGE_CARD_COUNT_PROBE = `document.querySelectorAll('[data-select-stage]').length`;
+
+/**
  * The arena hashed in two halves, left and right, plus its sprite ink (Story
  * 12.5).
  *
@@ -1562,6 +1660,11 @@ async function main() {
         // their own every Decision Point, so a whole-canvas hash would pass on a
         // frozen fighter. See `ARENA_TOP_PX`.
         const arcadeHashBefore = await cdp.evaluate(hostArenaHashProbe('#arcade'));
+        // Story 12.10. The same centre-to-wall pan drives `stage-parallax-has-depth`:
+        // sample a far strip and a near strip before the pan and after it, and the
+        // near strip must move by more pixels than the far one. Read here, off the
+        // one pan the gate already makes, rather than staging a second.
+        const stripsBefore = await cdp.evaluate(arenaStripsProbe('#arcade'));
         for (let press = 0; press < 30; press += 1) {
           await cdp.evaluate(dispatchKeydown('#arcade [data-arcade-keys]', 'ArrowRight'));
           await sleep(40);
@@ -1578,6 +1681,27 @@ async function main() {
           arcadeHashBefore === null
             ? 'no visible canvas under #arcade to drive'
             : `arena hash ${arcadeHashBefore} -> ${arcadeHashAfter}`,
+        );
+
+        // --- C1e stage-parallax-has-depth (Story 12.10) --------------------
+        const stripsAfter = await cdp.evaluate(arenaStripsProbe('#arcade'));
+        const cinematicStrip =
+          stripsBefore === null ||
+          stripsAfter === null ||
+          stripsBefore.cinematic === true ||
+          stripsAfter.cinematic === true;
+        const farShift = cinematicStrip ? -1 : stripDiff(stripsBefore.upper, stripsAfter.upper);
+        const nearShift = cinematicStrip ? -1 : stripDiff(stripsBefore.lower, stripsAfter.lower);
+        record(
+          'stage-parallax-has-depth',
+          // The near strip moved (the fight and the near layer), the far strip
+          // moved too (a flat backdrop would not, so this is what proves the
+          // scene parallaxes at all), and the near strip moved strictly more --
+          // which is depth. A cinematic frame is not judged.
+          !cinematicStrip && farShift > 0 && nearShift > farShift,
+          cinematicStrip
+            ? 'a cinematic frame was on screen; parallax not judged this run'
+            : `far strip changed ${farShift}, near strip changed ${nearShift} (near must exceed far, far must exceed 0)`,
         );
 
         // --- C1d fighters-inside-frame, at the wall (Story 12.3) -----------
@@ -1968,6 +2092,70 @@ async function main() {
           `showing #${select.screen ?? 'nothing'}, fighters named: ${select.found.join(', ') || 'none'}`,
         );
 
+      }
+
+      // --- C4f every-stage-draws (Story 12.10) ------------------------------
+      // Iterates the stage list rather than a hardcoded count, so a stage added
+      // and left unwired fails rather than ships. For each stage: pick it on the
+      // select screen, let its scenery decode, then scrub the replay player to a
+      // fixed frame and hash the arena below the HUD. The fighters are identical
+      // across all six -- same log, same scrub frame -- so the only thing that
+      // can change the hash is which stage was drawn. Two stages that both failed
+      // to load would hash identically (a flat arena over the same fighters), so
+      // requiring all six hashes distinct catches an unwired stage where an ink
+      // floor cannot: the backdrop fills the frame and reports ~98% either way.
+      if (!viewport.mobile) {
+        // The drift guard the duplicated `STAGE_IDS` needs: the select screen
+        // renders one card per stage in the module, so a mismatch here means the
+        // gate's copy has drifted from `render/stages.ts`.
+        await goto('/select');
+        const stageCardCount = await cdp.evaluate(STAGE_CARD_COUNT_PROBE);
+
+        const stageReadings = [];
+        for (const id of STAGE_IDS) {
+          await load(`${viewport.name}-stage-${id}`, '/select');
+          // The packs and the stage are late upgrades to an already-running
+          // page; a probe fired before they land measures the flat arena.
+          await sleep(2500);
+          const picked = await cdp.evaluate(pickStage(id));
+          // The pick starts the fetch; this is the decode.
+          await sleep(2000);
+          await goto('/replay');
+          await cdp.evaluate(scrubTo(40));
+          await sleep(500);
+          const hash = await cdp.evaluate(hostArenaHashProbe('#app'));
+          const canvases = await cdp.evaluate(CANVAS_PROBE);
+          const app = canvases.find((c) => c.host === 'app');
+          stageReadings.push({
+            id,
+            picked: picked.ok === true && picked.pressed === 'true',
+            hash,
+            ink: app ? app.inkRatio : 0,
+          });
+        }
+        const distinctHashes = new Set(stageReadings.map((r) => r.hash));
+        const measured = stageReadings.every((r) => r.picked && r.hash !== null);
+        const belowInk = stageReadings.filter((r) => r.ink < MIN_INK_RATIO);
+        record(
+          'every-stage-draws',
+          stageCardCount === STAGE_IDS.length &&
+            measured &&
+            distinctHashes.size === STAGE_IDS.length &&
+            belowInk.length === 0,
+          stageCardCount !== STAGE_IDS.length
+            ? `the page renders ${stageCardCount} stage cards but this gate iterates ${STAGE_IDS.length} — STAGE_IDS has drifted from render/stages.ts`
+            : !measured
+            ? `a stage did not pick or did not draw: ${stageReadings
+                .map((r) => `${r.id}(picked=${String(r.picked)} hash=${String(r.hash)})`)
+                .join(', ')}`
+            : distinctHashes.size !== STAGE_IDS.length
+            ? `only ${distinctHashes.size} distinct arenas across ${STAGE_IDS.length} stages — two stages drew the same, one is unwired: ${stageReadings
+                .map((r) => `${r.id}:${String(r.hash)}`)
+                .join(' ')}`
+            : belowInk.length > 0
+            ? `below the 2% ink floor: ${belowInk.map((r) => `${r.id}:${(r.ink * 100).toFixed(1)}%`).join(', ')}`
+            : `${STAGE_IDS.length} stages, ${distinctHashes.size} distinct arenas, all above the ink floor`,
+        );
       }
 
       // --- C5 screenshots-captured ------------------------------------------
