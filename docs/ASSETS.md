@@ -225,29 +225,64 @@ A fighter whose portrait 404'd but whose cells decoded keeps the cells and
 takes the banner in place of the portrait: the two are separate files and are
 dropped separately.
 
-### Arena backdrop
+### Arena stages (Story 12.10)
+
+| Asset | Source | Licence | Checked |
+|---|---|---|---|
+| Stage 1 (`apps/web/public/stages/stage-1/`) | copied byte-for-byte from the author's own prior project's `stages/s1.png` + `npc1.png` (own IP) | **Author-owned, used with permission** | 2026-08-11 |
+| Stage 2 (`apps/web/public/stages/stage-2/`) | copied byte-for-byte from the author's own prior project's `stages/s2.png` + `npc2.png` (own IP) | **Author-owned, used with permission** | 2026-08-11 |
+| Stage 3 (`apps/web/public/stages/stage-3/`) | copied byte-for-byte from the author's own prior project's `stages/s3.png` + `npc3.png` (own IP) | **Author-owned, used with permission** | 2026-08-11 |
+| Stage 4 (`apps/web/public/stages/stage-4/`) | copied byte-for-byte from the author's own prior project's `stages/s4.png` + `npc1.png` (own IP) | **Author-owned, used with permission** | 2026-08-11 |
+| Stage 5 (`apps/web/public/stages/stage-5/`) | copied byte-for-byte from the author's own prior project's `stages/s5.png` + `npc2.png` (own IP) | **Author-owned, used with permission** | 2026-08-11 |
+| Stage 6 (`apps/web/public/stages/stage-6/`) | copied byte-for-byte from the author's own prior project's `stages/s6.png` + `npc3.png` (own IP) | **Author-owned, used with permission** | 2026-08-11 |
+
+Same owner and same basis as the four fighter packs above — the scene images
+(`sN.png`, 1600×900) and the crowd sprites (`npcM.png`, 512×512) are frames from
+the author's own prior fighting-game project, copied verbatim into one directory
+per stage (`back.png` + `crowd.png`) and renamed for what they are, never for
+where they came from (AD-16; `packages/cli/src/extraction-exclusion.test.ts`
+enforces that nothing under `public/` names the reference by path or word).
+
+Each stage's `layout.json` draws the two images back to front with a per-layer
+**depth**: `back` at `0.04` reads as a horizon that barely tracks the camera,
+`crowd` at `0.16` slides faster, so the backdrop has distance in it. The offset
+is `cameraX * depth`, a pure function of Story 12.3's camera — not a scroll
+accumulator (`render/backdrop.ts`). `scale: 0.6` fits the 1600-wide scene onto
+the 960 arena and tiles to fill any gap a pan opens.
+
+`dim: 0.58` fades each stack toward `--tb-bg`. The value is per-stage (six
+chances to get it wrong) and the same across all six here because it clears the
+floor for every one of them: at 0.58 the bone-white sprite (`#f5f5f0`) reads
+against each stage's dimmed mid-tone at **7.70:1** (the light stone of stage 4)
+to **16.88:1** (stage 6), and against each stage's *brightest* pixel — the
+worst case anywhere on the canvas — no lower than **4.69:1**, both well above
+`docs/DESIGN.md`'s 3:1 graphical-object floor. (Measured by decoding each scene;
+see Story 12.10's Visual check finding for the per-stage table.)
+
+**Payload.** The six stages are 4.7 MB on disk, but a page load fetches exactly
+one — the stage `stageForSeed(seed)` picks for the demo, or the one the visitor
+chose — as a late upgrade to the already-running fight (`startup.ts`), the same
+as the sprite packs (`imageUrlsFor` fetches two of four). One stage is ~0.8 MB;
+the budget this story holds is **≤ 1 MB added per load**, not the whole set.
+
+**Rejected:** `edermunizz/free-pixel-art-forest` — CC-BY-**ND**, no derivatives,
+which does not survive being recomposited into a stage.
+
+### Arena backdrop — superseded, not deleted
 
 | Asset | Source | Licence | Checked |
 |---|---|---|---|
 | Mountain Dusk (`apps/web/public/sprites/mountain-dusk/`) | https://ansimuz.itch.io/mountain-dusk-parallax-background | **CC0 1.0 Universal** | 2026-08-01 |
 
-Verified twice: the pack's bundled `public-license.pdf` contains "Creative
-Commons Zero (CC0", and the itch.io page states "Creative Commons Zero v1.0
-Universal". The PDF lives at `docs/licences/mountain-dusk-public-license.pdf`,
-not in `public/` — it is 816 KB, `public/` ships verbatim, and the licence
-would otherwise outweigh every sprite in the app four times over.
-
-Six layers drawn back to front, static rather than parallaxed — the arena is a
-single fixed axis with no camera, so a scroll would be motion corresponding to
-nothing in the simulation. Anchored to the bottom so the treeline sits behind
-the fighters and the sky crops off.
-
-`dim: 0.55` fades the stack toward `--tb-bg`. Full strength fought the fighters
-for attention and dropped the bone-white sprites' contrast below the point
-where the action reads; scenery that competes with the subject is a defect.
-
-**Rejected:** `edermunizz/free-pixel-art-forest` — CC-BY-**ND**, no derivatives,
-which does not survive being recomposited into a stage.
+The project's one stage until Story 12.10 shipped the six above. Kept on disk as
+historical provenance per this doc's own rule (the same convention the Martial
+Hero packs follow), no longer wired into the loader — `startup.ts` now loads a
+stage from the list in `apps/web/src/render/stages.ts`. Licence verified twice:
+the pack's bundled `public-license.pdf` contains "Creative Commons Zero (CC0",
+and the itch.io page states "Creative Commons Zero v1.0 Universal". The PDF lives
+at `docs/licences/mountain-dusk-public-license.pdf`, not in `public/` — it is
+816 KB, `public/` ships verbatim, and the licence would otherwise outweigh every
+sprite in the app four times over.
 
 ### Swapping in a different pack
 

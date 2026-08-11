@@ -11,7 +11,32 @@ import {
   type RosterId,
   type RosterSide,
 } from '../render/roster';
-import { mountSelectPanel, selectMarkup, type SelectKeyEvent, type SelectNode } from './select';
+import {
+  DEFAULT_STAGE,
+  STAGE_IDS,
+  createStageSelection,
+  type StageId,
+} from '../render/stages';
+import {
+  mountSelectPanel,
+  selectMarkup,
+  type SelectKeyEvent,
+  type SelectNode,
+  type SelectPanelDeps,
+} from './select';
+
+/**
+ * The stage half of the deps (Story 12.10). Every existing case chose fighters
+ * and never a stage, so a fixed default stage and a no-op picker keep them
+ * describing exactly what they did before; the stage-specific cases below pass
+ * their own.
+ */
+const stageDeps = (
+  overrides: Partial<Pick<SelectPanelDeps, 'stage' | 'onPickStage'>> = {},
+): Pick<SelectPanelDeps, 'stage' | 'onPickStage'> => ({
+  stage: overrides.stage ?? ((): StageId => DEFAULT_STAGE),
+  onPickStage: overrides.onPickStage ?? ((): void => {}),
+});
 
 /**
  * Story 12.5: the screen that makes four fighters four fighters.
@@ -96,6 +121,7 @@ function fakeHost(missing: readonly string[] = []): {
 } {
   const declared = [
     ...[0, 1].flatMap((side) => ROSTER_IDS.map((id) => `[data-select-pick="${String(side)}:${id}"]`)),
+    ...STAGE_IDS.map((id) => `[data-select-stage="${id}"]`),
     '[data-select-fight]',
     '[data-select-readout]',
   ].filter((selector) => !missing.includes(selector));
@@ -157,7 +183,7 @@ describe('the character-select screen offers all four fighters', () => {
   it('marks the chosen fighter on each side, and only that one', () => {
     const host = fakeHost();
     const selection = createRosterSelection();
-    mountSelectPanel(host, { pair: () => selection.pair(), onPick: () => {}, onFight: () => {} });
+    mountSelectPanel(host, { pair: () => selection.pair(), onPick: () => {}, ...stageDeps(), onFight: () => {} });
 
     for (const side of [0, 1] as const) {
       for (const id of ROSTER_IDS) {
@@ -178,6 +204,7 @@ describe('the character-select screen offers all four fighters', () => {
         picks.push([side, id]);
         selection.select(side, id);
       },
+      ...stageDeps(),
       onFight: () => {},
     });
 
@@ -211,6 +238,7 @@ describe('the character-select screen offers all four fighters', () => {
       onPick: (side, id) => {
         selection.select(side, id);
       },
+      ...stageDeps(),
       onFight: () => {
         fights.count += 1;
       },
@@ -250,6 +278,7 @@ describe('the character-select screen offers all four fighters', () => {
       onPick: (side, id) => {
         selection.select(side, id);
       },
+      ...stageDeps(),
       onFight: () => {},
     });
     card(host, 0, 'grokk').click();
@@ -265,6 +294,7 @@ describe('the character-select screen offers all four fighters', () => {
       mountSelectPanel(fakeHost(['[data-select-fight]']), {
         pair: () => DEFAULT_ROSTER,
         onPick: () => {},
+        ...stageDeps(),
         onFight: () => {},
       }),
     ).toThrow(/did not mount/);
@@ -277,6 +307,7 @@ describe('the character-select screen offers all four fighters', () => {
       mountSelectPanel(fakeHost(['[data-select-readout]']), {
         pair: () => DEFAULT_ROSTER,
         onPick: () => {},
+        ...stageDeps(),
         onFight: () => {},
       }),
     ).not.toThrow();
@@ -295,5 +326,62 @@ describe('the character-select screen offers all four fighters', () => {
     // defect Story 12.4 had just cleared, reintroduced by the obvious layout.
     expect(APP_CSS).toMatch(/\.tb-select-row\s*\{[^}]*minmax\(0, 1fr\)/);
     expect(APP_CSS).toMatch(/\.tb-select-portrait\s*\{[^}]*width:\s*100%/);
+  });
+});
+
+describe('the character-select screen offers a stage (Story 12.10)', () => {
+  it('gives every shipped stage a card, so one added and left unwired shows nowhere', () => {
+    const markup = selectMarkup();
+    for (const id of STAGE_IDS) {
+      expect(markup).toContain(`data-select-stage="${id}"`);
+    }
+  });
+
+  it('marks the chosen stage, and only that one', () => {
+    const host = fakeHost();
+    const stages = createStageSelection();
+    mountSelectPanel(host, {
+      pair: () => DEFAULT_ROSTER,
+      onPick: () => {},
+      stage: () => stages.stage(),
+      onPickStage: (id) => stages.select(id),
+      onFight: () => {},
+    });
+
+    for (const id of STAGE_IDS) {
+      expect(
+        host.querySelector(`[data-select-stage="${id}"]`)?.attributes.get('aria-pressed'),
+      ).toBe(stages.stage() === id ? 'true' : 'false');
+    }
+  });
+
+  it('rounds a stage pick through the selection and re-marks the row', () => {
+    const host = fakeHost();
+    const picks: StageId[] = [];
+    const stages = createStageSelection();
+    mountSelectPanel(host, {
+      pair: () => DEFAULT_ROSTER,
+      onPick: () => {},
+      stage: () => stages.stage(),
+      onPickStage: (id) => {
+        picks.push(id);
+        stages.select(id);
+      },
+      onFight: () => {},
+    });
+
+    // Pick a stage that is not the default, and the row must move to it: the
+    // pick reaches the selection and the mark follows what is drawn.
+    const target = STAGE_IDS[3];
+    host.querySelector(`[data-select-stage="${target}"]`)?.click();
+
+    expect(picks).toStrictEqual([target]);
+    expect(stages.stage()).toBe(target);
+    expect(
+      host.querySelector(`[data-select-stage="${target}"]`)?.attributes.get('aria-pressed'),
+    ).toBe('true');
+    expect(
+      host.querySelector(`[data-select-stage="${DEFAULT_STAGE}"]`)?.attributes.get('aria-pressed'),
+    ).toBe('false');
   });
 });

@@ -24,6 +24,13 @@ import {
   type RosterSide,
 } from './render/roster';
 import {
+  createStageSelection,
+  stageForSeed,
+  stageLayoutUrlFor,
+  type StageId,
+  type StageSelection,
+} from './render/stages';
+import {
   createUltSheet,
   imageUrlsFor,
   validateUltSheetLayout,
@@ -90,7 +97,6 @@ import { ROUTE_BYOK, ROUTE_PLAY, ROUTE_REPLAY, ROUTE_SELECT, ROUTE_WATCH, SCREEN
 
 /** Same-origin, so both are covered by the no-remote-asset sweep in `style-discipline.test.ts`. */
 export const DEMO_REPLAY_URL = '/replays/demo.command-log.json';
-const BACKDROP_LAYOUT_URL = '/sprites/mountain-dusk/layout.json';
 /**
  * Story 11.2. The impact FX sheet's strip layout, authored in this repo beside
  * the image it describes. Same-origin like every other asset here, for INV-8's
@@ -294,16 +300,24 @@ async function decodeAll(
   return images;
 }
 
-/** Scenery is the most skippable thing on the page: losing it must never cost the replay. */
-async function loadBackdrop(globals: BrowserGlobals): Promise<Backdrop | undefined> {
+/**
+ * Loads one stage's backdrop (Story 12.10).
+ *
+ * Scenery is the most skippable thing on the page: losing it must never cost the
+ * replay, so a 404, a malformed layout, a remote image or an undecodable PNG is
+ * one warning and a flat arena. Only the *chosen* stage is fetched -- the six
+ * scenes are 4.7 MB on disk and a load pulls ~0.8 MB of them, the same lazy
+ * shape the sprite packs have (`imageUrlsFor` fetches two of four).
+ */
+async function loadStage(globals: BrowserGlobals, id: StageId): Promise<Backdrop | undefined> {
   try {
     if (globals.Image === undefined) {
       return undefined;
     }
-    const layout = validateBackdropLayout(await fetchJson(globals, BACKDROP_LAYOUT_URL));
-    return createBackdrop(await decodeAll(globals, layout.layers), layout);
+    const layout = validateBackdropLayout(await fetchJson(globals, stageLayoutUrlFor(id)));
+    return createBackdrop(await decodeAll(globals, layout.layers.map((layer) => layer.image)), layout);
   } catch (error) {
-    warn('Backdrop unavailable, the arena will render flat', error);
+    warn('Stage unavailable, the arena will render flat', error);
     return undefined;
   }
 }
@@ -683,6 +697,7 @@ function mountLanding(
 function mountSelect(
   globals: BrowserGlobals,
   selection: RosterSelection,
+  stageSelection: StageSelection,
   arcade: ArcadePanel | null,
   onGesture: () => void,
   navigate: (route: string) => void,
@@ -696,6 +711,10 @@ function mountSelect(
       pair: () => selection.pair(),
       onPick: (side: RosterSide, id: RosterId) => {
         selection.select(side, id);
+      },
+      stage: () => stageSelection.stage(),
+      onPickStage: (id: StageId) => {
+        stageSelection.select(id);
       },
       onFight: () => {
         onGesture();
@@ -826,6 +845,29 @@ export async function startup(globals: BrowserGlobals): Promise<StartupResult | 
     const selection = createRosterSelection({
       onChange: (pair) => {
         chosen.apply(pair);
+      },
+    });
+
+    /**
+     * Which stage the fight is drawn on, and the box a pick travels through
+     * (Story 12.10).
+     *
+     * The same shape as the roster selection above and for the same reason:
+     * reacting to a pick means fetching that stage's scenery, and that needs the
+     * dressing that needs the selection. The initial stage is
+     * `stageForSeed(log.seed)` -- a deterministic default over the demo log's own
+     * seed, so a first load, a direct replay link and the hero raster all draw
+     * the same scene, and no stage is ever recorded in a Command Log.
+     */
+    const chosenStage: { apply: (id: StageId) => void } = {
+      apply: () => {
+        // Replaced below, once there is something to dress.
+      },
+    };
+    const stageSelection = createStageSelection({
+      initial: stageForSeed(log.seed),
+      onChange: (id) => {
+        chosenStage.apply(id);
       },
     });
 
@@ -1167,15 +1209,24 @@ export async function startup(globals: BrowserGlobals): Promise<StartupResult | 
       void loadRosterArt(pair);
     };
 
+    /**
+     * Fetches a stage's scenery and dresses every live surface with it (Story
+     * 12.10). A pick re-dresses immediately -- while the visitor is still on the
+     * select screen -- so the scene is decoded by the time the Match starts
+     * rather than swapping in mid-fight, the same as a roster pick above.
+     */
+    const loadStageInto = async (id: StageId): Promise<void> => {
+      const backdrop = await loadStage(globals, id);
+      if (backdrop !== undefined) {
+        dressBackdrop(backdrop);
+      }
+    };
+    chosenStage.apply = (id: StageId): void => {
+      void loadStageInto(id);
+    };
+
     const upgrades: Promise<void>[] = [loadRosterArt(selection.pair()), loadStreamArt()];
-    upgrades.push(
-      (async (): Promise<void> => {
-        const backdrop = await loadBackdrop(globals);
-        if (backdrop !== undefined) {
-          dressBackdrop(backdrop);
-        }
-      })(),
-    );
+    upgrades.push(loadStageInto(stageSelection.stage()));
     upgrades.push(
       (async (): Promise<void> => {
         const vfx = await loadVfx(globals);
@@ -1253,7 +1304,7 @@ export async function startup(globals: BrowserGlobals): Promise<StartupResult | 
       }
       if (dressing.backdrop !== undefined) {
         // The scenery and the impact sheet are not keyed by a fighter, so both
-        // stay shared: there is one mountain-dusk backdrop and one FX sheet.
+        // stay shared: there is one chosen stage's backdrop and one FX sheet.
         spectatePanel.setBackdrop(dressing.backdrop);
       }
       // Story 11.6. The two sheets adopt on exactly the same terms the packs
@@ -1280,6 +1331,7 @@ export async function startup(globals: BrowserGlobals): Promise<StartupResult | 
     const selectPanel = mountSelect(
       globals,
       selection,
+      stageSelection,
       arcadePanel,
       () => {
         sink?.unlock();

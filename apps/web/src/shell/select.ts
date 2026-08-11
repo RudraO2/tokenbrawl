@@ -7,6 +7,7 @@ import {
   type RosterPair,
   type RosterSide,
 } from '../render/roster';
+import { STAGE_IDS, type StageId } from '../render/stages';
 
 /**
  * Story 12.5: the character-select screen.
@@ -74,6 +75,10 @@ export interface SelectPanelDeps {
   readonly pair: () => RosterPair;
   /** Records a pick. `startup.ts` fetches that fighter's art on the way through. */
   readonly onPick: (side: RosterSide, id: RosterId) => void;
+  /** The stage showing when the screen mounts, so a re-visit shows what was chosen (Story 12.10). */
+  readonly stage: () => StageId;
+  /** Records a stage pick. `startup.ts` fetches that stage's scenery on the way through. */
+  readonly onPickStage: (id: StageId) => void;
   /**
    * The visitor is done choosing: start the Match.
    *
@@ -88,6 +93,8 @@ export interface SelectPanel {
   readonly refresh: () => void;
   /** The pair the screen is currently showing as chosen. For tests and the readout. */
   readonly shown: () => RosterPair;
+  /** The stage the screen is currently showing as chosen (Story 12.10). */
+  readonly shownStage: () => StageId;
 }
 
 /** Which side of the Match each row chooses for, and what the row is called. */
@@ -99,7 +106,14 @@ const SIDES: readonly { readonly side: RosterSide; readonly heading: string }[] 
 /** The attribute a card carries its `side:id` in, so one delegated lookup finds any of the eight. */
 const PICK_ATTRIBUTE = 'data-select-pick';
 
+/** The attribute a stage card carries its id in (Story 12.10). */
+const STAGE_ATTRIBUTE = 'data-select-stage';
+
 const cardId = (side: RosterSide, id: RosterId): string => `${String(side)}:${id}`;
+
+/** `stage-3` -> `Stage 3`, on the plate. The id is what is wired; this is what a visitor reads. */
+const stageLabel = (id: StageId): string =>
+  id.replace(/^stage-(\d+)$/, 'Stage $1');
 
 function cardMarkup(side: RosterSide, id: RosterId, heading: string): string {
   const name = ROSTER_NAMES[id];
@@ -113,6 +127,29 @@ function cardMarkup(side: RosterSide, id: RosterId, heading: string): string {
     >
       <img class="tb-select-portrait" src="${escapeHtml(portraitUrlFor(id))}" alt="" />
       <span class="tb-select-plate">${escapeHtml(name)}</span>
+    </button>
+  `;
+}
+
+/**
+ * One stage card (Story 12.10).
+ *
+ * A text plate, not a thumbnail: a stage's own scene image is ~0.6 MB, and
+ * loading six of them onto the select screen would fetch 4 MB precisely to pick
+ * *one* -- the opposite of the lazy load the loader is built around. The card is
+ * page chrome and keeps every flat-surface rule, exactly as the fighter cards do.
+ */
+function stageCardMarkup(id: StageId): string {
+  const label = stageLabel(id);
+  return `
+    <button
+      class="tb-select-card tb-select-stage"
+      type="button"
+      ${STAGE_ATTRIBUTE}="${escapeHtml(id)}"
+      aria-pressed="false"
+      aria-label="${escapeHtml(`${label} arena`)}"
+    >
+      <span class="tb-select-plate">${escapeHtml(label)}</span>
     </button>
   `;
 }
@@ -137,14 +174,24 @@ export function selectMarkup(): string {
       </div>
     `,
   ).join('');
+  const stageRow = `
+      <div class="tb-select-side">
+        <h3 class="tb-select-side-heading" id="tb-select-side-stage">Stage</h3>
+        <div class="tb-select-row" role="group" aria-labelledby="tb-select-side-stage">
+          ${STAGE_IDS.map((id) => stageCardMarkup(id)).join('')}
+        </div>
+      </div>
+    `;
   return `
     <h2 class="tb-select-heading">Characters</h2>
     <p class="tb-select-note">
       Four fighters, four sprite packs, four portraits &mdash; all of it shipped, and until now only
-      two of them reachable. Pick who you play and who you play against, then fight. Arrow keys move
-      across the roster; Enter chooses. Who you pick changes what is drawn, never what is simulated.
+      two of them reachable. Pick who you play and who you play against, choose a stage, then fight.
+      Arrow keys move across the roster; Enter chooses. What you pick changes what is drawn, never
+      what is simulated.
     </p>
     ${rows}
+    ${stageRow}
     <button class="tb-button tb-select-fight" type="button" data-select-fight>Fight</button>
     <p class="tb-select-readout" data-select-readout role="status" aria-live="polite"></p>
   `;
@@ -180,6 +227,11 @@ export function mountSelectPanel(host: SelectHost, deps: SelectPanelDeps): Selec
     ROSTER_IDS.map((id) => host.querySelector(`[${PICK_ATTRIBUTE}="${cardId(side, id)}"]`)),
   );
 
+  /** The stage cards, in stage order (Story 12.10). */
+  const stageCards: readonly (SelectNode | null)[] = STAGE_IDS.map((id) =>
+    host.querySelector(`[${STAGE_ATTRIBUTE}="${id}"]`),
+  );
+
   const say = (pair: RosterPair): void => {
     if (readoutNode === null) {
       return;
@@ -204,6 +256,10 @@ export function mountSelectPanel(host: SelectHost, deps: SelectPanelDeps): Selec
       ROSTER_IDS.forEach((id, index) => {
         cards[side][index]?.setAttribute?.('aria-pressed', pair[side] === id ? 'true' : 'false');
       });
+    });
+    const stage = deps.stage();
+    STAGE_IDS.forEach((id, index) => {
+      stageCards[index]?.setAttribute?.('aria-pressed', stage === id ? 'true' : 'false');
     });
     say(pair);
   };
@@ -252,6 +308,16 @@ export function mountSelectPanel(host: SelectHost, deps: SelectPanelDeps): Selec
     });
   });
 
+  // The stage cards. Plain `<button>`s like the fighter cards, so the keyboard
+  // reaches them and Enter confirms with no handler of our own; a pick fetches
+  // that stage's scenery through `onPickStage` and re-marks the row.
+  STAGE_IDS.forEach((id, index) => {
+    stageCards[index]?.addEventListener('click', () => {
+      deps.onPickStage(id);
+      refresh();
+    });
+  });
+
   fightNode.addEventListener('click', () => {
     deps.onFight();
   });
@@ -261,5 +327,6 @@ export function mountSelectPanel(host: SelectHost, deps: SelectPanelDeps): Selec
   return Object.freeze({
     refresh,
     shown: (): RosterPair => deps.pair(),
+    shownStage: (): StageId => deps.stage(),
   });
 }

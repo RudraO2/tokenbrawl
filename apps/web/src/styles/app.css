@@ -1313,6 +1313,25 @@ body {
   color: var(--tb-bg);
 }
 
+/*
+ * A stage card carries a label plate and no portrait (Story 12.10): loading six
+ * ~0.6 MB scene images onto the select screen to pick one is the opposite of the
+ * lazy load the loader is built around. Flat fill, ink border, square corners --
+ * page chrome keeps every rule. The plate loses its top border because there is
+ * no portrait above it for the rule to divide from.
+ */
+.tb-select-stage {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 56px;
+}
+
+.tb-select-stage .tb-select-plate {
+  border-top: 0;
+  width: 100%;
+}
+
 .tb-select-fight {
   margin-top: var(--tb-space-1);
 }

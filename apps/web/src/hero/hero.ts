@@ -3,6 +3,7 @@ import { createFighterEnvironment } from '../../../../packages/env-fighter/src/e
 import { resolveDecision } from '../replay/decision-point';
 import { buildReplayFilm, type RenderFrame } from '../replay/film';
 import { createBankReadout } from '../replay/token-bank';
+import { createBackdrop, type Backdrop, type BackdropLayout } from '../render/backdrop';
 import { ARCADE_HUD_COLOURS } from '../render/hud';
 import { drawFrame } from '../render/renderer';
 import { DEFAULT_ROSTER } from '../render/roster';
@@ -264,16 +265,30 @@ export interface HeroScene {
   readonly log: HeroLogView;
   readonly frames: readonly RenderFrame[];
   readonly ticksPerDecision: number;
+  /**
+   * The stage backdrop this hero draws (Story 12.10), or `undefined` for the
+   * flat arena every earlier test renders.
+   *
+   * Built with **no decoded images** on purpose: `raster.ts`'s `drawImage`
+   * throws (it cannot decode a PNG without a Node built-in), so a stage's scene
+   * layers are skipped and only its `dim` is drawn -- the ground colour over the
+   * ground colour, which changes no pixel. The hero therefore *builds and draws*
+   * its stage (the code path runs, the same as the portrait plate falling back
+   * to its aura) without the raster gaining a decoder it may not have. The GIF
+   * is unchanged by design, which is what keeps the artefact drift test green.
+   */
+  readonly backdrop?: Backdrop;
 }
 
 /** Builds the film once, so every frame is drawn from the same simulation. */
-export function buildHeroScene(log: unknown): HeroScene {
+export function buildHeroScene(log: unknown, stage?: BackdropLayout): HeroScene {
   const env = createFighterEnvironment();
   const film = buildReplayFilm(log, env);
   return {
     log: log as HeroLogView,
     frames: film.frames,
     ticksPerDecision: env.ticksPerDecision,
+    backdrop: stage === undefined ? undefined : createBackdrop(new Map(), stage),
   };
 }
 
@@ -290,6 +305,10 @@ export function renderHeroFrame(scene: HeroScene, frameIndex: number): Uint8Arra
   drawFrame(surface, frame, {
     config: DEFAULT_FIGHTER_CONFIG,
     viewport: { width: HERO_WIDTH, height: HERO_ARENA_HEIGHT },
+    // Story 12.10. The chosen stage, drawn through the shipped `drawFrame` path
+    // exactly as the browser draws it. Its scene layers are skipped here (no
+    // decoder) and its dim paints ground over ground; see `HeroScene.backdrop`.
+    backdrop: scene.backdrop,
     // Story 12.6. The HUD names its fighters now, and `DEFAULT_ROSTER` is the
     // pair a Match is drawn as when nobody has chosen -- which `render/roster.ts`
     // names the hero raster as one of. No portrait sheet is passed and none can
@@ -344,8 +363,8 @@ export function heroGifFrames(scene: HeroScene): readonly GifFrame[] {
 }
 
 /** The whole hero: film, captions, diffed frames, encoded GIF. */
-export function renderHeroGif(log: unknown): Uint8Array {
-  const scene = buildHeroScene(log);
+export function renderHeroGif(log: unknown, stage?: BackdropLayout): Uint8Array {
+  const scene = buildHeroScene(log, stage);
   const frames = heroGifFrames(scene);
 
   return encodeAnimatedGif({

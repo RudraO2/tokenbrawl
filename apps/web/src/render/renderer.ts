@@ -856,11 +856,17 @@ export function drawFrame(ctx: Canvas2D, frame: RenderFrame, options: DrawFrameO
   const { config, viewport } = options;
   const groundY = groundYFor(viewport);
 
+  // Computed once, before the backdrop and again inside the camera transform:
+  // Story 12.10 offsets the backdrop's layers by `camera.x`, so the scenery and
+  // the fighters read the *same* camera. A second, separately-derived camera
+  // would let a pan slide the backdrop out from under the fight.
+  const camera = cameraForFrame(frame, config, viewport);
+
   ctx.clearRect(0, 0, viewport.width, viewport.height);
   ctx.fillStyle = theme.bg;
   ctx.fillRect(0, 0, viewport.width, viewport.height);
 
-  options.backdrop?.draw(ctx, viewport.width, viewport.height, theme);
+  options.backdrop?.draw(ctx, viewport.width, viewport.height, camera.x, theme);
 
   // The floor is a solid rule, not a gradient horizon. `fillRect` rather than
   // `strokeRect`: stroking a 4px-tall box draws its two long edges and leaves a
@@ -888,7 +894,7 @@ export function drawFrame(ctx: Canvas2D, frame: RenderFrame, options: DrawFrameO
   // value. Only the fighters live in world space, because they are the only
   // thing on this surface whose position means an arena position.
   ctx.save();
-  applyCamera(ctx, cameraForFrame(frame, config, viewport), viewport, groundY);
+  applyCamera(ctx, camera, viewport, groundY);
 
   for (const agentIndex of [0, 1] as const) {
     const window = liveWindow(frame, agentIndex, config, ticksElapsed);
