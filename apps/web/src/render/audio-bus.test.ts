@@ -286,6 +286,34 @@ describe('stopAll, because the sink outlives any one Match', () => {
     expect(context.sources().every((source) => source.stopped().length === 1)).toBe(true);
   });
 
+  it('drops a cue that was still arriving when everything was stopped (Story 12.9)', async () => {
+    // The defect the visual gate found: `stopAll` could only stop sources that
+    // already existed, and a cue starts one or two awaits after it is asked for.
+    // `startup.ts` paints the player's frame 0 -- which asks for the looping
+    // music bed -- and the screen router hides that screen and stops the graph
+    // in the same tick, so a visitor loading `#/watch` directly heard the replay
+    // player's bed loop behind a screen they could not see, permanently.
+    const context = createFakeContext();
+    const sink = createAudioBus({
+      AudioContext: asConstructor(() => context),
+      fetch: createCountingFetch(okResponse),
+    });
+
+    sink?.play(CUES.music);
+    // Not settled: the fetch and the decode are still in flight, exactly as they
+    // are on a real page one tick after mount.
+    sink?.stopAll();
+    await settle();
+
+    expect(context.sources()).toStrictEqual([]);
+
+    // And the sink is not poisoned by it: the next cue plays normally.
+    sink?.play(CUES.music);
+    await settle();
+    expect(context.sources()).toHaveLength(1);
+    expect(context.sources()[0].started()).toStrictEqual([0]);
+  });
+
   it('plays again after a stopAll: the sink is reusable, not spent', async () => {
     const context = createFakeContext();
     const sink = createAudioBus({

@@ -1,6 +1,6 @@
 {
   "label": "story-12-9",
-  "ranAt": "2026-08-11T10:20:49.874Z",
+  "ranAt": "2026-08-11T10:56:24.557Z",
   "checks": [
     {
       "id": "hidden-screens-are-idle-on-load-desktop",
@@ -15,7 +15,7 @@
     {
       "id": "audio-starts-on-first-gesture",
       "ok": true,
-      "detail": "clicked 1421,896 over <body>: context suspended -> running, sources started 1 -> 1, gain writes music/sfx/voice 7/7/7"
+      "detail": "clicked 1436,896 over <html> on #/watch: context suspended -> running, sources started 4 -> 6 within 700ms, looping sources live 0, gain writes music/sfx/voice 202/202/202"
     },
     {
       "id": "audio-cues-resolve",
@@ -25,7 +25,7 @@
     {
       "id": "sound-off-survives-a-reload",
       "ok": true,
-      "detail": "after a reload the switch reads aria-pressed=false and 0 source(s) started (context running)"
+      "detail": "after a reload straight to #/watch the page switch reads aria-pressed=false and Spectate's own button false; 0 source(s) started and 0 looping source(s) live (context running)"
     },
     {
       "id": "one-screen-at-a-time-desktop",
@@ -55,12 +55,12 @@
     {
       "id": "arcade-input-moves-fighter",
       "ok": true,
-      "detail": "arena hash -2049022087 -> 1942658084"
+      "detail": "arena hash -2049022087 -> 2126224289"
     },
     {
       "id": "stage-parallax-has-depth",
       "ok": true,
-      "detail": "far strip slid 8px, near strip slid 106px (near must exceed far, far must exceed 0)"
+      "detail": "far strip slid 8px, near strip slid 101px (near must exceed far, far must exceed 0)"
     },
     {
       "id": "fighters-inside-frame-at-the-wall",
@@ -70,27 +70,27 @@
     {
       "id": "canvas-not-blank-desktop",
       "ok": true,
-      "detail": "3 canvas(es), ink app:73.4% arcade:70.9% spectate:71.9%"
+      "detail": "3 canvas(es), ink app:73.4% arcade:70.9% spectate:72.2%"
     },
     {
       "id": "fighters-inside-frame-desktop",
       "ok": true,
-      "detail": "app edge=0 span=338..642 of 960 | arcade edge=0 span=416..535 of 960 | spectate edge=0 span=394..564 of 960"
+      "detail": "app edge=0 span=338..642 of 960 | arcade edge=0 span=416..534 of 960 | spectate edge=0 span=379..604 of 960"
     },
     {
       "id": "fight-is-centred-desktop",
       "ok": true,
-      "detail": "app ink centre 490 of 960 | arcade ink centre 476 of 960 | spectate ink centre 479 of 960"
+      "detail": "app ink centre 490 of 960 | arcade ink centre 475 of 960 | spectate ink centre 492 of 960"
     },
     {
       "id": "spectate-animates",
       "ok": true,
-      "detail": "hash -1067444950 -> 1014436481"
+      "detail": "hash 814168680 -> 502952747"
     },
     {
       "id": "spectate-shows-an-ultimate",
       "ok": true,
-      "detail": "showcase spectate-04: letterbox seen, caster-aura ink on a cinematic frame peaked at 60 (min 30)"
+      "detail": "showcase spectate-04: letterbox seen, caster-aura ink on a cinematic frame peaked at 2508 (min 30)"
     },
     {
       "id": "hidden-screens-are-idle-desktop",
@@ -100,12 +100,12 @@
     {
       "id": "hidden-screens-are-silent",
       "ok": true,
-      "detail": "shown (#/watch) wrote 129 bus gains; hidden (on #/play, whose own screen has no audio) wrote 0; sources started so far 56, per-bus writes music/sfx/voice 1334/1334/1334"
+      "detail": "shown (#/watch) wrote 129 bus gains with 1 looping source(s) live; hidden (on #/play, whose own screen has no audio of its own) wrote 0 with 0 live; sources started so far 34, per-bus writes music/sfx/voice 986/986/986"
     },
     {
       "id": "hud-has-all-five",
       "ok": true,
-      "detail": "/replay 11 regions ok (portrait colours 1497/1546, timer gold 105) | /play 11 regions ok (portrait colours 1457/1490, timer gold 102) | /watch 11 regions ok (portrait colours 1286/1313, timer gold 126)"
+      "detail": "/replay 11 regions ok (portrait colours 1457/1490, timer gold 105) | /play 11 regions ok (portrait colours 1457/1490, timer gold 102) | /watch 11 regions ok (portrait colours 1457/1490, timer gold 131)"
     },
     {
       "id": "hud-no-overlap",
@@ -140,12 +140,12 @@
     {
       "id": "hit-reads-as-impact",
       "ok": true,
-      "detail": "#app blob 0..5892 (min 900); #spectate blob 0..7219"
+      "detail": "#app blob 0..5892 (min 900); #spectate blob 0..12680"
     },
     {
       "id": "no-debug-hitbox",
       "ok": true,
-      "detail": "35 arena frames sampled across #app/#spectate/#arcade, 0 with a hollow warn box"
+      "detail": "30 arena frames sampled across #app/#spectate/#arcade, 0 with a hollow warn box"
     },
     {
       "id": "character-select-reachable",
@@ -195,17 +195,17 @@
     {
       "id": "canvas-not-blank-mobile",
       "ok": true,
-      "detail": "3 canvas(es), ink app:73.4% arcade:70.3% spectate:70.5%"
+      "detail": "3 canvas(es), ink app:73.4% arcade:70.3% spectate:70.4%"
     },
     {
       "id": "fighters-inside-frame-mobile",
       "ok": true,
-      "detail": "app edge=0 span=338..642 of 960 | arcade edge=0 span=322..629 of 960 | spectate edge=0 span=355..578 of 960"
+      "detail": "app edge=0 span=338..642 of 960 | arcade edge=0 span=322..629 of 960 | spectate edge=0 span=417..533 of 960"
     },
     {
       "id": "fight-is-centred-mobile",
       "ok": true,
-      "detail": "app ink centre 490 of 960 | arcade ink centre 476 of 960 | spectate ink centre 467 of 960"
+      "detail": "app ink centre 490 of 960 | arcade ink centre 476 of 960 | spectate ink centre 475 of 960"
     },
     {
       "id": "hidden-screens-are-idle-mobile",

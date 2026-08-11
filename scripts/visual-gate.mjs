@@ -1235,6 +1235,13 @@ const ultimatePlateProbe = (hostSelector) => `(() => {
  *   suspended plays when the context resumes. So this counts *cues that fired*,
  *   which is what "no source starts while muted" and "the fight becomes audible"
  *   are both statements about.
+ * - **looping sources still live.** Started with `loop === true` and not yet
+ *   stopped: the music bed, and nothing else in this app. An independent review
+ *   of this story pointed out that a *leaked* bed -- the failure
+ *   `hidden-screens-are-silent` was written for -- writes no gains and starts no
+ *   source, because it is a buffer that is already playing, so a check reading
+ *   only the two counters above would pass on a hidden screen with music
+ *   audibly running. This one is the statement about audibility.
  * - **gain writes per bus.** `createAudioBus` builds exactly three `GainNode`s,
  *   in the order music, sfx, voice, and the director writes all three on every
  *   frame it presents. Zero writes on a bus is a director that never ran; the
@@ -1245,7 +1252,7 @@ const ultimatePlateProbe = (hostSelector) => `(() => {
  * would report the gate's own context instead of the page's.
  */
 const AUDIO_INSTRUMENT = `(() => {
-  const stats = { started: 0, gainWrites: [0, 0, 0], contexts: 0 };
+  const stats = { started: 0, loopsLive: 0, gainWrites: [0, 0, 0], contexts: 0 };
   window.__tbAudioStats = stats;
   const Ctx = window.AudioContext;
   if (typeof Ctx !== 'function') return;
@@ -1261,11 +1268,30 @@ const AUDIO_INSTRUMENT = `(() => {
   Ctx.prototype.createBufferSource = function () {
     note(this);
     const node = createSource.call(this);
+    const live = { looping: false, stopped: false };
     const start = node.start.bind(node);
     node.start = (...args) => {
       stats.started += 1;
+      // \`audio-bus.ts\` assigns \`source.loop\` before it calls \`start(0)\`, so the
+      // flag is readable here and the bed is the only source that carries it.
+      if (node.loop === true) {
+        live.looping = true;
+        stats.loopsLive += 1;
+      }
       return start(...args);
     };
+    if (typeof node.stop === 'function') {
+      const stop = node.stop.bind(node);
+      node.stop = (...args) => {
+        // Once per source: \`stopAll\` may be called twice over the same set, and
+        // a bed counted down twice would report a negative live count.
+        if (live.looping && !live.stopped) {
+          live.stopped = true;
+          stats.loopsLive -= 1;
+        }
+        return stop(...args);
+      };
+    }
     return node;
   };
 
@@ -1297,10 +1323,11 @@ const AUDIO_INSTRUMENT = `(() => {
 
 /** The counters plus the page context's own state, read after the fact. */
 const AUDIO_STATS_PROBE = `(() => {
-  const stats = window.__tbAudioStats ?? { started: -1, gainWrites: [-1, -1, -1], contexts: 0 };
+  const stats = window.__tbAudioStats ?? { started: -1, loopsLive: -1, gainWrites: [-1, -1, -1], contexts: 0 };
   const context = window.__tbAudioContext;
   return {
     started: stats.started,
+    loopsLive: stats.loopsLive,
     gainWrites: stats.gainWrites,
     contexts: stats.contexts,
     state: context ? context.state : 'none',
@@ -2026,25 +2053,46 @@ async function main() {
         );
 
         // --- audio-starts-on-first-gesture ----------------------------------
-        // Two samples around one trusted click. Before it, the graph exists and
-        // the context is suspended -- which is correct and is what Chrome's
-        // allowlisted autoplay notice describes. After it, the context is
-        // running and sources have started, which is the fight becoming audible.
+        // A fresh document at `#/watch`, then one trusted click, then a *delta*.
         //
-        // Sources are counted rather than the context state alone, because a
-        // resumed context with nothing on it is silence: `audio-bus.ts` fetches
-        // and decodes a cue on first use, so a page whose cue names all 404 would
-        // resume happily and play nothing.
+        // Both halves of that are a correction an independent review of this
+        // story made, and the first version of this check was green for the
+        // wrong reason in exactly the way this repository keeps shipping. It
+        // read `after.started > 0` on the landing route, and reported
+        // `1 -> 1`: the one source was the demo player's bed, started during
+        // mount and *already stopped* by the router's construction-time
+        // `onHide`. The click started nothing, the page was silent, and the
+        // check passed on a counter any build satisfies.
+        //
+        // So it is measured where a gesture is supposed to make a difference --
+        // the watch screen, whose stream is running and dense with hits -- and
+        // it requires the count to *rise* after the click. The context reaching
+        // `running` is the arm; a source starting after that is the sound.
+        await load(`${viewport.name}-armed`, '/watch');
+        await sleep(2500);
         const before = await cdp.evaluate(AUDIO_STATS_PROBE);
         const clicked = await clickSomewhere();
-        await sleep(1500);
-        const after = await cdp.evaluate(AUDIO_STATS_PROBE);
+        // Polled rather than one long sleep: the bed and the first hits arrive
+        // within a second on a stream that is already playing, and a poll that
+        // breaks early keeps the gate's running time honest. The ceiling is
+        // generous because a quiet stretch of a Match is a fact about the film,
+        // not about the wiring.
+        const armed = { stats: before, waitedMs: 0 };
+        for (let sample = 0; sample < 12; sample += 1) {
+          await sleep(700);
+          armed.waitedMs += 700;
+          armed.stats = await cdp.evaluate(AUDIO_STATS_PROBE);
+          if (armed.stats.state === 'running' && armed.stats.started > before.started) {
+            break;
+          }
+        }
+        const after = armed.stats;
         record(
           'audio-starts-on-first-gesture',
-          clicked !== null && after.state === 'running' && after.started > 0,
+          clicked !== null && after.state === 'running' && after.started > before.started,
           clicked === null
             ? 'found nowhere on the page to click that was not a control'
-            : `clicked ${clicked.x},${clicked.y} over <${clicked.over}>: context ${before.state} -> ${after.state}, sources started ${before.started} -> ${after.started}, gain writes music/sfx/voice ${after.gainWrites.join('/')}`,
+            : `clicked ${clicked.x},${clicked.y} over <${clicked.over}> on #/watch: context ${before.state} -> ${after.state}, sources started ${before.started} -> ${after.started} within ${armed.waitedMs}ms, looping sources live ${after.loopsLive}, gain writes music/sfx/voice ${after.gainWrites.join('/')}`,
         );
 
         // --- audio-cues-resolve ---------------------------------------------
@@ -2061,25 +2109,31 @@ async function main() {
         );
 
         // --- the inverted arm: off stays off, and stays silent ---------------
-        // The same check with the switch the other way. A preference that did
-        // not survive a reload would be a switch that lies, and a muted page
-        // that still started sources would be a mute in the label only.
+        // The same measurement with the switch the other way, and on the same
+        // screen -- which is what makes the zero mean something. Measured on the
+        // landing route it would be a zero every build produces; measured on the
+        // watch screen it is a zero taken where the run above counted sources
+        // rising. A preference that did not survive a reload would be a switch
+        // that lies; a muted page that still started sources would be a mute in
+        // the label only.
         const turnedOff = await cdp.evaluate(setSoundSwitch(false));
-        await load(`${viewport.name}-muted`, '/');
+        await load(`${viewport.name}-muted`, '/watch');
         await sleep(2500);
         const mutedControl = await cdp.evaluate(SOUND_CONTROL_PROBE);
         await clickSomewhere();
-        await sleep(1500);
+        await sleep(armed.waitedMs + 2100);
         const mutedStats = await cdp.evaluate(AUDIO_STATS_PROBE);
         record(
           'sound-off-survives-a-reload',
           turnedOff.ok === true &&
             mutedControl.shell !== null &&
             mutedControl.shell.pressed === 'false' &&
-            mutedStats.started === 0,
+            mutedControl.spectate?.pressed !== 'true' &&
+            mutedStats.started === 0 &&
+            mutedStats.loopsLive === 0,
           turnedOff.ok !== true
             ? `could not turn the sound off: ${turnedOff.why ?? 'unknown'}`
-            : `after a reload the switch reads aria-pressed=${String(mutedControl.shell?.pressed)} and ${mutedStats.started} source(s) started (context ${mutedStats.state})`,
+            : `after a reload straight to #/watch the page switch reads aria-pressed=${String(mutedControl.shell?.pressed)} and Spectate's own button ${String(mutedControl.spectate?.pressed)}; ${mutedStats.started} source(s) started and ${mutedStats.loopsLive} looping source(s) live (context ${mutedStats.state})`,
         );
 
         // Back to the default for the rest of the run: every capture below, and
@@ -2580,10 +2634,22 @@ async function main() {
         const drivenOnPlay = writes(hiddenSoundAfter) - writes(hiddenSoundBefore);
         record(
           'hidden-screens-are-silent',
-          drivenOnWatch > 0 && drivenOnPlay === 0,
+          // Three conditions, and the third is an independent review's
+          // correction. Gain writes prove a *director* stopped, which is not the
+          // same claim as sound stopping: the music bed is a looping source that
+          // writes nothing and starts nothing once it is playing, so a build
+          // that regressed `startup.ts`'s `stopAll` on hide would leave music
+          // audibly running on a screen nobody can see and report zero writes.
+          // `loopsLive` is the counter that can see it -- and it is asked of the
+          // shown screen too, so "the bed is running here and not there" is one
+          // statement rather than two hopes.
+          drivenOnWatch > 0 &&
+            watchingAfter.loopsLive > 0 &&
+            drivenOnPlay === 0 &&
+            hiddenSoundAfter.loopsLive === 0,
           drivenOnWatch === 0
             ? `the watch screen wrote no bus gains in ${String(ANIMATION_SAMPLE_MS)}ms, so nothing was measured — a shown screen that drives no audio is the failure this check inverts (page switch ${String(buttons.shell?.pressed)}, spectate button ${String(buttons.spectate?.pressed)})`
-            : `shown (#/watch) wrote ${drivenOnWatch} bus gains; hidden (on #/play, whose own screen has no audio) wrote ${drivenOnPlay}; sources started so far ${hiddenSoundAfter.started}, per-bus writes music/sfx/voice ${hiddenSoundAfter.gainWrites.join('/')}`,
+            : `shown (#/watch) wrote ${drivenOnWatch} bus gains with ${watchingAfter.loopsLive} looping source(s) live; hidden (on #/play, whose own screen has no audio of its own) wrote ${drivenOnPlay} with ${hiddenSoundAfter.loopsLive} live; sources started so far ${hiddenSoundAfter.started}, per-bus writes music/sfx/voice ${hiddenSoundAfter.gainWrites.join('/')}`,
         );
       }
 

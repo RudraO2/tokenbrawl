@@ -1230,6 +1230,12 @@ body {
  * one attribute carries both the announced state and the visible one, so a
  * button that said "Sound: on" while reading as off to a screen reader is not
  * expressible.
+ *
+ * Spectate's own sound button carries this class too (`spectate/panel.ts`), so
+ * the two controls for one bit look like two controls for one bit. An
+ * independent review of this story found them reading the same word in two
+ * visual grammars -- one accent-filled and engaged, one inert -- which is the
+ * visible half of a state that can disagree with itself.
  */
 .tb-sound-toggle[aria-pressed='true'] {
   background: var(--tb-accent);

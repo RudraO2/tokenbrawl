@@ -240,7 +240,7 @@ export function spectateMarkup(entries: readonly SpectateManifestEntry[] = []): 
     </div>
     <p class="tb-spectate-status" data-spectate-status role="status" aria-live="polite"></p>
     <button class="tb-button tb-spectate-play" type="button" data-spectate-play>${PLAY_LABEL.pause}</button>
-    <button class="tb-button tb-spectate-sound" type="button" data-spectate-sound aria-pressed="false">${SOUND_LABEL.off}</button>
+    <button class="tb-button tb-sound-toggle tb-spectate-sound" type="button" data-spectate-sound aria-pressed="false">${SOUND_LABEL.off}</button>
     <div class="tb-spectate-picker" data-spectate-picker>${pickerMarkup(entries)}</div>
   `;
 }
@@ -574,10 +574,24 @@ export function mountSpectatePanel(host: SpectateHost, deps: SpectatePanelDeps):
   renderSound();
   soundButton.addEventListener('click', () => {
     const next = !audio.enabled;
-    setAudioEnabled(next);
-    // Story 12.9. The visitor's own press, reported to the shell so the page's
-    // control agrees with the one they just used. See `onAudioToggle`.
+    // Story 12.9, and the order is load-bearing. Report *first*, then apply.
+    //
+    // The sink this panel holds is gated by the page's switch (`startup.ts`),
+    // so pressing this button while the page is muted used to enable the panel
+    // against a closed gate: `setAudioEnabled` fires clock frame 0's looping
+    // music bed, the gate drops it, and the shell's own call a moment later is
+    // an idempotent no-op because `audio.enabled` is already true. Both buttons
+    // then read "Sound: on" over a stream with hits and no bed under them until
+    // the next entry -- which is the exact "hits over silence" failure `rearm`
+    // exists to prevent, arriving through call ordering. An independent review
+    // of this story found it.
+    //
+    // Reporting first opens the gate before anything is played: the shell's
+    // `onChange` reaches back into `setAudioEnabled` with the gate already open,
+    // and the call below is then the no-op. With no shell control listening
+    // (`onAudioToggle` absent), the call below is still what does the work.
     deps.onAudioToggle?.(next);
+    setAudioEnabled(next);
   });
 
   renderPlay();

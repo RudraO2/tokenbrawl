@@ -227,10 +227,38 @@ export function createAudioBus(config: AudioBusConfig): AudioSink | null {
    */
   const playing = new Set<AudioBufferSourceLike>();
 
+  /**
+   * How many times everything has been stopped. Story 12.9.
+   *
+   * `stopAll` could only stop sources that already *existed*, and a cue is
+   * started one or two awaits after it is asked for -- the fetch and the decode.
+   * So a cue requested just before a stop started playing just after it, with
+   * nothing left to stop it. For a one-shot that is a stray sound; for the
+   * looping music bed it is permanent.
+   *
+   * It is not theoretical. `startup.ts` paints the player's frame 0 (which asks
+   * for the bed) and the screen router then hides that screen and calls
+   * `stopAll` in the same tick, so a visitor loading `#/watch` directly got the
+   * *replay player's* bed looping over a screen they could not see, for the rest
+   * of the session. The visual gate's `audio-starts-on-first-gesture` found it
+   * as one looping source live on a surface whose own audio had never started.
+   *
+   * A counter rather than a flag per cue: "stop everything" is a statement about
+   * a moment, and anything asked for before that moment is stale however long
+   * its network takes.
+   */
+  const stopped = { generation: 0 };
+
   async function playCue(cue: AudioCue): Promise<void> {
+    const generation = stopped.generation;
     try {
       const buffer = await bufferFor(cue.name);
       if (buffer === null || buffer === undefined) {
+        return;
+      }
+      if (stopped.generation !== generation) {
+        // Everything was stopped while this cue was still arriving. Starting it
+        // now would be starting a sound the page has already decided is over.
         return;
       }
       const source = context.createBufferSource();
@@ -260,6 +288,8 @@ export function createAudioBus(config: AudioBusConfig): AudioSink | null {
       void playCue(cue);
     },
     stopAll: (): void => {
+      // First, so a cue still in flight (see `stopped`) cannot start after this.
+      stopped.generation += 1;
       // Each source independently: one that has already ended throws on `stop`
       // in some engines, and one bad source must not leave the rest of a stale
       // Match's audio playing under the new one.

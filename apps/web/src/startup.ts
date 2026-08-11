@@ -1639,11 +1639,7 @@ export async function startup(globals: BrowserGlobals): Promise<StartupResult | 
      * (`/play`, `/select`, `/byok`, `/`) needs nothing done -- the next Match
      * that mounts starts its own bed through `mountPlayer`.
      */
-    soundChanged.apply = (enabled: boolean): void => {
-      // Flipping a switch is a gesture, and it may be the first one on the
-      // page: a visitor whose only interaction is turning sound back on must
-      // not have to press something else to be heard.
-      sink?.unlock();
+    const applySoundToCurrentScreen = (enabled: boolean): void => {
       if (!enabled) {
         spectatePanel?.setAudioEnabled(false);
         sink?.stopAll();
@@ -1657,6 +1653,34 @@ export async function startup(globals: BrowserGlobals): Promise<StartupResult | 
         player.mounted.rearmAudio();
       }
     };
+
+    soundChanged.apply = (enabled: boolean): void => {
+      // Flipping a switch is a gesture, and it may be the first one on the
+      // page: a visitor whose only interaction is turning sound back on must
+      // not have to press something else to be heard. Only here, and not in
+      // `applySoundToCurrentScreen` below -- resuming a context nobody has
+      // touched yet is a browser policy violation, not an unlock.
+      sink?.unlock();
+      applySoundToCurrentScreen(enabled);
+    };
+
+    /**
+     * Tell the screen that is *already* showing what the switch says. Story 12.9.
+     *
+     * The router's first apply deliberately fires `onHide` for every other
+     * screen and **no `onShow` at all** -- the panels have already mounted and
+     * started themselves, so showing the one that is showing would restart a
+     * clock rather than leave it alone (`shell/router.ts`). Correct for a clock,
+     * and wrong for sound: nothing had told the panel what the page's switch
+     * said, so a visitor landing straight on `#/watch` -- a bookmark, a shared
+     * link, a reload, which is a route this product deliberately supports --
+     * watched a silent stream under a control reading "Sound: on", while the
+     * *replay player's* bed looped behind a screen they could not see. The
+     * visual gate's `audio-starts-on-first-gesture` is what found it.
+     *
+     * After the router rather than before, because it reads `current()`.
+     */
+    applySoundToCurrentScreen(soundControl?.enabled() ?? true);
 
     return {
       mounted: demoPlayer,

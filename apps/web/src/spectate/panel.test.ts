@@ -8,6 +8,7 @@ import { createFighterEnvironment } from '../../../../packages/env-fighter/src/e
 import { buildDemoLog } from '../testing/demo-log';
 import { buildReplayFilm, type ReplayFilm } from '../replay/film';
 import { createBlockArtist } from '../render/artist';
+import { createGatedSink } from '../render/audio';
 import type { AudioCue, AudioSink } from '../render/audio';
 import type { Canvas2D } from '../render/canvas2d';
 import { DEFAULT_JUICE_TUNING, arenaFor, buildJuiceTrack, type JuiceTrack } from '../render/juice';
@@ -855,6 +856,68 @@ describe('the Spectate panel (Story 9.3)', () => {
       // And the gains really are being written every frame after the toggle,
       // which is the state half of the director's contract.
       expect(recording.gains.length).toBeGreaterThan(30);
+    });
+
+    it('reports the press before it acts on it, so a gated sink is open by then (Story 12.9)', async () => {
+      // The defect an independent review of Story 12.9 found, as a test.
+      //
+      // The sink this panel holds is gated by the page's sound switch. Enabling
+      // *then* reporting meant the enable's own frame-0 bed was played into a
+      // closed gate and dropped, and the shell's call back into
+      // `setAudioEnabled` was an idempotent no-op because the panel already read
+      // as enabled -- so the stream ran with hits and no music under them until
+      // the next entry. Order is the whole fix, and this is what pins it.
+      const host = createHost();
+      const driver = createDriver();
+      const recording = createRecordingSink();
+      const open = { on: false };
+      // The real thing this panel is handed: `createGatedSink` over the page's
+      // graph, with the page's switch as the gate.
+      const gated = createGatedSink(recording.sink, () => open.on);
+      mountSpectatePanel(host, {
+        ...baseDeps(driver),
+        sink: gated,
+        // What `startup.ts` does with the report: open the gate.
+        onAudioToggle: (enabled) => {
+          open.on = enabled;
+        },
+      });
+      await flush();
+      driver.pump(5);
+
+      host.fire('[data-spectate-sound]', 'click');
+
+      // The bed reached the graph rather than a closed gate.
+      expect(recording.played.filter((cue) => cue.loop && cue.bus === 'music').length).toBe(1);
+      expect(host.node('[data-spectate-sound]').innerHTML).toContain('on');
+    });
+
+    it('tells the page it was pressed, and only when it was pressed (Story 12.9)', async () => {
+      // The page's switch is the source of truth and this button writes into
+      // it -- but only on a visitor's press. `setAudioEnabled` is also what the
+      // router calls on every show and hide, and reporting *that* would flip the
+      // page's switch off every time somebody navigated away from the watch
+      // screen.
+      const host = createHost();
+      const driver = createDriver();
+      const recording = createRecordingSink();
+      const reported: boolean[] = [];
+      const panel = mountSpectatePanel(host, {
+        ...baseDeps(driver),
+        sink: recording.sink,
+        onAudioToggle: (enabled) => reported.push(enabled),
+      });
+      await flush();
+
+      host.fire('[data-spectate-sound]', 'click');
+      expect(reported).toStrictEqual([true]);
+
+      panel.setAudioEnabled(false);
+      panel.setAudioEnabled(true);
+      expect(reported).toStrictEqual([true]);
+
+      host.fire('[data-spectate-sound]', 'click');
+      expect(reported).toStrictEqual([true, false]);
     });
 
     it('enabling on the very first frame does not double the bed either', async () => {

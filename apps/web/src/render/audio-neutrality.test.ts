@@ -15,6 +15,7 @@ import {
   type AudioSink,
   type AudioTuning,
 } from './audio';
+import type { RosterPair } from './roster';
 
 /**
  * Story 9.6, INV-2, INV-3 and AD-15: the audio must not touch the hash, and
@@ -354,5 +355,100 @@ describe('nothing in the mix can reveal how long an Agent took (AC5, INV-3)', ()
     expect(runs[0].cues()).toStrictEqual(runs[1].cues());
     expect(runs[0].gains()).toStrictEqual(runs[1].gains());
     expect(runs[0].cues().length).toBeGreaterThan(0);
+  });
+});
+
+/**
+ * Story 12.9: the per-character path is subject to every invariant above.
+ *
+ * The cases in this file all call `buildAudioTrack(juice, tuning)` with no
+ * roster, so until this block the branch that resolves a fighter's own cues was
+ * outside the sweep the story's Test plan puts it under. An independent review
+ * of this story pointed that out. No defect follows -- `sfxNameFor` and
+ * `voiceNameFor` are pure lookups on `event.agentIndex` and read no clock -- but
+ * an invariant asserted only over the table the story did not change is not
+ * asserted over the story.
+ */
+describe('the per-character cues are hash-neutral and latency-blind too (Story 12.9)', () => {
+  const ROSTERS: readonly RosterPair[] = [
+    ['clawde', 'chatty'],
+    ['gemini', 'grokk'],
+  ];
+
+  it('re-derives the same hash after a full playback under every roster', async () => {
+    const log = await buildDemoLog();
+    const film = buildReplayFilm(log, createFighterEnvironment());
+    const before = film.finalStateHash;
+    const options = { config: DEFAULT_FIGHTER_CONFIG, viewport: VIEWPORT };
+
+    for (const roster of ROSTERS) {
+      const ctx = createSilentCanvas();
+      const sink = createRecordingSink();
+      const juice = buildJuiceTrack(film.frames);
+      const director = createAudioDirector({
+        track: buildAudioTrack(juice, DEFAULT_AUDIO_TUNING, roster),
+        sink,
+      });
+      for (let index = 0; index < juice.frameCount; index += 1) {
+        drawJuicedFrame(ctx, film.frames[juice.filmIndexAt(index)], juice.at(index), options);
+        director.atFrame(index);
+      }
+      // Non-vacuous: this roster's own samples really were among what played.
+      expect(
+        sink.cues().some((cue) => cue.name.includes(roster[0]) || cue.name.includes(roster[1])),
+      ).toBe(true);
+
+      const rederived = buildReplayFilm(log, createFighterEnvironment());
+      expect(rederived.finalStateHash).toBe(before);
+      expect(rederived.matchesRecordedHash).toBe(true);
+    }
+  });
+
+  it('changes which samples play and nothing else about the mix', async () => {
+    // The gains, the frame count and the *shape* of the cue stream are the same
+    // under any roster: a fighter's identity chooses a sample, never a moment.
+    // Which is also the INV-3 claim, from the other side -- an identity is the
+    // visitor's pick, and a pick is not a latency.
+    const log = await buildDemoLog();
+    const film = buildReplayFilm(log, createFighterEnvironment());
+    const juice = buildJuiceTrack(film.frames);
+
+    const runs = ROSTERS.map((roster) => {
+      const sink = createRecordingSink();
+      const director = createAudioDirector({
+        track: buildAudioTrack(juice, DEFAULT_AUDIO_TUNING, roster),
+        sink,
+      });
+      for (let index = 0; index < juice.frameCount; index += 1) {
+        director.atFrame(index);
+      }
+      return sink;
+    });
+
+    expect(runs[0].gains()).toStrictEqual(runs[1].gains());
+    expect(runs[0].cues().map((cue) => cue.bus)).toStrictEqual(
+      runs[1].cues().map((cue) => cue.bus),
+    );
+    expect(runs[0].cues().map((cue) => cue.name)).not.toStrictEqual(
+      runs[1].cues().map((cue) => cue.name),
+    );
+  });
+
+  it('carries no latency-derived field on a per-character cue either', async () => {
+    const film = buildReplayFilm(await buildDemoLog(), createFighterEnvironment());
+    const juice = buildJuiceTrack(film.frames);
+    const sink = createRecordingSink();
+    const director = createAudioDirector({
+      track: buildAudioTrack(juice, DEFAULT_AUDIO_TUNING, ['gemini', 'grokk']),
+      sink,
+    });
+    for (let index = 0; index < juice.frameCount; index += 1) {
+      director.atFrame(index);
+    }
+
+    expect(sink.cues().length).toBeGreaterThan(0);
+    for (const cue of sink.cues()) {
+      expect(Object.keys(cue).sort()).toStrictEqual(['bus', 'loop', 'name']);
+    }
   });
 });
