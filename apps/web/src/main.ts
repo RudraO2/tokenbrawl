@@ -548,6 +548,18 @@ export interface ReasoningView {
   readonly bodyModifier: string;
   /** Verbatim provider response. Shown whenever there is one, required when the call was a Parse Failure. */
   readonly rawResponse: string | null;
+  /**
+   * Which provider served this call, and at which endpoint (Story 12.12, INV-6).
+   *
+   * Empty strings when the log recorded none, so the two are one shape for the
+   * renderer rather than two nullable branches in a template. Displayed rather
+   * than merely logged because INV-6's whole point is that a published result is
+   * attributable: "llama-3.3-70b" means nothing without the endpoint that served
+   * it, and the frozen `DecisionEntry` has carried both since Story 3.1 with no
+   * surface in the product showing either.
+   */
+  readonly provider: string;
+  readonly endpoint: string;
   /** The whole panel as one string, for the screen-reader announcement. */
   readonly announcement: string;
 }
@@ -598,6 +610,12 @@ export function reasoningView(
     chips.push({ label: 'Parse failure', modifier: 'tb-chip--failed' });
   }
 
+  // Story 12.12. Read off the lookup, which reads them off the *log* rather than
+  // the sidecar -- so a Decision Point still names its endpoint on a page whose
+  // sheddable reasoning never arrived.
+  const provider = lookup.provider ?? '';
+  const endpoint = lookup.endpoint ?? '';
+
   const view = (body: string, bodyModifier: string, rawResponse: string | null): ReasoningView =>
     Object.freeze({
       heading: agentId,
@@ -606,7 +624,19 @@ export function reasoningView(
       body,
       bodyModifier,
       rawResponse,
-      announcement: [agentId, tickLabel, ...chips.map((chip) => chip.label), body, rawResponse ?? '']
+      provider,
+      endpoint,
+      announcement: [
+        agentId,
+        tickLabel,
+        ...chips.map((chip) => chip.label),
+        // Announced as well as displayed: a screen-reader user reading a
+        // published result needs the attribution as much as a sighted one does.
+        provider === '' ? '' : `Served by ${provider}`,
+        endpoint === '' ? '' : `at ${endpoint}`,
+        body,
+        rawResponse ?? '',
+      ]
         .filter((part) => part.length > 0)
         .join('. '),
     });
@@ -822,15 +852,45 @@ export function renderApp(
         ? ''
         : `<p class="tb-reasoning-label">Raw response</p><pre class="tb-reasoning-raw">${escapeHtml(panelView.rawResponse)}</pre>`;
     const selected = selection.agentIndex === agentIndex ? ' tb-reasoning-card--selected' : '';
+    // Story 12.12, INV-6. A labelled block rather than two more chips: a chip is
+    // a state ("Reflex mode", "Parse failure") and these are attribution, which
+    // is a label-and-value pair. The `data-` hooks are what
+    // `reasoning-panel-shows-text` in `scripts/visual-gate.mjs` reads -- by
+    // attribute rather than by position, so a layout change cannot silently take
+    // the check with it.
+    //
+    // Deliberately NOT a description list. `<dt>` would be the right element and
+    // is unavailable: `source-discipline.test.ts` bans the token `dt` anywhere in
+    // shipped source, because `deltaTime`/`dt` is how an ordinary animation loop
+    // paces itself and that is the exact shape INV-3 forbids. The sweep cannot
+    // tell an HTML tag from a variable, and a sweep loosened to spare one element
+    // is a sweep that stops catching the thing it exists for. It cost this
+    // paragraph and two `<p>`s.
+    const attribution =
+      panelView.provider === '' && panelView.endpoint === ''
+        ? ''
+        : `<div class="tb-reasoning-served" data-panel-served="${String(agentIndex)}">
+        ${
+          panelView.provider === ''
+            ? ''
+            : `<p class="tb-reasoning-label">Provider</p><p class="tb-reasoning-served-value" data-panel-provider>${escapeHtml(panelView.provider)}</p>`
+        }
+        ${
+          panelView.endpoint === ''
+            ? ''
+            : `<p class="tb-reasoning-label">Endpoint</p><p class="tb-reasoning-served-value" data-panel-endpoint>${escapeHtml(panelView.endpoint)}</p>`
+        }
+      </div>`;
 
     return `
-      <article class="tb-reasoning-card${selected}">
+      <article class="tb-reasoning-card${selected}" data-panel-card="${String(agentIndex)}">
         <p class="tb-reasoning-heading">${escapeHtml(panelView.heading)}</p>
         <div class="tb-reasoning-meta">
           ${panelView.tickLabel === '' ? '' : `<span class="tb-chip tb-chip--tick">${escapeHtml(panelView.tickLabel)}</span>`}
           ${chips}
         </div>
-        <p class="tb-reasoning-body ${panelView.bodyModifier}">${escapeHtml(panelView.body)}</p>
+        <p class="tb-reasoning-body ${panelView.bodyModifier}" data-panel-body>${escapeHtml(panelView.body)}</p>
+        ${attribution}
         ${raw}
       </article>
     `;

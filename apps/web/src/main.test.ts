@@ -222,6 +222,11 @@ const READY: ReasoningLookup = {
   rawResponse: null,
   reflexMode: false,
   parseFailure: false,
+  // Story 12.12. `null` here rather than a provider name, so every case below
+  // keeps describing exactly what it describes and the two new cases at the end
+  // of this block are the only ones that speak about attribution.
+  provider: null,
+  endpoint: null,
 };
 
 const HERE: ResolvedDecision = { tick: 120, decisionPoint: 4, polled: true };
@@ -321,6 +326,53 @@ describe('the reasoning panel (4.3)', () => {
     for (const part of ['model-a', 'Tick 90', 'Still committed', 'Reflex mode']) {
       expect(view.announcement).toContain(part);
     }
+  });
+
+  it('shows which provider and endpoint served the call (Story 12.12, INV-6)', () => {
+    const view = reasoningView(
+      {
+        ...READY,
+        reasoning: 'punish the commitment',
+        provider: 'groq',
+        endpoint: 'https://api.groq.com/openai/v1/chat/completions',
+      },
+      HERE,
+      'groq:llama-3.3-70b-versatile',
+    );
+
+    expect(view.provider).toBe('groq');
+    expect(view.endpoint).toBe('https://api.groq.com/openai/v1/chat/completions');
+    // And in the announcement, so the attribution is not sighted-only.
+    expect(view.announcement).toContain('groq');
+    expect(view.announcement).toContain('https://api.groq.com/openai/v1/chat/completions');
+  });
+
+  it('renders no attribution at all when the log recorded none', () => {
+    // Empty strings rather than the string "null": the card omits the block
+    // entirely, and a template interpolating a nullable would print the word.
+    const view = reasoningView({ ...READY, reasoning: 'close the gap' }, HERE, 'model-a');
+
+    expect(view.provider).toBe('');
+    expect(view.endpoint).toBe('');
+    expect(view.announcement).not.toMatch(/Served by/);
+  });
+
+  it('still names the endpoint on a Parse Failure, which is the entry most worth attributing', () => {
+    const view = reasoningView(
+      {
+        ...READY,
+        parseFailure: true,
+        rawResponse: 'I will hold this Decision Point and see what they do next.',
+        provider: 'groq',
+        endpoint: 'https://api.groq.com/openai/v1/chat/completions',
+      },
+      HERE,
+      'groq:openai-gpt-oss-120b',
+    );
+
+    expect(view.bodyModifier).toBe('tb-reasoning--warn');
+    expect(view.provider).toBe('groq');
+    expect(view.endpoint).toBe('https://api.groq.com/openai/v1/chat/completions');
   });
 
   it('says nothing about how long anything took, in any state (INV-3)', () => {

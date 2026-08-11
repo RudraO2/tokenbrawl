@@ -300,6 +300,26 @@ body {
   color: var(--tb-muted);
 }
 
+/*
+ * Story 12.12, INV-6: who served this call, and where.
+ *
+ * An endpoint is a URL, which is data, so it takes the mono face like every
+ * other data value in this panel. It is allowed to wrap rather than to scroll:
+ * the host is the part a reader is checking and truncating it with an ellipsis
+ * would hide exactly that. `overflow-wrap` rather than a fixed break, so a short
+ * endpoint still sits on one line.
+ */
+.tb-reasoning-served {
+  margin: var(--tb-space-2) 0 0;
+}
+
+.tb-reasoning-served-value {
+  margin: 0;
+  font-family: var(--tb-font-mono);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
 /* Verbatim, and it must stay verbatim: Story 1.6 publishes failures to be audited. */
 .tb-reasoning-raw {
   margin: 0;

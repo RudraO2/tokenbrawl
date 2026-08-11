@@ -74,6 +74,23 @@ export interface ReasoningLookup {
   readonly rawResponse: string | null;
   readonly reflexMode: boolean;
   readonly parseFailure: boolean;
+  /**
+   * Which provider served this call, and at which endpoint (Story 12.12, INV-6).
+   *
+   * Read from the **Command Log**, never from the sidecar, and that is the whole
+   * design. INV-6 is "provider and endpoint are logged per call": they are
+   * `DecisionEntry` fields in the frozen contract, `splitReasoning` moves only
+   * `reasoning` and `rawResponse` out, and the sidecar is *sheddable* — a page
+   * whose sidecar never arrives must still be able to say which endpoint served
+   * the Decision Point it is showing. Putting them in the sidecar would make the
+   * one non-sheddable fact about a call depend on the one document playback is
+   * forbidden to wait for.
+   *
+   * `null` means the log recorded none, which is a malformed Deployment entry
+   * rather than an ordinary state — a Baseline Bot records `"bot"` for both.
+   */
+  readonly provider: string | null;
+  readonly endpoint: string | null;
 }
 
 export interface ReasoningSource {
@@ -93,6 +110,15 @@ interface ReasoningBearingEntry {
   readonly rawResponse?: string | null;
   readonly reflexMode?: boolean;
   readonly parseFailure?: boolean;
+  /** Story 12.12, INV-6. Carried by the log itself, never by the sidecar. */
+  readonly provider?: string | null;
+  readonly endpoint?: string | null;
+}
+
+/** Which provider and endpoint served one Decision Point, per the log. */
+interface CallIdentity {
+  readonly provider: string | null;
+  readonly endpoint: string | null;
 }
 
 interface ReasoningBearingLog {
@@ -207,7 +233,14 @@ export function validateReasoningSidecar(candidate: unknown, matchId: string): R
   });
 }
 
-function lookupFrom(status: ReasoningStatus, entry: ReasoningEntry | undefined): ReasoningLookup {
+const NO_IDENTITY: CallIdentity = Object.freeze({ provider: null, endpoint: null });
+
+function lookupFrom(
+  status: ReasoningStatus,
+  entry: ReasoningEntry | undefined,
+  identity: CallIdentity | undefined,
+): ReasoningLookup {
+  const call = identity ?? NO_IDENTITY;
   if (entry === undefined) {
     return Object.freeze({
       status,
@@ -216,6 +249,8 @@ function lookupFrom(status: ReasoningStatus, entry: ReasoningEntry | undefined):
       rawResponse: null,
       reflexMode: false,
       parseFailure: false,
+      provider: call.provider,
+      endpoint: call.endpoint,
     });
   }
   return Object.freeze({
@@ -225,6 +260,8 @@ function lookupFrom(status: ReasoningStatus, entry: ReasoningEntry | undefined):
     rawResponse: entry.rawResponse,
     reflexMode: entry.reflexMode,
     parseFailure: entry.parseFailure,
+    provider: call.provider,
+    endpoint: call.endpoint,
   });
 }
 
@@ -245,9 +282,15 @@ function lookupFrom(status: ReasoningStatus, entry: ReasoningEntry | undefined):
  */
 export function createReasoningSource(log: ReasoningBearingLog): ReasoningSource {
   const inlineEntries = new Map<string, ReasoningEntry>();
+  // Story 12.12. Kept in a *second* map rather than folded into `inlineEntries`,
+  // because the two are looked up from different documents: a sidecar entry
+  // replaces the reasoning text but never the call's identity, so an adopted
+  // sidecar must not be able to blank out which endpoint served the call (INV-6).
+  const identities = new Map<string, CallIdentity>();
   for (const decision of log.decisions) {
+    const key = keyOf(decision.tick, decision.agentIndex);
     inlineEntries.set(
-      keyOf(decision.tick, decision.agentIndex),
+      key,
       Object.freeze({
         tick: decision.tick,
         agentIndex: decision.agentIndex,
@@ -255,6 +298,13 @@ export function createReasoningSource(log: ReasoningBearingLog): ReasoningSource
         rawResponse: decision.rawResponse ?? null,
         reflexMode: decision.reflexMode === true,
         parseFailure: decision.parseFailure === true,
+      }),
+    );
+    identities.set(
+      key,
+      Object.freeze({
+        provider: decision.provider ?? null,
+        endpoint: decision.endpoint ?? null,
       }),
     );
   }
@@ -303,7 +353,7 @@ export function createReasoningSource(log: ReasoningBearingLog): ReasoningSource
       // fallback in every other state. One lookup, four states, so the panel
       // has a single code path (AD-10).
       const entry = state.entries?.get(key) ?? inlineEntries.get(key);
-      return lookupFrom(state.status, entry);
+      return lookupFrom(state.status, entry, identities.get(key));
     },
   });
 }

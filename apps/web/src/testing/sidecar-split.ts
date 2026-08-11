@@ -1,4 +1,9 @@
-import type { CommandLog, DecisionEntry } from '@tokenbrawl/contracts';
+import type {
+  CommandLog,
+  CommandLogV2,
+  DecisionEntry,
+  DecisionEntryV2,
+} from '@tokenbrawl/contracts';
 import {
   REASONING_SIDECAR_VERSION,
   type ReasoningEntry,
@@ -59,6 +64,59 @@ export function splitReasoning(log: CommandLog): {
 
   return {
     log: { ...log, decisions: stripped, reasoningSidecar: DEMO_SIDECAR_PATH },
+    sidecar: {
+      schemaVersion: REASONING_SIDECAR_VERSION,
+      matchId: log.matchId,
+      entries,
+    },
+  };
+}
+
+/**
+ * The same split for a v2 Command Log (Story 12.12).
+ *
+ * A separate function rather than a widened `splitReasoning`, for the reason
+ * `assertSchemaVersionV2` is a separate function from `assertSchemaVersion`: the
+ * two documents are exact-match versions and one signature that accepted either
+ * would let a v1 log be written out under a v2 caller's assumptions. The
+ * *behaviour* is byte-identical -- including the parse-failure exception, which
+ * `command-log.v2.schema.json` requires exactly as v1 does -- so the two bodies
+ * look the same on purpose.
+ *
+ * `provider` and `endpoint` deliberately do NOT move. They are INV-6's per-call
+ * record and `replay/sidecar.ts` reads them off the log, so a page whose
+ * sheddable sidecar never arrives can still say which endpoint served the
+ * Decision Point it is showing.
+ *
+ * `sidecarPath` is a parameter here where the v1 splitter hardcodes the demo's,
+ * because this one has a second caller: `apps/web/scripts/build-exhibition-replay.mts`
+ * writes `exhibition.reasoning.json` beside its own log.
+ */
+export function splitReasoningV2(
+  log: CommandLogV2,
+  sidecarPath: string,
+): {
+  readonly log: CommandLogV2;
+  readonly sidecar: ReasoningSidecar;
+} {
+  const entries: ReasoningEntry[] = log.decisions.map((decision) => ({
+    tick: decision.tick,
+    agentIndex: decision.agentIndex,
+    reasoning: decision.reasoning ?? null,
+    rawResponse: decision.rawResponse ?? null,
+    reflexMode: decision.reflexMode === true,
+    parseFailure: decision.parseFailure === true,
+  }));
+
+  const stripped: DecisionEntryV2[] = log.decisions.map((decision) => {
+    const { reasoning: _reasoning, rawResponse, ...rest } = decision;
+    return decision.parseFailure === true
+      ? { ...rest, rawResponse: rawResponse ?? null }
+      : rest;
+  });
+
+  return {
+    log: { ...log, decisions: stripped, reasoningSidecar: sidecarPath },
     sidecar: {
       schemaVersion: REASONING_SIDECAR_VERSION,
       matchId: log.matchId,
