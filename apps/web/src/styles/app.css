@@ -1209,6 +1209,45 @@ body {
 }
 
 /*
+ * Story 12.9: the page's sound switch, under the nav strip and above every
+ * screen.
+ *
+ * Right-aligned rather than sitting in the nav row itself: the nav answers
+ * "where am I", this answers "is it making noise", and running them together
+ * would make the switch read as a sixth screen. Page chrome, so every
+ * `docs/DESIGN.md` rule applies unchanged -- it borrows `.tb-button` whole and
+ * adds nothing but position.
+ */
+.tb-sound {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: var(--tb-space-3);
+}
+
+/*
+ * On reads as live, in the one accent this palette has, exactly as the current
+ * nav link does. `aria-pressed` is the selector for `.tb-nav-link`'s reason:
+ * one attribute carries both the announced state and the visible one, so a
+ * button that said "Sound: on" while reading as off to a screen reader is not
+ * expressible.
+ */
+.tb-sound-toggle[aria-pressed='true'] {
+  background: var(--tb-accent);
+  color: var(--tb-bg);
+}
+
+/*
+ * Invert, still. `.tb-button:hover` fills with the accent, which on a switch
+ * that is already accent-filled is no feedback at all -- so the "on" state
+ * hovers the other way, back to the ground colour. Same rule, read from the
+ * other end.
+ */
+.tb-sound-toggle[aria-pressed='true']:hover {
+  background: var(--tb-bg);
+  color: var(--tb-ink);
+}
+
+/*
  * Story 12.4: the Spectate stage, which never had a rule of its own.
  *
  * That is why the page scrolled sideways: the canvas carried a 960px backbuffer

@@ -141,6 +141,52 @@ const CONSOLE_ALLOWLIST = [
 /** How long a canvas is watched before it is called static. Two playback frames is not enough. */
 const ANIMATION_SAMPLE_MS = 700;
 
+/**
+ * Every cue name the audio layer can emit (Story 12.9): the seven shared cues in
+ * `DEFAULT_AUDIO_TUNING` plus the twenty in `render/roster.ts`'s `ROSTER_AUDIO`.
+ *
+ * Duplicated here for this file's standing reason -- dependency-free ESM run
+ * straight by Node cannot import a `.ts` module, the same as `STAGE_IDS` and
+ * `HUD_BAND`. What makes the copy safe is the same thing that makes theirs safe:
+ * `apps/web/src/render/audio-assets.test.ts` reads *this literal* off disk and
+ * compares it against the names the two tables actually produce, so a cue added
+ * on one side and forgotten on the other fails the suite in the same change.
+ *
+ * `audio-cues-resolve` fetches all of them. A name with no file behind it is
+ * silent in exactly the way a missing cue is, and nothing on screen says so --
+ * `audio-bus.ts` warns once and caches the name as absent, which is the correct
+ * fail-soft behaviour and completely invisible to a visitor.
+ */
+const AUDIO_CUES = [
+  "music_battle",
+  "sfx_chatty_hit_h",
+  "sfx_chatty_hit_l",
+  "sfx_clawde_hit_h",
+  "sfx_clawde_hit_l",
+  "sfx_gemini_hit_h",
+  "sfx_gemini_hit_l",
+  "sfx_grokk_hit_h",
+  "sfx_grokk_hit_l",
+  "sfx_hit_h",
+  "sfx_hit_l",
+  "sfx_ko",
+  "sfx_special",
+  "vo_chatty_hurt",
+  "vo_chatty_ko",
+  "vo_chatty_transform",
+  "vo_clawde_hurt",
+  "vo_clawde_ko",
+  "vo_clawde_transform",
+  "vo_gemini_hurt",
+  "vo_gemini_ko",
+  "vo_gemini_transform",
+  "vo_grokk_hurt",
+  "vo_grokk_ko",
+  "vo_grokk_transform",
+  "vo_ko",
+  "vo_ultimate"
+];
+
 /** Ink threshold below which a canvas counts as blank. 2% is far under any real frame. */
 const MIN_INK_RATIO = 0.02;
 
@@ -1173,6 +1219,166 @@ const ultimatePlateProbe = (hostSelector) => `(() => {
   return { cinematic, auraPixels };
 })()`;
 
+/**
+ * Story 12.9: the audio graph, counted from inside the page.
+ *
+ * Installed with `Page.addScriptToEvaluateOnNewDocument`, so it is in place
+ * before `boot.ts` constructs anything and survives every navigation the run
+ * makes. Nothing in the app knows it is there: a debug global shipped in
+ * `audio-bus.ts` would be a measurement the product carries for the gate's
+ * benefit, and this file's rule is that what a check measures lives in this file.
+ *
+ * Two numbers, and each answers a question a screenshot cannot:
+ *
+ * - **sources started.** `source.start()` is the only way a sample is heard, and
+ *   it is called whether or not the context is running -- a source started while
+ *   suspended plays when the context resumes. So this counts *cues that fired*,
+ *   which is what "no source starts while muted" and "the fight becomes audible"
+ *   are both statements about.
+ * - **gain writes per bus.** `createAudioBus` builds exactly three `GainNode`s,
+ *   in the order music, sfx, voice, and the director writes all three on every
+ *   frame it presents. Zero writes on a bus is a director that never ran; the
+ *   per-bus split is what the story asks the finding to record.
+ *
+ * `state` is read off the same context the graph was built on -- captured when
+ * the app asks it for a node -- rather than by constructing one here, which
+ * would report the gate's own context instead of the page's.
+ */
+const AUDIO_INSTRUMENT = `(() => {
+  const stats = { started: 0, gainWrites: [0, 0, 0], contexts: 0 };
+  window.__tbAudioStats = stats;
+  const Ctx = window.AudioContext;
+  if (typeof Ctx !== 'function') return;
+
+  const note = (context) => {
+    if (window.__tbAudioContext !== context) {
+      window.__tbAudioContext = context;
+      stats.contexts += 1;
+    }
+  };
+
+  const createSource = Ctx.prototype.createBufferSource;
+  Ctx.prototype.createBufferSource = function () {
+    note(this);
+    const node = createSource.call(this);
+    const start = node.start.bind(node);
+    node.start = (...args) => {
+      stats.started += 1;
+      return start(...args);
+    };
+    return node;
+  };
+
+  // The first three gains this page builds are the three buses, in
+  // createAudioBus's own order (music, sfx, voice). A fourth node would not be a
+  // bus -- the story that added one would have to say so here -- so it is
+  // counted by nothing and reported by nothing.
+  const built = { gains: 0 };
+  const createGain = Ctx.prototype.createGain;
+  Ctx.prototype.createGain = function () {
+    note(this);
+    const node = createGain.call(this);
+    const bus = built.gains;
+    built.gains += 1;
+    if (bus < 3) {
+      const param = node.gain;
+      const descriptor = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(param), 'value');
+      if (descriptor && descriptor.set && descriptor.get) {
+        Object.defineProperty(param, 'value', {
+          configurable: true,
+          get() { return descriptor.get.call(param); },
+          set(next) { stats.gainWrites[bus] += 1; descriptor.set.call(param, next); },
+        });
+      }
+    }
+    return node;
+  };
+})()`;
+
+/** The counters plus the page context's own state, read after the fact. */
+const AUDIO_STATS_PROBE = `(() => {
+  const stats = window.__tbAudioStats ?? { started: -1, gainWrites: [-1, -1, -1], contexts: 0 };
+  const context = window.__tbAudioContext;
+  return {
+    started: stats.started,
+    gainWrites: stats.gainWrites,
+    contexts: stats.contexts,
+    state: context ? context.state : 'none',
+  };
+})()`;
+
+/** The page's sound switch and Spectate's own button, read as a visitor's screen reader would. */
+const SOUND_CONTROL_PROBE = `(() => {
+  const read = (selector) => {
+    const node = document.querySelector(selector);
+    if (!node) return null;
+    return { pressed: node.getAttribute('aria-pressed'), label: (node.textContent || '').trim() };
+  };
+  return { shell: read('[data-sound]'), spectate: read('[data-spectate-sound]') };
+})()`;
+
+/**
+ * A point on the page that a real click can land on without doing anything.
+ *
+ * The gesture below has to be *trusted input* -- `element.click()` from
+ * `Runtime.evaluate` is not user activation and would leave the context
+ * suspended, which is the whole thing AC2 is about -- so it goes through
+ * `Input.dispatchMouseEvent`, which lands wherever the pointer is put. This
+ * finds somewhere harmless: a point whose top element is not a link, a button or
+ * a field, so the click cannot navigate, start a Match or toggle the very switch
+ * the check is reading.
+ */
+const SAFE_CLICK_POINT = `(() => {
+  const width = document.documentElement.clientWidth;
+  const height = document.documentElement.clientHeight;
+  const candidates = [
+    [width - 4, height - 4],
+    [4, height - 4],
+    [Math.round(width / 2), height - 4],
+    [width - 4, Math.round(height / 2)],
+  ];
+  for (const [x, y] of candidates) {
+    const element = document.elementFromPoint(x, y);
+    if (!element) return { x, y, over: 'nothing' };
+    if (!element.closest('a, button, input, select, textarea, [role="button"]')) {
+      return { x, y, over: element.tagName.toLowerCase() };
+    }
+  }
+  return null;
+})()`;
+
+/**
+ * Sets the page's sound switch, through the control a visitor would use.
+ *
+ * A plain `click()` rather than trusted input, deliberately: this one is about
+ * the *switch*, and it must not double as the page's first gesture -- the check
+ * above is what proves a gesture arms the graph, and it would prove nothing if
+ * this had already done it.
+ */
+const setSoundSwitch = (on) => `(() => {
+  const button = document.querySelector('[data-sound]');
+  if (!button) return { ok: false, why: 'no sound control on the page' };
+  const want = ${JSON.stringify(on ? 'true' : 'false')};
+  if (button.getAttribute('aria-pressed') === want) return { ok: true, already: true, pressed: want };
+  button.click();
+  return { ok: true, already: false, pressed: button.getAttribute('aria-pressed') };
+})()`;
+
+/** Fetches every cue the audio layer can name, from the page, and reports the ones that are not 200. */
+const cuesResolveProbe = (names) => `(async () => {
+  const names = ${JSON.stringify(names)};
+  const missing = [];
+  for (const name of names) {
+    try {
+      const response = await fetch('/audio/' + encodeURIComponent(name) + '.mp3');
+      if (!response.ok) missing.push(name + ':' + response.status);
+    } catch (error) {
+      missing.push(name + ':' + String(error));
+    }
+  }
+  return { asked: names.length, missing };
+})()`;
+
 /** Plays the Spectate entry whose picker card carries `data-spectate-pick="<id>"` (Story 12.11). */
 const pickSpectate = (id) => `(() => {
   const card = document.querySelector('[data-spectate-pick="' + ${JSON.stringify(id)} + '"]');
@@ -1703,6 +1909,14 @@ async function main() {
       features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }],
     });
 
+    // --- the audio counters, before the page's first line runs ---------------
+    //
+    // Story 12.9. `addScriptToEvaluateOnNewDocument` runs ahead of `boot.ts` on
+    // every document this run loads, which is what makes "sources started"
+    // countable at all: the graph is built during startup, and a script injected
+    // afterwards would be wrapping a constructor nobody calls again.
+    await cdp.send('Page.addScriptToEvaluateOnNewDocument', { source: AUDIO_INSTRUMENT });
+
     /**
      * Loads the page at `route` as a fresh document.
      *
@@ -1766,6 +1980,122 @@ async function main() {
           ? 'no off-screen canvas found, so nothing was measured'
           : `${idleOnLoadBefore.length} off-screen canvas(es) on the landing screen${movedOnLoad.length === 0 ? ', none repainted' : ` REPAINTED: ${movedOnLoad.map((c) => c.host ?? '?').join(', ')}`}`,
       );
+
+      // --- C0d the sound is on, and armed (Story 12.9) ---------------------
+      //
+      // Desktop only, on the same terms `arcade-live-canvas` is: these three are
+      // page-chrome and page-graph checks rather than layout ones, and the
+      // persistence arm reloads the document twice, which on the mobile pass
+      // would also throw away the running Match the overflow section needs.
+      //
+      // Placed after the idle sample and before the screen walk, because two of
+      // the three are statements about a page nobody has touched yet: the switch
+      // as a first-time visitor finds it, and a graph with no gesture behind it.
+      if (!viewport.mobile) {
+        /** Trusted input at a harmless point. See `SAFE_CLICK_POINT`. */
+        const clickSomewhere = async () => {
+          const point = await cdp.evaluate(SAFE_CLICK_POINT);
+          if (point === null) {
+            return null;
+          }
+          for (const type of ['mousePressed', 'mouseReleased']) {
+            await cdp.send('Input.dispatchMouseEvent', {
+              type,
+              x: point.x,
+              y: point.y,
+              button: 'left',
+              clickCount: 1,
+            });
+          }
+          return point;
+        };
+
+        // --- sound-on-by-default -------------------------------------------
+        // Read off `aria-pressed`, not off the label. The two are the same state
+        // by construction (`shell/sound.ts` writes both from one bit) and the
+        // attribute is the half a screen reader gets, so it is the half worth
+        // failing on. The label is reported so a failure says what a visitor
+        // would have seen.
+        const control = await cdp.evaluate(SOUND_CONTROL_PROBE);
+        record(
+          'sound-on-by-default',
+          control.shell !== null && control.shell.pressed === 'true',
+          control.shell === null
+            ? 'no [data-sound] control on the page at all — the switch a visitor mutes with is missing'
+            : `shell control reads aria-pressed=${control.shell.pressed} "${control.shell.label}"`,
+        );
+
+        // --- audio-starts-on-first-gesture ----------------------------------
+        // Two samples around one trusted click. Before it, the graph exists and
+        // the context is suspended -- which is correct and is what Chrome's
+        // allowlisted autoplay notice describes. After it, the context is
+        // running and sources have started, which is the fight becoming audible.
+        //
+        // Sources are counted rather than the context state alone, because a
+        // resumed context with nothing on it is silence: `audio-bus.ts` fetches
+        // and decodes a cue on first use, so a page whose cue names all 404 would
+        // resume happily and play nothing.
+        const before = await cdp.evaluate(AUDIO_STATS_PROBE);
+        const clicked = await clickSomewhere();
+        await sleep(1500);
+        const after = await cdp.evaluate(AUDIO_STATS_PROBE);
+        record(
+          'audio-starts-on-first-gesture',
+          clicked !== null && after.state === 'running' && after.started > 0,
+          clicked === null
+            ? 'found nowhere on the page to click that was not a control'
+            : `clicked ${clicked.x},${clicked.y} over <${clicked.over}>: context ${before.state} -> ${after.state}, sources started ${before.started} -> ${after.started}, gain writes music/sfx/voice ${after.gainWrites.join('/')}`,
+        );
+
+        // --- audio-cues-resolve ---------------------------------------------
+        // Every name the audio layer can emit, fetched from the page so it goes
+        // through the same origin and the same server a cue does. A 404 here is
+        // a cue that is silent with nothing on screen to say so.
+        const cues = await cdp.evaluate(cuesResolveProbe(AUDIO_CUES));
+        record(
+          'audio-cues-resolve',
+          cues.asked === AUDIO_CUES.length && cues.missing.length === 0,
+          cues.missing.length === 0
+            ? `${cues.asked} cue files, all 200`
+            : `${cues.missing.length} of ${cues.asked} did not resolve: ${cues.missing.join(', ')}`,
+        );
+
+        // --- the inverted arm: off stays off, and stays silent ---------------
+        // The same check with the switch the other way. A preference that did
+        // not survive a reload would be a switch that lies, and a muted page
+        // that still started sources would be a mute in the label only.
+        const turnedOff = await cdp.evaluate(setSoundSwitch(false));
+        await load(`${viewport.name}-muted`, '/');
+        await sleep(2500);
+        const mutedControl = await cdp.evaluate(SOUND_CONTROL_PROBE);
+        await clickSomewhere();
+        await sleep(1500);
+        const mutedStats = await cdp.evaluate(AUDIO_STATS_PROBE);
+        record(
+          'sound-off-survives-a-reload',
+          turnedOff.ok === true &&
+            mutedControl.shell !== null &&
+            mutedControl.shell.pressed === 'false' &&
+            mutedStats.started === 0,
+          turnedOff.ok !== true
+            ? `could not turn the sound off: ${turnedOff.why ?? 'unknown'}`
+            : `after a reload the switch reads aria-pressed=${String(mutedControl.shell?.pressed)} and ${mutedStats.started} source(s) started (context ${mutedStats.state})`,
+        );
+
+        // Back to the default for the rest of the run: every capture below, and
+        // every other check, should see the page a first-time visitor meets.
+        await cdp.evaluate(setSoundSwitch(true));
+        await load(viewport.name, '/');
+        await sleep(2500);
+        const restored = await cdp.evaluate(SOUND_CONTROL_PROBE);
+        if (restored.shell?.pressed !== 'true') {
+          record(
+            'sound-restored-for-the-rest-of-the-run',
+            false,
+            `the switch is still ${String(restored.shell?.pressed)} — every check below this line ran muted`,
+          );
+        }
+      }
 
       // --- C0 the cabinet: one screen at a time, and it fits ----------------
       // Every screen is walked, not just the ones with a canvas: the overflow

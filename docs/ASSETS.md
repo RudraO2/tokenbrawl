@@ -326,6 +326,56 @@ Story 11.5 the seventh, `vo_ultimate` — the announcement the music ducks under
 | `apps/web/public/audio/vo_ko.mp3` | authored in this repo — the author's own prior project's voice line (own IP) | **Author-owned, used with permission** | 2026-08-06 |
 | `apps/web/public/audio/sfx_special.mp3` | authored in this repo — the author's own prior project's Ultimate SFX (own IP), copied byte-for-byte from its `audio/sfx_special.mp3` | **Author-owned, used with permission** | 2026-08-07 |
 | `apps/web/public/audio/vo_ultimate.mp3` | authored in this repo — the author's own prior project's Ultimate announcement (own IP), copied byte-for-byte from its `audio/vo_ultimate.mp3` | **Author-owned, used with permission** | 2026-08-08 |
+| `apps/web/public/audio/sfx_clawde_hit_l.mp3` | authored in this repo — the author's own prior project's per-character SFX (own IP), copied byte-for-byte | **Author-owned, used with permission** | 2026-08-11 |
+| `apps/web/public/audio/sfx_clawde_hit_h.mp3` | authored in this repo — the author's own prior project's per-character SFX (own IP), copied byte-for-byte | **Author-owned, used with permission** | 2026-08-11 |
+| `apps/web/public/audio/vo_clawde_hurt.mp3` | authored in this repo — the author's own prior project's per-character voice line (own IP), copied byte-for-byte | **Author-owned, used with permission** | 2026-08-11 |
+| `apps/web/public/audio/vo_clawde_ko.mp3` | authored in this repo — the author's own prior project's per-character voice line (own IP), copied byte-for-byte | **Author-owned, used with permission** | 2026-08-11 |
+| `apps/web/public/audio/vo_clawde_transform.mp3` | authored in this repo — the author's own prior project's per-character Ultimate line (own IP), copied byte-for-byte | **Author-owned, used with permission** | 2026-08-11 |
+| `apps/web/public/audio/sfx_chatty_hit_l.mp3` | authored in this repo — the author's own prior project's per-character SFX (own IP), copied byte-for-byte | **Author-owned, used with permission** | 2026-08-11 |
+| `apps/web/public/audio/sfx_chatty_hit_h.mp3` | authored in this repo — the author's own prior project's per-character SFX (own IP), copied byte-for-byte | **Author-owned, used with permission** | 2026-08-11 |
+| `apps/web/public/audio/vo_chatty_hurt.mp3` | authored in this repo — the author's own prior project's per-character voice line (own IP), copied byte-for-byte | **Author-owned, used with permission** | 2026-08-11 |
+| `apps/web/public/audio/vo_chatty_ko.mp3` | authored in this repo — the author's own prior project's per-character voice line (own IP), copied byte-for-byte | **Author-owned, used with permission** | 2026-08-11 |
+| `apps/web/public/audio/vo_chatty_transform.mp3` | authored in this repo — the author's own prior project's per-character Ultimate line (own IP), copied byte-for-byte | **Author-owned, used with permission** | 2026-08-11 |
+| `apps/web/public/audio/sfx_gemini_hit_l.mp3` | authored in this repo — the author's own prior project's per-character SFX (own IP), copied byte-for-byte | **Author-owned, used with permission** | 2026-08-11 |
+| `apps/web/public/audio/sfx_gemini_hit_h.mp3` | authored in this repo — the author's own prior project's per-character SFX (own IP), copied byte-for-byte | **Author-owned, used with permission** | 2026-08-11 |
+| `apps/web/public/audio/vo_gemini_hurt.mp3` | authored in this repo — the author's own prior project's per-character voice line (own IP), copied byte-for-byte | **Author-owned, used with permission** | 2026-08-11 |
+| `apps/web/public/audio/vo_gemini_ko.mp3` | authored in this repo — the author's own prior project's per-character voice line (own IP), copied byte-for-byte | **Author-owned, used with permission** | 2026-08-11 |
+| `apps/web/public/audio/vo_gemini_transform.mp3` | authored in this repo — the author's own prior project's per-character Ultimate line (own IP), copied byte-for-byte | **Author-owned, used with permission** | 2026-08-11 |
+| `apps/web/public/audio/sfx_grokk_hit_l.mp3` | authored in this repo — the author's own prior project's per-character SFX (own IP), copied byte-for-byte | **Author-owned, used with permission** | 2026-08-11 |
+| `apps/web/public/audio/sfx_grokk_hit_h.mp3` | authored in this repo — the author's own prior project's per-character SFX (own IP), copied byte-for-byte | **Author-owned, used with permission** | 2026-08-11 |
+| `apps/web/public/audio/vo_grokk_hurt.mp3` | authored in this repo — the author's own prior project's per-character voice line (own IP), copied byte-for-byte | **Author-owned, used with permission** | 2026-08-11 |
+| `apps/web/public/audio/vo_grokk_ko.mp3` | authored in this repo — the author's own prior project's per-character voice line (own IP), copied byte-for-byte | **Author-owned, used with permission** | 2026-08-11 |
+| `apps/web/public/audio/vo_grokk_transform.mp3` | authored in this repo — the author's own prior project's per-character Ultimate line (own IP), copied byte-for-byte | **Author-owned, used with permission** | 2026-08-11 |
+
+### Story 12.9: the twenty per-character cues
+
+The paragraph below this table used to end *"a later story that makes audio
+per-fighter would draw from the same source and add rows here the same way."*
+Story 12.9 is that story, and the twenty rows above are those rows.
+
+Five cues per fighter, for all four: a light hit, a heavy hit, a hurt line, a KO
+line and an Ultimate line. **290 379 B added** (283.6 KB) against the 574 147 B
+already here, for 864 526 B (844.3 KB) total — inside the 320 KB / 900 KB budget
+the story recorded before the files were copied. The largest single file is
+`vo_clawde_transform.mp3` at 39 855 B and the smallest is any of the four
+`sfx_*_hit_l.mp3` at 4 747 B. Nothing here is on the critical path: audio is
+fetched by `audio-bus.ts` on first use of a cue name, one request per name, and
+a name whose file is missing is cached as absent after exactly one attempt.
+
+**The sizes collide and the content does not.** All four `sfx_*_hit_l.mp3` are
+4 747 B, all four `sfx_*_hit_h.mp3` are 6 837 B and all four `vo_*_ko.mp3` are
+14 685 B, which reads exactly like one file copied four times. It is not: all
+twenty are distinct by MD5 (same encoder settings and duration, different
+audio). `render/audio-assets.test.ts` asserts it, because a copy-paste that
+duplicated one fighter's pack across four would satisfy every other check while
+making "the voice cue differs" false.
+
+Two cues stayed shared on purpose. `sfx_ko` is the *impact* of a knockdown and
+belongs to the stage; the cry over it is `vo_<id>_ko` and belongs to the fighter.
+`music_battle` is the bed. And there is no shared `vo_hurt`: the only hurt lines
+that exist are per-character, so a fighter with no audio pack takes a heavy hit
+silently rather than borrowing another fighter's voice — which is why the hurt
+cue lives in `ROSTER_AUDIO` rather than in `DEFAULT_AUDIO_TUNING.voice`.
 
 `sfx_special.mp3` is a genuinely different sample from `sfx_hit_h.mp3`, not a
 re-encode or a louder copy — the two files' MD5s differ
@@ -341,14 +391,17 @@ Story 11.5 gives it its own tuning key next to `sfx_special` instead of a
 slots: it belongs to neither, and letting it belong to neither would let a KO
 start on top of it.
 
-`DEFAULT_AUDIO_TUNING` is global, not per-fighter: one hit SFX pair, one KO SFX,
-one KO voice line, one Ultimate SFX and one Ultimate announcement regardless of
-which two packs are loaded. The source project ships per-character variants
-(`sfx_clawde_hit_l.mp3`, `vo_chatty_ko.mp3`, `sfx_<id>_ult.mp3`, …) and fires
-its per-fighter Ultimate SFX with `sfx_special` only as a *fallback*; only its
-generic, character-neutral files are used here, matching the cue names this
-codebase already calls by. A later story that makes audio per-fighter would draw
-from the same source and add rows here the same way.
+`DEFAULT_AUDIO_TUNING` was global rather than per-fighter until Story 12.9: one
+hit SFX pair, one KO SFX, one KO voice line, one Ultimate SFX and one Ultimate
+announcement regardless of which two packs were loaded. It is still the table
+every *shared* cue is named in, and it is still what a surface with no roster
+gets. What 12.9 added sits beside it in `render/roster.ts` (`ROSTER_AUDIO`), and
+`buildAudioTrack` takes the `RosterPair` as a parameter rather than reading one:
+the struck fighter's own hit, heavy, hurt and KO cues, and the caster's own
+Ultimate line, resolved through that table with the shared cue as the fallback.
+The Ultimate **SFX** stays shared (`sfx_special`), which is also how the source
+project fires it — its per-fighter `sfx_<id>_ult` files are the variant and
+`sfx_special` the fallback, and only the fallback is used here.
 
 Between Story 9.6 and Story 9.7 the shipped player ran the whole audio graph
 and played nothing, and that was not an oversight being deferred — it was the
@@ -407,6 +460,23 @@ The names the shipped tuning asks for:
 | `vo_ko` | voice | `public/audio/vo_ko.mp3` |
 | `sfx_special` | sfx | `public/audio/sfx_special.mp3` |
 | `vo_ultimate` | voice | `public/audio/vo_ultimate.mp3` |
+
+And the names `ROSTER_AUDIO` asks for, five per fighter, for `<id>` in
+`clawde`, `chatty`, `gemini`, `grokk` (Story 12.9):
+
+| Cue | Bus | Fires on | Replaces |
+|---|---|---|---|
+| `sfx_<id>_hit_l` | sfx | a `hit` on that fighter | `sfx_hit_l` |
+| `sfx_<id>_hit_h` | sfx | a `heavy` on that fighter | `sfx_hit_h` |
+| `vo_<id>_hurt` | voice | a `heavy` on that fighter, and never a `hit` | nothing — no fighter had one |
+| `vo_<id>_ko` | voice | a `ko` on that fighter | `vo_ko` |
+| `vo_<id>_transform` | voice | that fighter casting the Ultimate | `vo_ultimate` |
+
+The `<id>` here is a *table key*, not a string this codebase builds: every one of
+the twenty names is written out in `ROSTER_AUDIO`, so a fifth fighter added to
+the roster with no audio pack falls back to the shared cue rather than resolving
+a name with no file behind it. `scripts/visual-gate.mjs`'s `audio-cues-resolve`
+fetches all twenty-seven and fails on any that is not a 200.
 
 `sfx_special` and `vo_ultimate` are the two cues that are not keyed on a
 `JuiceKind`. Both fire on `CinematicEvent.filmIndex` — the film frame Story

@@ -22,10 +22,12 @@ import {
   DEFAULT_AUDIO_TUNING,
   buildAudioTrack,
   createAudioDirector,
+  createGatedSink,
   type AudioCue,
   type AudioSink,
   type AudioTuning,
 } from './audio';
+import { ROSTER_AUDIO, ROSTER_IDS, type RosterId, type RosterPair } from './roster';
 
 /**
  * Story 9.6, the pure half.
@@ -1117,5 +1119,296 @@ describe('seeking to a frame equals playing to it', () => {
       ).toBe(played[index]);
     }
     expect(audio.frameCount).toBeGreaterThan(100);
+  });
+});
+
+/**
+ * Story 12.9: the cues belong to the fighter they happen to.
+ *
+ * Every case here builds the *same* film twice -- once with no roster and once
+ * with one -- because the claim is not "a cue fired" (Story 9.6 already pins
+ * that) but "a different fighter produced a different cue". A test that only
+ * asserted the roster-keyed name would pass on a table wired to one fighter
+ * four times, which is the copy-paste this story's byte-distinctness criterion
+ * exists to catch on disk and this block catches in the mix.
+ */
+describe('per-character cues (Story 12.9)', () => {
+  const namesOn = (
+    bus: AudioCue['bus'],
+    frames: readonly RenderFrame[],
+    roster: RosterPair | undefined,
+  ): readonly string[] => {
+    const audio = buildAudioTrack(trackFor(frames), DEFAULT_AUDIO_TUNING, roster);
+    const found: string[] = [];
+    for (let clockIndex = 0; clockIndex < audio.frameCount; clockIndex += 1) {
+      for (const cue of audio.at(clockIndex).cues) {
+        if (cue.bus === bus) {
+          found.push(cue.name);
+        }
+      }
+    }
+    return found;
+  };
+
+  it('strikes each fighter with their own light and heavy hit', () => {
+    // `healthFilm` walks agent 1's health down, so agent 1 is the struck side
+    // and the roster's second slot is the one whose cues must be heard.
+    for (const id of ROSTER_IDS) {
+      const roster: RosterPair = ['clawde', id];
+      expect(namesOn('sfx', healthFilm([100, 95]), roster)).toStrictEqual([ROSTER_AUDIO[id].hit]);
+      expect(namesOn('sfx', healthFilm([100, 80]), roster)).toStrictEqual([ROSTER_AUDIO[id].heavy]);
+    }
+    // And the four differ from each other, which is what "their own" means.
+    expect(new Set(ROSTER_IDS.map((id) => ROSTER_AUDIO[id].hit)).size).toBe(ROSTER_IDS.length);
+    expect(new Set(ROSTER_IDS.map((id) => ROSTER_AUDIO[id].heavy)).size).toBe(ROSTER_IDS.length);
+  });
+
+  it('reads the struck fighter, not the striker', () => {
+    // The two sides carry different fighters and only one of them is being hit.
+    // A table read with the wrong index would still produce a per-character cue,
+    // and it would be the wrong character's -- which no count of cues can catch.
+    expect(namesOn('sfx', healthFilm([100, 80]), ['gemini', 'grokk'])).toStrictEqual([
+      ROSTER_AUDIO.grokk.heavy,
+    ]);
+  });
+
+  it('speaks a hurt line on a heavy hit and says nothing at all on a light one', () => {
+    // The asymmetry is the acceptance criterion, and it is the reason
+    // `AudioTuning.voice` is partial: a voice line on every chip hit is how a
+    // fighting game becomes unlistenable in thirty seconds.
+    const roster: RosterPair = ['clawde', 'gemini'];
+    expect(namesOn('voice', healthFilm([100, 80]), roster)).toStrictEqual([
+      ROSTER_AUDIO.gemini.hurt,
+    ]);
+    expect(namesOn('voice', healthFilm([100, 95]), roster)).toStrictEqual([]);
+  });
+
+  it('puts the hurt line on the voice bus on the same clock frame as the hit that caused it', () => {
+    const roster: RosterPair = ['clawde', 'grokk'];
+    const audio = buildAudioTrack(trackFor(healthFilm([100, 80])), DEFAULT_AUDIO_TUNING, roster);
+    const hurt = framesNaming(audio, ROSTER_AUDIO.grokk.hurt);
+    const heavy = framesNaming(audio, ROSTER_AUDIO.grokk.heavy);
+
+    expect(hurt).toHaveLength(1);
+    expect(hurt).toStrictEqual(heavy);
+    expect(audio.at(hurt[0]).cues.find((cue) => cue.name === ROSTER_AUDIO.grokk.hurt)?.bus).toBe(
+      'voice',
+    );
+  });
+
+  it('gives each fighter their own KO cry over the one shared KO impact', () => {
+    for (const id of ROSTER_IDS) {
+      const roster: RosterPair = ['clawde', id];
+      expect(namesOn('voice', healthFilm([100, 0]), roster)).toStrictEqual([ROSTER_AUDIO[id].ko]);
+      // The impact stays the stage's: four fighters with four death cries and
+      // one thud is right; the other way round is not.
+      expect(namesOn('sfx', healthFilm([100, 0]), roster)).toStrictEqual([
+        DEFAULT_AUDIO_TUNING.sfx.ko,
+      ]);
+    }
+    expect(new Set(ROSTER_IDS.map((id) => ROSTER_AUDIO[id].ko)).size).toBe(ROSTER_IDS.length);
+  });
+
+  it('announces the Ultimate in the voice of whoever cast it, and two casters differ', () => {
+    const juice = buildJuiceTrack(ultimateFilm());
+    expect(juice.cinematics).toHaveLength(1);
+    const caster = juice.cinematics[0].agentIndex;
+
+    const heard = (id: RosterId): readonly string[] => {
+      const pair: RosterPair = caster === 0 ? [id, 'clawde'] : ['clawde', id];
+      const audio = buildAudioTrack(juice, DEFAULT_AUDIO_TUNING, pair);
+      const found: string[] = [];
+      for (let clockIndex = 0; clockIndex < audio.frameCount; clockIndex += 1) {
+        for (const cue of audio.at(clockIndex).cues) {
+          if (cue.bus === 'voice') {
+            found.push(cue.name);
+          }
+        }
+      }
+      return found;
+    };
+
+    expect(heard('gemini')).toContain(ROSTER_AUDIO.gemini.ultimate);
+    expect(heard('grokk')).toContain(ROSTER_AUDIO.grokk.ultimate);
+    expect(ROSTER_AUDIO.gemini.ultimate).not.toBe(ROSTER_AUDIO.grokk.ultimate);
+    // And with no roster it is still the shared announcement, unchanged.
+    expect(framesNaming(buildAudioTrack(juice), DEFAULT_AUDIO_TUNING.ultimateVoice)).toHaveLength(1);
+  });
+
+  it('falls back to the shared cues for a fighter with no audio pack', () => {
+    // The `undefined` branch of `audioCuesFor`, reached through a roster id this
+    // project ships no audio for. A name with no file behind it is silence with
+    // nothing on screen to say so, which is strictly worse than the shared cue.
+    const unpacked = 'pilot' as unknown as RosterId;
+    const roster: RosterPair = ['clawde', unpacked];
+
+    expect(namesOn('sfx', healthFilm([100, 95]), roster)).toStrictEqual([
+      DEFAULT_AUDIO_TUNING.sfx.hit,
+    ]);
+    expect(namesOn('sfx', healthFilm([100, 80]), roster)).toStrictEqual([
+      DEFAULT_AUDIO_TUNING.sfx.heavy,
+    ]);
+    expect(namesOn('voice', healthFilm([100, 0]), roster)).toStrictEqual([
+      DEFAULT_AUDIO_TUNING.voice.ko,
+    ]);
+    // And no hurt line at all, because there is no shared one to fall back to:
+    // a fighter borrowing another fighter's voice is worse than a silent one.
+    expect(namesOn('voice', healthFilm([100, 80]), roster)).toStrictEqual([]);
+  });
+
+  it('keeps the shared cue set exactly as it was when no roster is handed in', () => {
+    // Every caller before this story, and every case above this block. The
+    // per-character path is an addition, not a replacement.
+    expect(namesOn('sfx', healthFilm([100, 95]), undefined)).toStrictEqual([
+      DEFAULT_AUDIO_TUNING.sfx.hit,
+    ]);
+    expect(namesOn('voice', healthFilm([100, 0]), undefined)).toStrictEqual([
+      DEFAULT_AUDIO_TUNING.voice.ko,
+    ]);
+    expect(namesOn('voice', healthFilm([100, 80]), undefined)).toStrictEqual([]);
+  });
+
+  it('is still rate-limited per fighter, whoever is speaking', () => {
+    // Two heavy hits on the same fighter with the window widened past the film:
+    // the second hurt line is dropped, exactly as a second KO line would be. The
+    // per-character name changes which sample plays, never the discipline.
+    const roster: RosterPair = ['clawde', 'chatty'];
+    const audio = buildAudioTrack(
+      trackFor(healthFilm([100, 80, 60])),
+      { ...DEFAULT_AUDIO_TUNING, voiceRateLimitFrames: 10_000 },
+      roster,
+    );
+    expect(framesNaming(audio, ROSTER_AUDIO.chatty.hurt)).toHaveLength(1);
+  });
+});
+
+/**
+ * Story 12.9: the mute the page's sound switch flips.
+ *
+ * `createGatedSink` is what makes muting one decision rather than four, so what
+ * is worth pinning is which verbs it holds back and which it lets through --
+ * `stopAll` passing through while muted is the difference between a mute and a
+ * button that leaves the music bed playing.
+ */
+describe('the gated sink (Story 12.9)', () => {
+  it('drops play and setGains while muted, and passes both when not', () => {
+    const inner = createRecordingSink();
+    const open = { on: false };
+    const gated = createGatedSink(inner, () => open.on);
+
+    gated.play({ bus: 'sfx', name: 'sfx_hit_l', loop: false });
+    gated.setGains(8000, 10_000, 10_000);
+    expect(inner.played()).toStrictEqual([]);
+    expect(inner.gains()).toStrictEqual([]);
+
+    open.on = true;
+    gated.play({ bus: 'sfx', name: 'sfx_hit_l', loop: false });
+    gated.setGains(8000, 10_000, 10_000);
+    expect(inner.played()).toStrictEqual(['sfx:sfx_hit_l']);
+    expect(inner.gains()).toStrictEqual(['8000/10000/10000']);
+  });
+
+  it('always stops and always unlocks, muted or not', () => {
+    const inner = createRecordingSink();
+    const gated = createGatedSink(inner, () => false);
+
+    gated.stopAll();
+    gated.unlock();
+
+    // The bed is a looping source started before the mute; a mute that could not
+    // stop it would be a mute that does nothing to the one cue that matters.
+    expect(inner.stops()).toBe(1);
+    // And resuming a suspended context makes no sound on its own, so a visitor
+    // who arrives muted and gestures does not need a second gesture later.
+    expect(inner.unlocks()).toBe(1);
+  });
+
+  it('asks its gate on every call rather than capturing the answer once', () => {
+    const inner = createRecordingSink();
+    const open = { on: true };
+    const gated = createGatedSink(inner, () => open.on);
+
+    gated.play({ bus: 'music', name: 'music_battle', loop: true });
+    open.on = false;
+    gated.play({ bus: 'music', name: 'music_battle', loop: true });
+
+    expect(inner.played()).toStrictEqual(['music:music_battle:loop']);
+  });
+});
+
+/**
+ * Story 12.9: `rearm`, the verb Story 12.4 recorded as missing.
+ *
+ * A visitor who hid the replay screen (which stops the graph) or muted the page
+ * mid-Match had no way back to the music bed short of a Replay, because the bed
+ * is a looping cue on clock frame 0 and playback never returns there.
+ */
+describe("the director's rearm (Story 12.9)", () => {
+  it('stops what is playing and starts the bed again, without moving playback', () => {
+    const sink = createRecordingSink();
+    const track = buildAudioTrack(trackFor(healthFilm([100, 100, 80])));
+    const director = createAudioDirector({ track, sink });
+    for (let index = 0; index < 12; index += 1) {
+      director.atFrame(index);
+    }
+    const before = sink.played().length;
+
+    director.rearm();
+
+    // Exactly two things happened: everything stopped, and the loop started.
+    expect(sink.played().slice(before)).toStrictEqual(['stopAll', 'music:music_battle:loop']);
+    // And playback did not move: frame 12 is still an ordinary advance, so it
+    // is not read as a rewind and does not stop the graph a second time.
+    director.atFrame(12);
+    expect(sink.played().slice(before + 2)).not.toContain('stopAll');
+  });
+
+  it('starts the loop and nothing else', () => {
+    // Frame 0's one-shots -- there are none in the shipped tuning, and a later
+    // one could add some -- describe a moment long past, and firing them here
+    // would sound like the fight restarting.
+    const sink = createRecordingSink();
+    const track = buildAudioTrack(trackFor(healthFilm([100, 80])));
+    createAudioDirector({ track, sink }).rearm();
+
+    expect(sink.played().filter((entry) => entry !== 'stopAll')).toStrictEqual([
+      'music:music_battle:loop',
+    ]);
+  });
+
+  it('re-states the mix as it is now, not as it was at frame 0', () => {
+    // Re-arming inside a duck window must not put the bed back to full for the
+    // rest of it, which is what reading frame 0's gains would do.
+    // A quiet Decision Point first, so the duck starts somewhere the director
+    // has to have *arrived* at rather than on frame 0, where re-reading frame 0
+    // would happen to be right.
+    const track = buildAudioTrack(trackFor(healthFilm([100, 100, 0])));
+    const sink = createRecordingSink();
+    const director = createAudioDirector({ track, sink });
+    const ducked = (() => {
+      for (let index = 0; index < track.frameCount; index += 1) {
+        if (track.at(index).musicGainBasisPoints === DEFAULT_AUDIO_TUNING.duckBasisPoints) {
+          return index;
+        }
+      }
+      return -1;
+    })();
+    expect(ducked).toBeGreaterThan(0);
+    for (let index = 0; index <= ducked; index += 1) {
+      director.atFrame(index);
+    }
+
+    director.rearm();
+
+    const gains = sink.gains();
+    expect(gains[gains.length - 1]).toBe(
+      `${String(DEFAULT_AUDIO_TUNING.duckBasisPoints)}/${String(DEFAULT_AUDIO_TUNING.sfxGainBasisPoints)}/${String(DEFAULT_AUDIO_TUNING.voiceGainBasisPoints)}`,
+    );
+  });
+
+  it('throws nothing and does nothing with no sink at all', () => {
+    expect(() => {
+      createAudioDirector({ track: buildAudioTrack(trackFor(healthFilm([100, 80]))) }).rearm();
+    }).not.toThrow();
   });
 });

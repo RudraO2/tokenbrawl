@@ -11,7 +11,7 @@ import {
   type HitFlashSource,
 } from './render/artist';
 import { createBackdrop, validateBackdropLayout, type Backdrop } from './render/backdrop';
-import type { AudioSink } from './render/audio';
+import { createGatedSink, type AudioSink } from './render/audio';
 import { createAudioBus, type AudioContextLike, type AudioFetchResponse } from './render/audio-bus';
 import { createSpriteSheet, validateSpriteSheetLayout } from './render/sprite-sheet';
 import {
@@ -40,6 +40,7 @@ import { createVfxSheet, validateVfxSheetLayout, type VfxSheet } from './render/
 import { mountSpectatePanel, type SpectateHost, type SpectatePanel } from './spectate/panel';
 import { mountLandingPanel, type LandingHost, type LandingPanel } from './landing/panel';
 import { mountNav, type NavHost } from './shell/nav';
+import { mountSoundControl, type SoundControl, type SoundHost } from './shell/sound';
 import {
   createScreenRouter,
   type Screen,
@@ -616,6 +617,8 @@ function mountSpectate(
   onGesture: () => void,
   /** Story 11.6. The page's one graph, shared with the player -- see `spectate/panel.ts` on who owns it when. */
   sink: AudioSink | null,
+  /** Story 12.9. Reports a press of *this panel's* sound button to the page's switch. */
+  onAudioToggle: (enabled: boolean) => void,
 ): SpectatePanel | null {
   const host = globals.document?.querySelector('#spectate');
   const view = globals.window;
@@ -631,6 +634,7 @@ function mountSpectate(
       // now also unlocks the context for the stream itself.
       onGesture,
       sink,
+      onAudioToggle,
       // Not `globals.fetch` handed through directly: a real browser's
       // `fetch` is a WebIDL operation branded to `Window`, and extracting it
       // as a bare reference detaches that binding. `startup.ts`'s own
@@ -757,6 +761,89 @@ function mountSelect(
   } catch (error) {
     warn('Character select unavailable', error);
     return null;
+  }
+}
+
+/**
+ * Mounts the page's sound switch, or returns `null` when this page has no
+ * `#screen-sound` host (Story 12.9).
+ *
+ * `null` is a supported configuration and it is what every existing test is in:
+ * `startup.test.ts` hands this function a document whose `querySelector` answers
+ * for a handful of ids. A page with no switch is a page whose sound is simply
+ * on, which is this story's default -- so the degrade is the feature, not a
+ * silent mute.
+ */
+function mountSound(
+  globals: BrowserGlobals,
+  onChange: (enabled: boolean) => void,
+): SoundControl | null {
+  const host = globals.document?.querySelector('#screen-sound') as unknown as SoundHost | null;
+  if (host == null || typeof host.querySelector !== 'function') {
+    return null;
+  }
+  try {
+    return mountSoundControl(host, {
+      // Absent in a tab with storage blocked, and absent under test -- both read
+      // as "there is nowhere to remember this", which lasts one session.
+      ...(globals.localStorage === undefined ? {} : { storage: globals.localStorage }),
+      onChange,
+    });
+  } catch (error) {
+    warn('Sound control unavailable', error);
+    return null;
+  }
+}
+
+/**
+ * What a browser needs to offer for the first gesture to be noticed. Story 12.9.
+ *
+ * Declared structurally for this file's standing reason -- `tsconfig.base.json`
+ * has no DOM lib -- and deliberately *not* the same shape as `ShellView`: this
+ * one listens for three input events and does not care about `location`.
+ */
+interface GestureView {
+  addEventListener(
+    type: 'pointerdown' | 'keydown' | 'touchstart',
+    listener: () => void,
+    options?: { once?: boolean; passive?: boolean },
+  ): void;
+}
+
+/**
+ * Resumes the audio context on the first click, keypress or tap anywhere on the
+ * page (Story 12.9, AC2).
+ *
+ * "Sound on by default" cannot mean sound before a gesture -- no browser allows
+ * it, and Chrome says so in the console line the visual gate allowlists. So the
+ * graph is built early and *armed*: the page listens once for each of the three
+ * ways a visitor first touches it, and the first one to fire resumes.
+ *
+ * Before this, unlocking happened only in handlers the panels bound -- pressing
+ * Play, picking a Spectate entry, running a BYOK Match. A visitor who clicked
+ * anywhere else first, or who simply pressed a key, watched a silent fight with
+ * a control that said the sound was on.
+ *
+ * `once` on each listener rather than a flag: the browser drops them after they
+ * fire, so there is no per-event work left on the page and no module-level
+ * mutable binding to hold the flag in (`source-discipline.test.ts` bans one).
+ * `passive` on `touchstart` because this handler never cancels a scroll.
+ */
+function armAudioOnFirstGesture(globals: BrowserGlobals, unlock: () => void): void {
+  const view = globals.window as unknown as Partial<GestureView> | undefined;
+  if (view == null || typeof view.addEventListener !== 'function') {
+    return;
+  }
+  const listening = view as GestureView;
+  try {
+    listening.addEventListener('pointerdown', unlock, { once: true });
+    listening.addEventListener('keydown', unlock, { once: true });
+    listening.addEventListener('touchstart', unlock, { once: true, passive: true });
+  } catch (error) {
+    // A host that rejects the options object, or an embedding with no input
+    // events at all. The panels' own gesture hooks still unlock; this is the
+    // wider net, not the only one.
+    warn('Audio could not be armed on the first gesture', error);
   }
 }
 
@@ -950,10 +1037,49 @@ export async function startup(globals: BrowserGlobals): Promise<StartupResult | 
      * once; the real `Response` satisfies both, and the loader treats a missing
      * method as one more absent cue.
      */
-    const sink = createAudioBus({
+    const graph = createAudioBus({
       AudioContext: globals.AudioContext,
       fetch: (url: string) =>
         globals.fetch!(url) as unknown as Promise<AudioFetchResponse>,
+    });
+
+    /**
+     * Story 12.9. The page's sound switch, and the box its changes travel
+     * through.
+     *
+     * Mounted here, before the player, because the gated sink below has to be
+     * able to ask it whether sound is on from the very first frame -- and its
+     * `onChange` needs the panels, which need `mount`, which needs the player.
+     * The box breaks that cycle the same way `chosen`/`shell.router` above do.
+     */
+    const soundChanged: { apply: (enabled: boolean) => void } = {
+      apply: () => {
+        // Replaced below, once there is something to make audible. A press
+        // that arrived before then has nothing to turn on, and the switch has
+        // already remembered itself either way.
+      },
+    };
+    const soundControl = mountSound(globals, (enabled) => {
+      soundChanged.apply(enabled);
+    });
+
+    /**
+     * The sink every surface is handed: the real graph, behind the page's
+     * switch (Story 12.9).
+     *
+     * Wrapped rather than each panel checking a flag, because the buses are the
+     * page's and the switch is the page's -- see `createGatedSink`. `?? true`
+     * for a page with no switch: this story's default is on, and a missing
+     * control must not be a silent mute.
+     */
+    const sink =
+      graph === null ? null : createGatedSink(graph, () => soundControl?.enabled() ?? true);
+
+    // Story 12.9, AC2. On by default means *armed*: the graph is built and
+    // suspended, and the first gesture anywhere resumes it. The panels' own
+    // `onGesture` hooks stay -- this is the wider net around them.
+    armAudioOnFirstGesture(globals, () => {
+      sink?.unlock();
     });
 
     const player: { mounted: MountedApp } = { mounted: renderApp(root, log, view, sink) };
@@ -1321,6 +1447,11 @@ export async function startup(globals: BrowserGlobals): Promise<StartupResult | 
         sink?.unlock();
       },
       sink,
+      // Story 12.9. This panel's own button, reported so the page's switch
+      // follows it. `set` is idempotent, so the two cannot ping-pong.
+      (enabled) => {
+        soundControl?.set(enabled);
+      },
     );
     panels.spectate = spectatePanel;
     // Adopt whatever already landed. The upgrades started before this mount, so
@@ -1407,8 +1538,13 @@ export async function startup(globals: BrowserGlobals): Promise<StartupResult | 
        * it off calls `stopAll`, turning it back on re-arms the director from
        * frame zero (`spectate/panel.ts`). Reusing it means the returning
        * visitor gets their bed back rather than silence.
+       *
+       * Story 12.9 reversed the default. It is the page's switch that decides,
+       * not this surface: a visitor who has not turned sound off arrives on the
+       * watch screen with the stream audible, which is what "the sound is on"
+       * means on the surface that recorded the opposite decision in 11.6.
        */
-      audible: false,
+      audible: soundControl?.enabled() ?? true,
     };
     const screens: Screen[] = SCREENS.map((spec) => {
       const element = (globals.document?.querySelector(spec.selector) ??
@@ -1453,6 +1589,14 @@ export async function startup(globals: BrowserGlobals): Promise<StartupResult | 
           // rather than continue it.
           onShow: (): void => {
             player.mounted.clock.resume();
+            // Story 12.9, and the cost `onHide` below recorded as this story's
+            // to pay: the bed is a looping cue on clock frame 0, so a visitor
+            // returning mid-film used to get the fight back with no music under
+            // it. `rearmAudio` is the verb that was missing. Guarded by the
+            // switch so returning to this screen muted starts nothing.
+            if (soundControl?.enabled() ?? true) {
+              player.mounted.rearmAudio();
+            }
           },
           onHide: (): void => {
             player.mounted.clock.stop();
@@ -1463,10 +1607,10 @@ export async function startup(globals: BrowserGlobals): Promise<StartupResult | 
             // the incoming screen because every `onHide` runs before any
             // `onShow` -- see `shell/router.ts`.
             //
-            // The cost is that a visitor returning mid-film gets the fight
-            // back without its bed, because the bed's cue is at frame 0 and
-            // there is no verb for "re-arm the music". Deferred to `12-9`,
-            // which owns audio defaults and is where that verb belongs.
+            // The cost used to be that a visitor returning mid-film got the
+            // fight back without its bed, because the bed's cue is at frame 0
+            // and there was no verb for "re-arm the music". Story 12.9 added
+            // one (`rearmAudio`) and `onShow` above calls it.
             sink?.stopAll();
           },
         };
@@ -1477,6 +1621,43 @@ export async function startup(globals: BrowserGlobals): Promise<StartupResult | 
       return base;
     });
     shell.router = mountRouter(globals, screens);
+
+    /**
+     * What flipping the page's sound switch does. Story 12.9.
+     *
+     * Written here, after the router, for the reason every screen callback
+     * above is: this is the one file holding every panel handle, and neither
+     * `shell/sound.ts` nor a panel should have to learn what the other surfaces
+     * are.
+     *
+     * Turning it **off** is unconditional and stops the graph, because the
+     * looping music bed outlives whatever was firing one-shots and is the one
+     * cue a visitor most wants stopped. Turning it **on** is routed to the
+     * surface currently on screen: the bed lives on clock frame 0, so every
+     * surface needs to be *told* to start it again rather than waiting for a
+     * frame that will never carry it. A screen with no audio of its own
+     * (`/play`, `/select`, `/byok`, `/`) needs nothing done -- the next Match
+     * that mounts starts its own bed through `mountPlayer`.
+     */
+    soundChanged.apply = (enabled: boolean): void => {
+      // Flipping a switch is a gesture, and it may be the first one on the
+      // page: a visitor whose only interaction is turning sound back on must
+      // not have to press something else to be heard.
+      sink?.unlock();
+      watch.audible = enabled;
+      if (!enabled) {
+        spectatePanel?.setAudioEnabled(false);
+        sink?.stopAll();
+        return;
+      }
+      if (shell.router?.current() === ROUTE_WATCH) {
+        spectatePanel?.setAudioEnabled(true);
+        return;
+      }
+      if (shell.router === null || shell.router.current() === ROUTE_REPLAY) {
+        player.mounted.rearmAudio();
+      }
+    };
 
     return {
       mounted: demoPlayer,

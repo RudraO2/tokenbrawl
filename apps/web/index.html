@@ -66,6 +66,13 @@
     -->
     <div id="screen-nav"></div>
     <!--
+      Story 12.9. The page's sound switch, filled by `shell/sound.ts`. Outside
+      every screen for the reason the nav is: there is one audio graph for the
+      whole page, so the control that mutes it belongs to the page rather than
+      to whichever surface happens to be making the noise.
+    -->
+    <div id="screen-sound"></div>
+    <!--
       Story 12.4. Every section below carries `data-screen`, and exactly one of
       them carries `data-screen-active` at a time -- `shell/router.ts` moves the
       attribute, `app.css` turns it into `display`. They are the same five
