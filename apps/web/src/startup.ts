@@ -855,9 +855,11 @@ export async function startup(globals: BrowserGlobals): Promise<StartupResult | 
      * The same shape as the roster selection above and for the same reason:
      * reacting to a pick means fetching that stage's scenery, and that needs the
      * dressing that needs the selection. The initial stage is
-     * `stageForSeed(log.seed)` -- a deterministic default over the demo log's own
-     * seed, so a first load, a direct replay link and the hero raster all draw
-     * the same scene, and no stage is ever recorded in a Command Log.
+     * `stageForSeed(log.seed)` -- derived from the demo log's own seed, so the
+     * same log always draws on the same scene (a direct replay link is stable)
+     * without any stage ever being recorded in a Command Log. It is the seed's
+     * stage, not a fixed one: a different log, or the hero's own seed, derives a
+     * different scene.
      */
     const chosenStage: { apply: (id: StageId) => void } = {
       apply: () => {
@@ -1214,10 +1216,17 @@ export async function startup(globals: BrowserGlobals): Promise<StartupResult | 
      * 12.10). A pick re-dresses immediately -- while the visitor is still on the
      * select screen -- so the scene is decoded by the time the Match starts
      * rather than swapping in mid-fight, the same as a roster pick above.
+     *
+     * The generation guard makes a fast second pick win: two picks in flight can
+     * resolve out of order (a small scene decodes before a large one begun
+     * earlier), and without this the *earlier* pick's stage would dress last and
+     * stick. Only the latest pick's result is allowed to dress.
      */
+    const stageGeneration = { current: 0 };
     const loadStageInto = async (id: StageId): Promise<void> => {
+      const generation = (stageGeneration.current += 1);
       const backdrop = await loadStage(globals, id);
-      if (backdrop !== undefined) {
+      if (backdrop !== undefined && generation === stageGeneration.current) {
         dressBackdrop(backdrop);
       }
     };

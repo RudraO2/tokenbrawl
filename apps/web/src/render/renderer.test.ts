@@ -139,6 +139,37 @@ function draw(frame: RenderFrame): RecordingCanvas {
   return ctx;
 }
 
+describe('the backdrop is fed the frame camera (Story 12.10)', () => {
+  it("draws the backdrop with the frame's own camera x, not a fixed value", () => {
+    // A frame whose fighters are off to one side, so the camera is not centred
+    // and a regression that passed `0` (or the viewport centre) instead of
+    // `camera.x` would draw a different number here. Nothing else in this suite
+    // exercises the backdrop wiring, so a `render/backdrop.ts` offset silently
+    // pinned to zero would keep `npm test` green without this.
+    const frame = frameWith(
+      stateWith({ position: [700, 900] }),
+      stateWith({ position: [700, 900] }),
+    );
+    const seen: number[] = [];
+    const backdrop = {
+      layerUrls: [],
+      draw: (_ctx: unknown, _w: number, _h: number, cameraX: number) => {
+        seen.push(cameraX);
+      },
+    };
+    const ctx = createRecordingCanvas();
+    drawFrame(ctx, frame, {
+      config: DEFAULT_FIGHTER_CONFIG,
+      viewport: VIEWPORT,
+      backdrop: backdrop as unknown as DrawFrameOptions['backdrop'],
+    });
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toBe(cameraForFrame(frame, DEFAULT_FIGHTER_CONFIG, VIEWPORT).x);
+    // And it is not the trivial centre, so the assertion above has teeth.
+    expect(seen[0]).not.toBe(VIEWPORT.width / 2);
+  });
+});
+
 describe('drawing a frame', () => {
   it('clears, lays the ground, then draws both fighters and both HUD blocks', () => {
     const ctx = draw(frameWith(stateWith(), stateWith()));

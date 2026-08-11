@@ -58,21 +58,38 @@ import type { Theme } from './theme';
  */
 
 /**
+ * A sub-rectangle of a layer's source image, in the image's own pixels.
+ *
+ * Optional, and used by the crowd rail: its source PNG is a small sprite atlas
+ * of several figures with empty bands between them, not one illustration, so
+ * drawing the whole image tiled would stamp the empty bands and the second row
+ * of cells across the arena. A `crop` picks the one cell that is a single figure;
+ * absent, the whole image is drawn, which is what a full scene wants.
+ */
+export interface BackdropCrop {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+}
+
+/**
  * One layer of a backdrop: a same-origin image, how much of the camera it takes,
- * and the integer-free scale it is drawn at.
+ * the integer-free scale it is drawn at, and an optional source crop.
  *
  * `depth` is `0..1`: 0 is fixed, 1 tracks the camera one-for-one. `scale`
- * multiplies the image's native size; unlike `packages/` geometry it is a plain
- * number rather than a safe integer, because a stage is a full illustration
- * fitted to the arena (0.6 maps a 1600-wide scene onto the 960 arena) rather
- * than a pixel-art tile drawn at an integer multiple. `render/**` is released
- * from the flat-surface rules but not from type discipline; the value is still
- * validated as fetched, untrusted JSON.
+ * multiplies the drawn size; unlike `packages/` geometry it is a plain number
+ * rather than a safe integer, because a stage is a full illustration fitted to
+ * the arena (0.6 maps a 1600-wide scene onto the 960 arena) rather than a
+ * pixel-art tile drawn at an integer multiple. `render/**` is released from the
+ * flat-surface rules but not from type discipline; every value is validated as
+ * fetched, untrusted JSON.
  */
 export interface BackdropLayer {
   readonly image: string;
   readonly depth: number;
   readonly scale: number;
+  readonly crop?: BackdropCrop;
 }
 
 export interface BackdropLayout {
@@ -113,7 +130,31 @@ function validateLayer(candidate: unknown, index: number): BackdropLayer {
   if (typeof layer.scale !== 'number' || !Number.isFinite(layer.scale) || layer.scale <= 0) {
     fail(`layer ${index}: scale must be a positive number, got ${String(layer.scale)}`);
   }
-  return Object.freeze({ image: layer.image, depth: layer.depth, scale: layer.scale });
+  const crop = layer.crop === undefined ? undefined : validateCrop(layer.crop, index);
+  return Object.freeze({ image: layer.image, depth: layer.depth, scale: layer.scale, crop });
+}
+
+function validateCrop(candidate: unknown, index: number): BackdropCrop {
+  if (typeof candidate !== 'object' || candidate === null || Array.isArray(candidate)) {
+    fail(`layer ${index}: crop is not an object`);
+  }
+  const crop = candidate as Record<string, unknown>;
+  for (const key of ['x', 'y'] as const) {
+    if (!Number.isSafeInteger(crop[key]) || (crop[key] as number) < 0) {
+      fail(`layer ${index}: crop.${key} must be a non-negative safe integer, got ${String(crop[key])}`);
+    }
+  }
+  for (const key of ['width', 'height'] as const) {
+    if (!Number.isSafeInteger(crop[key]) || (crop[key] as number) <= 0) {
+      fail(`layer ${index}: crop.${key} must be a positive safe integer, got ${String(crop[key])}`);
+    }
+  }
+  return Object.freeze({
+    x: crop.x as number,
+    y: crop.y as number,
+    width: crop.width as number,
+    height: crop.height as number,
+  });
 }
 
 export function validateBackdropLayout(candidate: unknown): BackdropLayout {
@@ -159,8 +200,13 @@ export function createBackdrop(
         if (image === undefined) {
           continue;
         }
-        const drawWidth = image.width * layer.scale;
-        const drawHeight = image.height * layer.scale;
+        // The source rectangle: a crop's cell, or the whole image.
+        const sourceX = layer.crop?.x ?? 0;
+        const sourceY = layer.crop?.y ?? 0;
+        const sourceWidth = layer.crop?.width ?? image.width;
+        const sourceHeight = layer.crop?.height ?? image.height;
+        const drawWidth = sourceWidth * layer.scale;
+        const drawHeight = sourceHeight * layer.scale;
         // Parallax: the layer slides left as the camera's centre moves right,
         // `depth` of the way. Pure in `cameraX`, so a scrubbed frame and a
         // played frame land the layer identically.
@@ -175,10 +221,10 @@ export function createBackdrop(
         for (let x = startX; x < width; x += drawWidth) {
           ctx.drawImage(
             image,
-            0,
-            0,
-            image.width,
-            image.height,
+            sourceX,
+            sourceY,
+            sourceWidth,
+            sourceHeight,
             x,
             height - drawHeight,
             drawWidth,

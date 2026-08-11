@@ -1001,6 +1001,10 @@ describe('the arena boundary is named, documented, and still swept for clocks', 
       // question about the game rather than about the site.
       'render/roster.ts',
       'render/sprite-sheet.ts',
+      // Story 12.10. The stage list -- which scene the fight is drawn on, keyed
+      // by seed. Arena by the same reasoning as `roster.ts`: it is presentation
+      // that decides what the game surface draws, and it reads no brand colour.
+      'render/stages.ts',
       'render/theme.ts',
       // Story 11.4. The Ultimate's per-character art: arena by definition, on
       // exactly `vfx-sheet.ts`'s terms.

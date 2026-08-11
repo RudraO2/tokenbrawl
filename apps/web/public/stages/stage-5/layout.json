@@ -3,21 +3,24 @@
     "Stage 5. Two depth layers drawn behind the fighters, back to front.",
     "'back' is the full arena scene (sky, banners, crowd, floor) at a near-zero",
     "depth so it reads as a horizon that barely tracks the camera; 'crowd' is a",
-    "foreground rail confined to the lower band (a short scale) at a larger depth",
-    "so it slides several times faster than the scene behind it. The near part of",
-    "the frame therefore shifts more than the far part when the camera pans, which",
-    "is depth. offset = cameraX * depth, computed fresh each frame from the camera",
-    "12.3 returns (render/backdrop.ts) -- no scroll accumulator anywhere.",
+    "foreground rail at a larger depth so it slides several times faster than the",
+    "scene behind it. The near part of the frame therefore shifts more than the",
+    "far part when the camera pans, which is depth. offset = cameraX * depth,",
+    "computed fresh each frame from the camera 12.3 returns (render/backdrop.ts)",
+    "-- no scroll accumulator anywhere.",
     "",
-    "back scale 0.6 maps the 1600-wide scene onto the 960 arena; crowd scale 0.35",
-    "keeps the rail in the lower band so the far strip above it is scene-only. Both",
-    "tile to fill any gap a pan opens. dim 0.58 fades the whole stack toward the",
-    "ground colour: at 0.58 the bone-white sprite reads against this stage's dimmed",
-    "mid-tone well above the 3:1 graphical-object floor (docs/stories/12.10)."
+    "crowd.png is a small sprite atlas of several figure groups with empty bands",
+    "between them, so its layer takes a 'crop' of the one full-width crowd strip",
+    "(y 96..254) rather than the whole sheet -- otherwise the empty bands and the",
+    "second row of cells would tile across the floor. back scale 0.6 maps the",
+    "1600-wide scene onto the 960 arena; both tile to fill any gap a pan opens.",
+    "dim 0.58 fades the whole stack toward the ground colour: at 0.58 the",
+    "bone-white sprite reads against this stage's dimmed mid-tone well above the",
+    "3:1 graphical-object floor (docs/stories/12.10)."
   ],
   "dim": 0.58,
   "layers": [
     { "image": "/stages/stage-5/back.png", "depth": 0.03, "scale": 0.6 },
-    { "image": "/stages/stage-5/crowd.png", "depth": 0.28, "scale": 0.35 }
+    { "image": "/stages/stage-5/crowd.png", "depth": 0.28, "scale": 0.6, "crop": { "x": 0, "y": 96, "width": 254, "height": 158 } }
   ]
 }

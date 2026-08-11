@@ -1047,8 +1047,16 @@ const arenaStripsProbe = (hostSelector) => `(() => {
   return { cinematic: false, upper: columnSignal(upperTop), lower: columnSignal(lowerTop) };
 })()`;
 
-/** The widest slide the correlation searches for, in pixels. */
-const PARALLAX_MAX_SHIFT = 60;
+/**
+ * The widest slide the correlation searches for, in pixels.
+ *
+ * Comfortably above the near layer's real displacement: at depth 0.28 and the
+ * arcade pan's camera travel (~270 world px) the near strip slides ~75px, and a
+ * cap below that would clip the true minimum and report a compromise between the
+ * near and far layers rather than the near layer's own slide. 150 leaves the
+ * argmin free to land where the crowd actually moved.
+ */
+const PARALLAX_MAX_SHIFT = 150;
 /**
  * The horizontal shift (in pixels) that best aligns two column signals, by
  * minimising mean squared error over the overlap. `-1` when the two are not

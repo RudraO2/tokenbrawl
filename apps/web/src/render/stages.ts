@@ -35,10 +35,12 @@ export const STAGE_IDS = [
 export type StageId = (typeof STAGE_IDS)[number];
 
 /**
- * The stage drawn when nothing has been chosen.
+ * The stage a `StageSelection` falls back to when no initial is supplied and no
+ * seed is in hand -- a test, or a caller with nothing to derive from.
  *
- * Named here rather than spelled into `startup.ts`, so a first load, the hero
- * raster and the character-select screen all start from the same scene.
+ * The live page does not use it: `startup.ts` seeds the selection from
+ * `stageForSeed(log.seed)`, and the hero from its own seed. It is the honest
+ * "no information" answer, named here rather than spelled at a call site.
  */
 export const DEFAULT_STAGE: StageId = STAGE_IDS[0];
 

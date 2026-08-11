@@ -242,13 +242,19 @@ the author's own prior fighting-game project, copied verbatim into one directory
 per stage (`back.png` + `crowd.png`) and renamed for what they are, never for
 where they came from (AD-16; `packages/cli/src/extraction-exclusion.test.ts`
 enforces that nothing under `public/` names the reference by path or word).
+There are three distinct crowd sprites, reused across the six stages (stages 1/4,
+2/5 and 3/6 share `crowd.png` byte-for-byte); each stage's `back.png` is unique.
 
 Each stage's `layout.json` draws the two images back to front with a per-layer
-**depth**: `back` at `0.04` reads as a horizon that barely tracks the camera,
-`crowd` at `0.16` slides faster, so the backdrop has distance in it. The offset
-is `cameraX * depth`, a pure function of Story 12.3's camera — not a scroll
-accumulator (`render/backdrop.ts`). `scale: 0.6` fits the 1600-wide scene onto
-the 960 arena and tiles to fill any gap a pan opens.
+**depth**: `back` at `0.03` reads as a horizon that barely tracks the camera,
+`crowd` at `0.28` slides roughly nine times faster, so the backdrop has distance
+in it. The offset is `cameraX * depth`, a pure function of Story 12.3's camera —
+not a scroll accumulator (`render/backdrop.ts`). `back` is drawn at `scale: 0.6`,
+which fits the 1600-wide scene onto the 960 arena; `crowd.png` is a small sprite
+atlas of several figure groups, so its layer takes a `crop` of the one full-width
+crowd strip (`{ x: 0, y: 96, width: 254, height: 158 }`) rather than the whole
+sheet — otherwise the empty bands and the second row of cells would tile across
+the floor. Both layers tile to fill any gap a pan opens.
 
 `dim: 0.58` fades each stack toward `--tb-bg`. The value is per-stage (six
 chances to get it wrong) and the same across all six here because it clears the
@@ -259,11 +265,13 @@ worst case anywhere on the canvas — no lower than **4.69:1**, both well above
 `docs/DESIGN.md`'s 3:1 graphical-object floor. (Measured by decoding each scene;
 see Story 12.10's Visual check finding for the per-stage table.)
 
-**Payload.** The six stages are 4.7 MB on disk, but a page load fetches exactly
+**Payload.** The six stages are 4.67 MiB on disk, but a page load fetches exactly
 one — the stage `stageForSeed(seed)` picks for the demo, or the one the visitor
 chose — as a late upgrade to the already-running fight (`startup.ts`), the same
-as the sprite packs (`imageUrlsFor` fetches two of four). One stage is ~0.8 MB;
-the budget this story holds is **≤ 1 MB added per load**, not the whole set.
+as the sprite packs (`imageUrlsFor` fetches two of four). A stage is its unique
+`back.png` (0.47–0.68 MiB) plus a shared `crowd.png` (0.17–0.28 MiB); the largest,
+stage 6, is 0.96 MiB. The budget this story holds is **≤ 1 MiB added per load**,
+not the whole set.
 
 **Rejected:** `edermunizz/free-pixel-art-forest` — CC-BY-**ND**, no derivatives,
 which does not survive being recomposited into a stage.

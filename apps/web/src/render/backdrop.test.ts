@@ -67,9 +67,17 @@ describe('validateBackdropLayout (Story 12.10)', () => {
   });
 });
 
-/** A canvas that records only the `drawImage` destination x of every call. */
-function recordingCanvas(): { ctx: Canvas2D; xs: () => number[] } {
-  const xs: number[] = [];
+interface DrawImageCall {
+  readonly sx: number;
+  readonly sy: number;
+  readonly sw: number;
+  readonly sh: number;
+  readonly dx: number;
+}
+
+/** A canvas that records the source rect and destination x of every `drawImage`. */
+function recordingCanvas(): { ctx: Canvas2D; xs: () => number[]; calls: () => DrawImageCall[] } {
+  const calls: DrawImageCall[] = [];
   const ctx = {
     fillStyle: '',
     strokeStyle: '',
@@ -87,22 +95,24 @@ function recordingCanvas(): { ctx: Canvas2D; xs: () => number[] } {
     fillRect() {},
     strokeRect() {},
     fillText() {},
-    drawImage(_image: unknown, _sx: number, _sy: number, _sw: number, _sh: number, dx: number) {
-      xs.push(dx);
+    drawImage(_image: unknown, sx: number, sy: number, sw: number, sh: number, dx: number) {
+      calls.push({ sx, sy, sw, sh, dx });
     },
   } as unknown as Canvas2D;
-  return { ctx, xs: () => xs };
+  return { ctx, xs: () => calls.map((c) => c.dx), calls: () => calls };
 }
 
 const image = (): SpriteImage => ({ width: 1600, height: 900 }) as unknown as SpriteImage;
 
 describe('backdrop parallax is pure in the camera (Story 12.10)', () => {
+  // The depths the stages actually ship (`public/stages/*/layout.json`), so the
+  // purity and ordering tests exercise the tuning the gate measures.
   const built = () => {
     const validated = validateBackdropLayout({
       dim: 0,
       layers: [
-        { image: '/back.png', depth: 0.04, scale: 0.6 },
-        { image: '/crowd.png', depth: 0.16, scale: 0.6 },
+        { image: '/back.png', depth: 0.03, scale: 0.6 },
+        { image: '/crowd.png', depth: 0.28, scale: 0.6, crop: { x: 0, y: 96, width: 254, height: 158 } },
       ],
     });
     const images = new Map<string, SpriteImage>([
@@ -123,9 +133,10 @@ describe('backdrop parallax is pure in the camera (Story 12.10)', () => {
 
   it('shifts a near layer by more pixels than a far layer for the same pan', () => {
     // One layer per backdrop, so the recorded `drawImage` x is that layer's own
-    // first-tile start with nothing else in the way. drawWidth is 1600*0.6=960,
-    // so at cameraX 0 every layer starts at 0; at cameraX 100 the far layer
-    // (depth 0.04) starts at -4 and the near layer (depth 0.16) at -16.
+    // first-tile start with nothing else in the way. The shipped depths: at
+    // cameraX 100 the far layer (0.03) starts at -3 and the near layer (0.28) at
+    // -28 -- the near layer slides ~9x as far, which is the depth ordering the
+    // gate's `stage-parallax-has-depth` measures on the real page.
     const oneLayer = (depth: number) =>
       createBackdrop(
         new Map([['/layer.png', image()]]),
@@ -136,10 +147,38 @@ describe('backdrop parallax is pure in the camera (Story 12.10)', () => {
       oneLayer(depth).draw(rec.ctx, 960, 400, cameraX, THEME);
       return rec.xs()[0];
     };
-    const farShift = Math.abs(startX(0.04, 100) - startX(0.04, 0));
-    const nearShift = Math.abs(startX(0.16, 100) - startX(0.16, 0));
+    const farShift = Math.abs(startX(0.03, 100) - startX(0.03, 0));
+    const nearShift = Math.abs(startX(0.28, 100) - startX(0.28, 0));
     expect(nearShift).toBeGreaterThan(farShift);
     expect(farShift).toBeGreaterThan(0);
+  });
+
+  it('draws only the cropped cell of a layer that declares a crop', () => {
+    const cropped = createBackdrop(
+      new Map([['/crowd.png', image()]]),
+      validateBackdropLayout({
+        dim: 0,
+        layers: [{ image: '/crowd.png', depth: 0, scale: 1, crop: { x: 0, y: 96, width: 254, height: 158 } }],
+      }),
+    );
+    const rec = recordingCanvas();
+    cropped.draw(rec.ctx, 960, 400, 0, THEME);
+    // Every tile is drawn from the crop's source rectangle, never the whole
+    // 1600x900 (the atlas's empty bands and second row stay off the canvas).
+    expect(rec.calls().length).toBeGreaterThan(0);
+    for (const call of rec.calls()) {
+      expect([call.sx, call.sy, call.sw, call.sh]).toStrictEqual([0, 96, 254, 158]);
+    }
+  });
+
+  it('rejects a malformed crop the way it rejects a malformed scale', () => {
+    const withCrop = (crop: unknown): unknown => ({
+      dim: 0,
+      layers: [{ image: '/a.png', depth: 0.1, scale: 1, crop }],
+    });
+    expect(() => validateBackdropLayout(withCrop({ x: -1, y: 0, width: 10, height: 10 }))).toThrow(/crop\.x/);
+    expect(() => validateBackdropLayout(withCrop({ x: 0, y: 0, width: 0, height: 10 }))).toThrow(/crop\.width/);
+    expect(() => validateBackdropLayout(withCrop({ x: 0, y: 0, width: 1.5, height: 10 }))).toThrow(/crop\.width/);
   });
 
   it('skips a layer whose image never decoded rather than throwing', () => {
