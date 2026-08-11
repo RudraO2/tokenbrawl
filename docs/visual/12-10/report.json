@@ -1,0 +1,183 @@
+{
+  "label": "12-10",
+  "ranAt": "2026-08-11T05:53:50.295Z",
+  "checks": [
+    {
+      "id": "hidden-screens-are-idle-on-load-desktop",
+      "ok": true,
+      "detail": "3 off-screen canvas(es) on the landing screen, none repainted"
+    },
+    {
+      "id": "one-screen-at-a-time-desktop",
+      "ok": true,
+      "detail": "6 screens, exactly one visible on each"
+    },
+    {
+      "id": "route-survives-reload-desktop",
+      "ok": true,
+      "detail": "loaded #/watch, showing spectate"
+    },
+    {
+      "id": "back-button-walks-the-screens-desktop",
+      "ok": true,
+      "detail": "after back: arcade; after forward: spectate"
+    },
+    {
+      "id": "arcade-live-canvas",
+      "ok": true,
+      "detail": "started=true canvases=1 visible=1"
+    },
+    {
+      "id": "camera-frames-the-fight",
+      "ok": true,
+      "detail": "arcade middle=3330 outerFifth=0 span=322..629 (32.0% of 960)"
+    },
+    {
+      "id": "arcade-input-moves-fighter",
+      "ok": true,
+      "detail": "arena hash 2056613695 -> 1999242691"
+    },
+    {
+      "id": "stage-parallax-has-depth",
+      "ok": true,
+      "detail": "far strip slid 8px, near strip slid 51px (near must exceed far, far must exceed 0)"
+    },
+    {
+      "id": "fighters-inside-frame-at-the-wall",
+      "ok": true,
+      "detail": "arcade edge=0 span=417..533 of 960"
+    },
+    {
+      "id": "canvas-not-blank-desktop",
+      "ok": true,
+      "detail": "3 canvas(es), ink app:70.8% arcade:71.1% spectate:71.6%"
+    },
+    {
+      "id": "fighters-inside-frame-desktop",
+      "ok": true,
+      "detail": "app edge=0 span=377..551 of 960 | arcade edge=0 span=416..535 of 960 | spectate edge=0 span=417..533 of 960"
+    },
+    {
+      "id": "fight-is-centred-desktop",
+      "ok": true,
+      "detail": "app ink centre 464 of 960 | arcade ink centre 476 of 960 | spectate ink centre 475 of 960"
+    },
+    {
+      "id": "spectate-animates",
+      "ok": true,
+      "detail": "hash 53985904 -> -864383082"
+    },
+    {
+      "id": "hidden-screens-are-idle-desktop",
+      "ok": true,
+      "detail": "2 off-screen canvas(es), none repainted"
+    },
+    {
+      "id": "hud-has-all-five",
+      "ok": true,
+      "detail": "/replay 11 regions ok (portrait colours 1481/1517, timer gold 124) | /play 11 regions ok (portrait colours 1457/1490, timer gold 78) | /watch 11 regions ok (portrait colours 1457/1490, timer gold 129)"
+    },
+    {
+      "id": "hud-no-overlap",
+      "ok": true,
+      "detail": "6 row spans disjoint; 0 bar pixels in the callout's rows and 0 in the readout's"
+    },
+    {
+      "id": "hud-timer-counts-down",
+      "ok": true,
+      "detail": "frame 0..531: timer 1163989263 -> 778921895 -> 1163989263"
+    },
+    {
+      "id": "hud-round-pips-advance",
+      "ok": true,
+      "detail": "64 gold pixels across both pip groups at the end of the Match"
+    },
+    {
+      "id": "match-end-overlay",
+      "ok": true,
+      "detail": "overlay gold frame 0: 0 -> tail: 499"
+    },
+    {
+      "id": "hit-reads-as-impact",
+      "ok": true,
+      "detail": "#app blob 0..7211 (min 900); #spectate blob 0..7284"
+    },
+    {
+      "id": "no-debug-hitbox",
+      "ok": true,
+      "detail": "37 arena frames sampled across #app/#spectate/#arcade, 0 with a hollow warn box"
+    },
+    {
+      "id": "character-select-reachable",
+      "ok": true,
+      "detail": "showing #select, fighters named: clawde, chatty, gemini, grokk"
+    },
+    {
+      "id": "every-stage-draws",
+      "ok": true,
+      "detail": "6 stages, 6 distinct arenas, all above the ink floor"
+    },
+    {
+      "id": "selected-fighter-is-drawn",
+      "ok": true,
+      "detail": "gemini: picked=true played=true left=-1441266140 right=1949730153 spriteInk=1995 | grokk: picked=true played=true left=-1352670727 right=1949730153 spriteInk=1773"
+    },
+    {
+      "id": "hidden-screens-are-idle-on-load-mobile",
+      "ok": true,
+      "detail": "3 off-screen canvas(es) on the landing screen, none repainted"
+    },
+    {
+      "id": "one-screen-at-a-time-mobile",
+      "ok": true,
+      "detail": "6 screens, exactly one visible on each"
+    },
+    {
+      "id": "route-survives-reload-mobile",
+      "ok": true,
+      "detail": "loaded #/watch, showing spectate"
+    },
+    {
+      "id": "back-button-walks-the-screens-mobile",
+      "ok": true,
+      "detail": "after back: arcade; after forward: spectate"
+    },
+    {
+      "id": "arcade-live-canvas-mobile",
+      "ok": true,
+      "detail": "started=true canvases=1 visible=1"
+    },
+    {
+      "id": "no-horizontal-overflow",
+      "ok": true,
+      "detail": "widest screen /: scrollWidth=390 clientWidth=390"
+    },
+    {
+      "id": "canvas-not-blank-mobile",
+      "ok": true,
+      "detail": "3 canvas(es), ink app:70.8% arcade:70.6% spectate:70.7%"
+    },
+    {
+      "id": "fighters-inside-frame-mobile",
+      "ok": true,
+      "detail": "app edge=0 span=377..551 of 960 | arcade edge=0 span=322..629 of 960 | spectate edge=0 span=379..600 of 960"
+    },
+    {
+      "id": "fight-is-centred-mobile",
+      "ok": true,
+      "detail": "app ink centre 464 of 960 | arcade ink centre 476 of 960 | spectate ink centre 490 of 960"
+    },
+    {
+      "id": "hidden-screens-are-idle-mobile",
+      "ok": true,
+      "detail": "2 off-screen canvas(es), none repainted"
+    },
+    {
+      "id": "console-clean",
+      "ok": true,
+      "detail": "no errors or warnings"
+    }
+  ],
+  "waived": [],
+  "staleWaivers": []
+}

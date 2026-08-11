@@ -989,21 +989,25 @@ const hostArenaHashProbe = (hostSelector) => `(() => {
  * Story 12.10: the arena split into a far strip and a near strip, for
  * `stage-parallax-has-depth`.
  *
- * The backdrop has depth if, when the camera pans, the near (lower) part of the
- * frame shifts by more pixels than the far (upper) part. The far strip sits just
- * below the HUD, above where the fighters ever reach, so what changes there is
- * the backdrop and only the backdrop -- a flat, non-parallaxed backdrop would
- * not move it at all. The near strip sits just above the floor, where the near
- * layer (and the fighters) live. Each strip is returned as a coarse grid of
- * `r+g+b` samples; the two are diffed in Node between a before-pan and an
- * after-pan reading.
+ * The backdrop has depth if, when the camera pans, the near part of the frame is
+ * *displaced by more pixels* than the far part. The measurement is displacement,
+ * not raw change -- an early version counted changed pixels and failed backwards,
+ * because the banner wall in the upper strip is far more textured than the floor
+ * in the lower one and so changed more samples at a smaller shift. Displacement
+ * is what depth actually is.
+ *
+ * Each strip is reduced to a one-dimensional column signal: the sum of `r+g+b`
+ * down the strip's rows, per column. `stripShift` then finds the horizontal
+ * offset that best aligns a before-pan signal with an after-pan one, which is
+ * the number of pixels that strip slid. The far strip sits just below the HUD,
+ * above where the near rail is drawn and where the camera keeps the fighters, so
+ * what slides there is the scene layer alone -- a flat, non-parallaxed backdrop
+ * would not slide at all. The near strip sits in the foreground rail's band.
  *
  * Same cinematic guard as the ink probes: a letterboxed frame (the Ultimate) is
  * reported so the check can skip it rather than read the plate's slam as motion.
  */
 const PARALLAX_STRIP_HEIGHT = 48;
-const PARALLAX_SAMPLE_STEP_X = 12;
-const PARALLAX_SAMPLE_STEP_Y = 4;
 const arenaStripsProbe = (hostSelector) => `(() => {
   const host = document.querySelector(${JSON.stringify(hostSelector)});
   if (!host) return null;
@@ -1024,15 +1028,14 @@ const arenaStripsProbe = (hostSelector) => `(() => {
   if (black >= Math.floor(canvas.width * 0.9)) return { cinematic: true, upper: [], lower: [] };
 
   const stripH = ${PARALLAX_STRIP_HEIGHT};
-  const stepX = ${PARALLAX_SAMPLE_STEP_X};
-  const stepY = ${PARALLAX_SAMPLE_STEP_Y};
-  const sampleStrip = (top) => {
-    const out = [];
+  // One column signal per strip: the sum of r+g+b down the strip's rows, per x.
+  const columnSignal = (top) => {
+    const out = new Array(canvas.width).fill(0);
     const data = ctx.getImageData(0, top, canvas.width, stripH).data;
-    for (let y = 0; y < stripH; y += stepY) {
-      for (let x = 0; x < canvas.width; x += stepX) {
+    for (let y = 0; y < stripH; y += 1) {
+      for (let x = 0; x < canvas.width; x += 1) {
         const i = (y * canvas.width + x) * 4;
-        out.push(data[i] + data[i + 1] + data[i + 2]);
+        out[x] += data[i] + data[i + 1] + data[i + 2];
       }
     }
     return out;
@@ -1041,21 +1044,42 @@ const arenaStripsProbe = (hostSelector) => `(() => {
   const upperTop = ${ARENA_TOP_PX};
   const lowerTop = canvas.height - ${FLOOR_INSET_PX} - stripH;
   if (upperTop + stripH > lowerTop) return { cinematic: false, upper: [], lower: [] };
-  return { cinematic: false, upper: sampleStrip(upperTop), lower: sampleStrip(lowerTop) };
+  return { cinematic: false, upper: columnSignal(upperTop), lower: columnSignal(lowerTop) };
 })()`;
 
-/** How far two samples must differ to count as changed -- a little slack for antialiasing. */
-const PARALLAX_SAMPLE_DELTA = 24;
-/** Samples that changed between two strip readings. */
-const stripDiff = (before, after) => {
-  if (!Array.isArray(before) || !Array.isArray(after) || before.length !== after.length) {
+/** The widest slide the correlation searches for, in pixels. */
+const PARALLAX_MAX_SHIFT = 60;
+/**
+ * The horizontal shift (in pixels) that best aligns two column signals, by
+ * minimising mean squared error over the overlap. `-1` when the two are not
+ * comparable. The sign is dropped: a slide left and a slide right are both a
+ * slide, and only its magnitude matters to depth.
+ */
+const stripShift = (before, after) => {
+  if (!Array.isArray(before) || !Array.isArray(after) || before.length !== after.length || before.length === 0) {
     return -1;
   }
-  let changed = 0;
-  for (let i = 0; i < before.length; i += 1) {
-    if (Math.abs(before[i] - after[i]) > PARALLAX_SAMPLE_DELTA) changed += 1;
+  const width = before.length;
+  let best = 0;
+  let bestScore = Number.POSITIVE_INFINITY;
+  for (let d = -PARALLAX_MAX_SHIFT; d <= PARALLAX_MAX_SHIFT; d += 1) {
+    let sse = 0;
+    let n = 0;
+    for (let x = 0; x < width; x += 1) {
+      const xs = x + d;
+      if (xs < 0 || xs >= width) continue;
+      const diff = before[x] - after[xs];
+      sse += diff * diff;
+      n += 1;
+    }
+    if (n === 0) continue;
+    const score = sse / n;
+    if (score < bestScore) {
+      bestScore = score;
+      best = d;
+    }
   }
-  return changed;
+  return Math.abs(best);
 };
 
 /** Clicks the character-select card for stage `id` (Story 12.10). */
@@ -1690,18 +1714,17 @@ async function main() {
           stripsAfter === null ||
           stripsBefore.cinematic === true ||
           stripsAfter.cinematic === true;
-        const farShift = cinematicStrip ? -1 : stripDiff(stripsBefore.upper, stripsAfter.upper);
-        const nearShift = cinematicStrip ? -1 : stripDiff(stripsBefore.lower, stripsAfter.lower);
+        const farShift = cinematicStrip ? -1 : stripShift(stripsBefore.upper, stripsAfter.upper);
+        const nearShift = cinematicStrip ? -1 : stripShift(stripsBefore.lower, stripsAfter.lower);
         record(
           'stage-parallax-has-depth',
-          // The near strip moved (the fight and the near layer), the far strip
-          // moved too (a flat backdrop would not, so this is what proves the
-          // scene parallaxes at all), and the near strip moved strictly more --
+          // The far strip slid at all (a flat backdrop would not, so this proves
+          // the scene parallaxes), and the near strip slid strictly further --
           // which is depth. A cinematic frame is not judged.
           !cinematicStrip && farShift > 0 && nearShift > farShift,
           cinematicStrip
             ? 'a cinematic frame was on screen; parallax not judged this run'
-            : `far strip changed ${farShift}, near strip changed ${nearShift} (near must exceed far, far must exceed 0)`,
+            : `far strip slid ${farShift}px, near strip slid ${nearShift}px (near must exceed far, far must exceed 0)`,
         );
 
         // --- C1d fighters-inside-frame, at the wall (Story 12.3) -----------
