@@ -28,11 +28,19 @@
       sidecar are upgrades to an already-running fight (see startup.ts) and
       preloading them would have them competing for the same narrow pipe as the
       thing that actually blocks.
+
+      Story 12.12 repointed this at the exhibition replay, in the same change that
+      repointed `DEMO_REPLAY_URL`. The two must agree: a preload of a document the
+      page then does not fetch is a wasted round trip on the critical path AND a
+      cold fetch of the one that does block, which is the opposite of what this
+      line is for. `startup.test.ts` asserts the page's first request is
+      `DEMO_REPLAY_URL`; `exhibition-artefact.test.ts` asserts this href is the
+      same URL, because nothing else can see an HTML attribute.
     -->
     <link
       rel="preload"
       as="fetch"
-      href="/replays/demo.command-log.json"
+      href="/replays/exhibition.command-log.json"
       type="application/json"
       crossorigin
     />

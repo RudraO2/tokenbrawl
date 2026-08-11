@@ -1,0 +1,673 @@
+{
+  "schemaVersion": "2.0.0",
+  "matchId": "de3b4f1865f3528f472fff92ffb28c68e4cf12bf698bce74b8ba4e4806deabb7",
+  "environment": {
+    "id": "fighter-1v1",
+    "version": "1.0.0"
+  },
+  "seed": 121200,
+  "configHash": "1024a4dc9375cbc0710a1dcb4e4c15824fda350376e9e456ff5dd19932b3db9f",
+  "tokenBankStart": 25000,
+  "agents": [
+    {
+      "id": "groq-gpt-oss-120b",
+      "kind": "deployment",
+      "deployment": {
+        "provider": "groq",
+        "endpoint": "https://api.groq.com/openai/v1/chat/completions",
+        "model": "openai/gpt-oss-120b"
+      }
+    },
+    {
+      "id": "groq-gpt-oss-20b",
+      "kind": "deployment",
+      "deployment": {
+        "provider": "groq",
+        "endpoint": "https://api.groq.com/openai/v1/chat/completions",
+        "model": "openai/gpt-oss-20b"
+      }
+    }
+  ],
+  "decisions": [
+    {
+      "tick": 0,
+      "agentIndex": 0,
+      "action": "advance",
+      "tokensSpent": 106,
+      "reasoningTokens": 94,
+      "bankRemaining": 24894,
+      "reflexMode": false,
+      "provider": "groq",
+      "endpoint": "https://api.groq.com/openai/v1/chat/completions"
+    },
+    {
+      "tick": 0,
+      "agentIndex": 1,
+      "action": "attack",
+      "tokensSpent": 662,
+      "reasoningTokens": 650,
+      "bankRemaining": 24338,
+      "reflexMode": false,
+      "provider": "groq",
+      "endpoint": "https://api.groq.com/openai/v1/chat/completions"
+    },
+    {
+      "tick": 30,
+      "agentIndex": 0,
+      "action": "attack",
+      "tokensSpent": 441,
+      "reasoningTokens": 429,
+      "bankRemaining": 24709,
+      "reflexMode": false,
+      "provider": "groq",
+      "endpoint": "https://api.groq.com/openai/v1/chat/completions"
+    },
+    {
+      "tick": 60,
+      "agentIndex": 1,
+      "action": "attack",
+      "tokensSpent": 189,
+      "reasoningTokens": 177,
+      "bankRemaining": 24149,
+      "reflexMode": false,
+      "provider": "groq",
+      "endpoint": "https://api.groq.com/openai/v1/chat/completions"
+    },
+    {
+      "tick": 90,
+      "agentIndex": 0,
+      "action": "block",
+      "tokensSpent": 309,
+      "reasoningTokens": 297,
+      "bankRemaining": 24400,
+      "reflexMode": false,
+      "provider": "groq",
+      "endpoint": "https://api.groq.com/openai/v1/chat/completions"
+    },
+    {
+      "tick": 120,
+      "agentIndex": 0,
+      "action": "advance",
+      "tokensSpent": 97,
+      "reasoningTokens": 85,
+      "bankRemaining": 24303,
+      "reflexMode": false,
+      "provider": "groq",
+      "endpoint": "https://api.groq.com/openai/v1/chat/completions"
+    },
+    {
+      "tick": 120,
+      "agentIndex": 1,
+      "action": "retreat",
+      "tokensSpent": 627,
+      "reasoningTokens": 615,
+      "bankRemaining": 23522,
+      "reflexMode": false,
+      "provider": "groq",
+      "endpoint": "https://api.groq.com/openai/v1/chat/completions"
+    },
+    {
+      "tick": 150,
+      "agentIndex": 0,
+      "action": "advance",
+      "tokensSpent": 213,
+      "reasoningTokens": 201,
+      "bankRemaining": 24090,
+      "reflexMode": false,
+      "provider": "groq",
+      "endpoint": "https://api.groq.com/openai/v1/chat/completions"
+    },
+    {
+      "tick": 150,
+      "agentIndex": 1,
+      "action": "attack",
+      "tokensSpent": 386,
+      "reasoningTokens": 374,
+      "bankRemaining": 23136,
+      "reflexMode": false,
+      "provider": "groq",
+      "endpoint": "https://api.groq.com/openai/v1/chat/completions"
+    },
+    {
+      "tick": 180,
+      "agentIndex": 0,
+      "action": "block",
+      "tokensSpent": 283,
+      "reasoningTokens": 271,
+      "bankRemaining": 23807,
+      "reflexMode": false,
+      "provider": "groq",
+      "endpoint": "https://api.groq.com/openai/v1/chat/completions"
+    },
+    {
+      "tick": 210,
+      "agentIndex": 0,
+      "action": "advance",
+      "tokensSpent": 151,
+      "reasoningTokens": 139,
+      "bankRemaining": 23656,
+      "reflexMode": false,
+      "provider": "groq",
+      "endpoint": "https://api.groq.com/openai/v1/chat/completions"
+    },
+    {
+      "tick": 210,
+      "agentIndex": 1,
+      "action": "block",
+      "tokensSpent": 220,
+      "reasoningTokens": 208,
+      "bankRemaining": 22916,
+      "reflexMode": false,
+      "provider": "groq",
+      "endpoint": "https://api.groq.com/openai/v1/chat/completions"
+    },
+    {
+      "tick": 240,
+      "agentIndex": 0,
+      "action": "advance",
+      "tokensSpent": 152,
+      "reasoningTokens": 140,
+      "bankRemaining": 23504,
+      "reflexMode": false,
+      "provider": "groq",
+      "endpoint": "https://api.groq.com/openai/v1/chat/completions"
+    },
+    {
+      "tick": 240,
+      "agentIndex": 1,
+      "action": "attack",
+      "tokensSpent": 211,
+      "reasoningTokens": 199,
+      "bankRemaining": 22705,
+      "reflexMode": false,
+      "provider": "groq",
+      "endpoint": "https://api.groq.com/openai/v1/chat/completions"
+    },
+    {
+      "tick": 270,
+      "agentIndex": 0,
+      "action": "attack",
+      "tokensSpent": 229,
+      "reasoningTokens": 217,
+      "bankRemaining": 23275,
+      "reflexMode": false,
+      "provider": "groq",
+      "endpoint": "https://api.groq.com/openai/v1/chat/completions"
+    },
+    {
+      "tick": 330,
+      "agentIndex": 0,
+      "action": "retreat",
+      "tokensSpent": 659,
+      "reasoningTokens": 647,
+      "bankRemaining": 22616,
+      "reflexMode": false,
+      "provider": "groq",
+      "endpoint": "https://api.groq.com/openai/v1/chat/completions"
+    },
+    {
+      "tick": 330,
+      "agentIndex": 1,
+      "action": "block",
+      "tokensSpent": 660,
+      "reasoningTokens": 648,
+      "bankRemaining": 22045,
+      "reflexMode": false,
+      "provider": "groq",
+      "endpoint": "https://api.groq.com/openai/v1/chat/completions"
+    },
+    {
+      "tick": 360,
+      "agentIndex": 0,
+      "action": "advance",
+      "tokensSpent": 220,
+      "reasoningTokens": 208,
+      "bankRemaining": 22396,
+      "reflexMode": false,
+      "provider": "groq",
+      "endpoint": "https://api.groq.com/openai/v1/chat/completions"
+    },
+    {
+      "tick": 360,
+      "agentIndex": 1,
+      "action": "advance",
+      "tokensSpent": 297,
+      "reasoningTokens": 285,
+      "bankRemaining": 21748,
+      "reflexMode": false,
+      "provider": "groq",
+      "endpoint": "https://api.groq.com/openai/v1/chat/completions"
+    },
+    {
+      "tick": 390,
+      "agentIndex": 0,
+      "action": "advance",
+      "tokensSpent": 648,
+      "reasoningTokens": 636,
+      "bankRemaining": 22004,
+      "reflexMode": false,
+      "provider": "groq",
+      "endpoint": "https://api.groq.com/openai/v1/chat/completions"
+    },
+    {
+      "tick": 390,
+      "agentIndex": 1,
+      "action": "block",
+      "tokensSpent": 765,
+      "reasoningTokens": 753,
+      "bankRemaining": 21239,
+      "reflexMode": false,
+      "provider": "groq",
+      "endpoint": "https://api.groq.com/openai/v1/chat/completions"
+    },
+    {
+      "tick": 420,
+      "agentIndex": 0,
+      "action": "advance",
+      "tokensSpent": 583,
+      "reasoningTokens": 571,
+      "bankRemaining": 21421,
+      "reflexMode": false,
+      "provider": "groq",
+      "endpoint": "https://api.groq.com/openai/v1/chat/completions"
+    },
+    {
+      "tick": 420,
+      "agentIndex": 1,
+      "action": "attack",
+      "tokensSpent": 512,
+      "reasoningTokens": 500,
+      "bankRemaining": 20983,
+      "reflexMode": false,
+      "provider": "groq",
+      "endpoint": "https://api.groq.com/openai/v1/chat/completions"
+    },
+    {
+      "tick": 480,
+      "agentIndex": 0,
+      "action": "advance",
+      "tokensSpent": 183,
+      "reasoningTokens": 171,
+      "bankRemaining": 21238,
+      "reflexMode": false,
+      "provider": "groq",
+      "endpoint": "https://api.groq.com/openai/v1/chat/completions"
+    },
+    {
+      "tick": 480,
+      "agentIndex": 1,
+      "action": "attack",
+      "tokensSpent": 83,
+      "reasoningTokens": 71,
+      "bankRemaining": 20900,
+      "reflexMode": false,
+      "provider": "groq",
+      "endpoint": "https://api.groq.com/openai/v1/chat/completions"
+    },
+    {
+      "tick": 540,
+      "agentIndex": 0,
+      "action": "advance",
+      "tokensSpent": 329,
+      "reasoningTokens": 317,
+      "bankRemaining": 21165,
+      "reflexMode": false,
+      "provider": "groq",
+      "endpoint": "https://api.groq.com/openai/v1/chat/completions"
+    },
+    {
+      "tick": 540,
+      "agentIndex": 1,
+      "action": "attack",
+      "tokensSpent": 614,
+      "reasoningTokens": 602,
+      "bankRemaining": 20542,
+      "reflexMode": false,
+      "provider": "groq",
+      "endpoint": "https://api.groq.com/openai/v1/chat/completions"
+    },
+    {
+      "tick": 600,
+      "agentIndex": 0,
+      "action": "retreat",
+      "tokensSpent": 410,
+      "reasoningTokens": 398,
+      "bankRemaining": 21011,
+      "reflexMode": false,
+      "provider": "groq",
+      "endpoint": "https://api.groq.com/openai/v1/chat/completions"
+    },
+    {
+      "tick": 600,
+      "agentIndex": 1,
+      "action": "attack",
+      "tokensSpent": 455,
+      "reasoningTokens": 443,
+      "bankRemaining": 20087,
+      "reflexMode": false,
+      "provider": "groq",
+      "endpoint": "https://api.groq.com/openai/v1/chat/completions"
+    },
+    {
+      "tick": 660,
+      "agentIndex": 0,
+      "action": "block",
+      "tokensSpent": 401,
+      "reasoningTokens": 389,
+      "bankRemaining": 20610,
+      "reflexMode": false,
+      "provider": "groq",
+      "endpoint": "https://api.groq.com/openai/v1/chat/completions"
+    },
+    {
+      "tick": 660,
+      "agentIndex": 1,
+      "action": "attack",
+      "tokensSpent": 798,
+      "reasoningTokens": 786,
+      "bankRemaining": 19545,
+      "reflexMode": false,
+      "provider": "groq",
+      "endpoint": "https://api.groq.com/openai/v1/chat/completions"
+    },
+    {
+      "tick": 690,
+      "agentIndex": 0,
+      "action": "block",
+      "tokensSpent": 389,
+      "reasoningTokens": 377,
+      "bankRemaining": 20477,
+      "reflexMode": false,
+      "provider": "groq",
+      "endpoint": "https://api.groq.com/openai/v1/chat/completions"
+    },
+    {
+      "tick": 720,
+      "agentIndex": 0,
+      "action": "block",
+      "tokensSpent": 237,
+      "reasoningTokens": 225,
+      "bankRemaining": 20240,
+      "reflexMode": false,
+      "provider": "groq",
+      "endpoint": "https://api.groq.com/openai/v1/chat/completions"
+    },
+    {
+      "tick": 720,
+      "agentIndex": 1,
+      "action": "advance",
+      "tokensSpent": 224,
+      "reasoningTokens": 212,
+      "bankRemaining": 19321,
+      "reflexMode": false,
+      "provider": "groq",
+      "endpoint": "https://api.groq.com/openai/v1/chat/completions"
+    },
+    {
+      "tick": 750,
+      "agentIndex": 0,
+      "action": "block",
+      "tokensSpent": 326,
+      "reasoningTokens": 314,
+      "bankRemaining": 19914,
+      "reflexMode": false,
+      "provider": "groq",
+      "endpoint": "https://api.groq.com/openai/v1/chat/completions"
+    },
+    {
+      "tick": 750,
+      "agentIndex": 1,
+      "action": "attack",
+      "tokensSpent": 79,
+      "reasoningTokens": 67,
+      "bankRemaining": 19242,
+      "reflexMode": false,
+      "provider": "groq",
+      "endpoint": "https://api.groq.com/openai/v1/chat/completions"
+    },
+    {
+      "tick": 780,
+      "agentIndex": 0,
+      "action": "retreat",
+      "tokensSpent": 775,
+      "reasoningTokens": 763,
+      "bankRemaining": 19139,
+      "reflexMode": false,
+      "provider": "groq",
+      "endpoint": "https://api.groq.com/openai/v1/chat/completions"
+    },
+    {
+      "tick": 810,
+      "agentIndex": 0,
+      "action": "advance",
+      "tokensSpent": 120,
+      "reasoningTokens": 108,
+      "bankRemaining": 19019,
+      "reflexMode": false,
+      "provider": "groq",
+      "endpoint": "https://api.groq.com/openai/v1/chat/completions"
+    },
+    {
+      "tick": 810,
+      "agentIndex": 1,
+      "action": "retreat",
+      "tokensSpent": 687,
+      "reasoningTokens": 675,
+      "bankRemaining": 18555,
+      "reflexMode": false,
+      "provider": "groq",
+      "endpoint": "https://api.groq.com/openai/v1/chat/completions"
+    },
+    {
+      "tick": 840,
+      "agentIndex": 0,
+      "action": "block",
+      "tokensSpent": 411,
+      "reasoningTokens": 399,
+      "bankRemaining": 18864,
+      "reflexMode": false,
+      "provider": "groq",
+      "endpoint": "https://api.groq.com/openai/v1/chat/completions"
+    },
+    {
+      "tick": 840,
+      "agentIndex": 1,
+      "action": "attack",
+      "tokensSpent": 1303,
+      "reasoningTokens": 1291,
+      "bankRemaining": 17252,
+      "reflexMode": false,
+      "provider": "groq",
+      "endpoint": "https://api.groq.com/openai/v1/chat/completions"
+    },
+    {
+      "tick": 870,
+      "agentIndex": 0,
+      "action": "block",
+      "tokensSpent": 593,
+      "reasoningTokens": 581,
+      "bankRemaining": 18527,
+      "reflexMode": false,
+      "provider": "groq",
+      "endpoint": "https://api.groq.com/openai/v1/chat/completions"
+    },
+    {
+      "tick": 900,
+      "agentIndex": 0,
+      "action": "advance",
+      "tokensSpent": 559,
+      "reasoningTokens": 547,
+      "bankRemaining": 17968,
+      "reflexMode": false,
+      "provider": "groq",
+      "endpoint": "https://api.groq.com/openai/v1/chat/completions"
+    },
+    {
+      "tick": 900,
+      "agentIndex": 1,
+      "action": "advance",
+      "tokensSpent": 367,
+      "reasoningTokens": 355,
+      "bankRemaining": 17141,
+      "reflexMode": false,
+      "provider": "groq",
+      "endpoint": "https://api.groq.com/openai/v1/chat/completions"
+    },
+    {
+      "tick": 930,
+      "agentIndex": 0,
+      "action": "block",
+      "tokensSpent": 304,
+      "reasoningTokens": 292,
+      "bankRemaining": 17664,
+      "reflexMode": false,
+      "provider": "groq",
+      "endpoint": "https://api.groq.com/openai/v1/chat/completions"
+    },
+    {
+      "tick": 930,
+      "agentIndex": 1,
+      "action": "block",
+      "tokensSpent": 1028,
+      "reasoningTokens": 1016,
+      "bankRemaining": 16113,
+      "reflexMode": false,
+      "provider": "groq",
+      "endpoint": "https://api.groq.com/openai/v1/chat/completions"
+    },
+    {
+      "tick": 960,
+      "agentIndex": 0,
+      "action": "advance",
+      "tokensSpent": 169,
+      "reasoningTokens": 157,
+      "bankRemaining": 17495,
+      "reflexMode": false,
+      "provider": "groq",
+      "endpoint": "https://api.groq.com/openai/v1/chat/completions"
+    },
+    {
+      "tick": 960,
+      "agentIndex": 1,
+      "action": "stand",
+      "tokensSpent": 2048,
+      "reasoningTokens": 2046,
+      "bankRemaining": 14321,
+      "reflexMode": false,
+      "parseFailure": true,
+      "provider": "groq",
+      "endpoint": "https://api.groq.com/openai/v1/chat/completions",
+      "rawResponse": ""
+    },
+    {
+      "tick": 990,
+      "agentIndex": 0,
+      "action": "advance",
+      "tokensSpent": 246,
+      "reasoningTokens": 234,
+      "bankRemaining": 17249,
+      "reflexMode": false,
+      "provider": "groq",
+      "endpoint": "https://api.groq.com/openai/v1/chat/completions"
+    },
+    {
+      "tick": 990,
+      "agentIndex": 1,
+      "action": "attack",
+      "tokensSpent": 175,
+      "reasoningTokens": 163,
+      "bankRemaining": 14146,
+      "reflexMode": false,
+      "provider": "groq",
+      "endpoint": "https://api.groq.com/openai/v1/chat/completions"
+    },
+    {
+      "tick": 1050,
+      "agentIndex": 0,
+      "action": "advance",
+      "tokensSpent": 250,
+      "reasoningTokens": 238,
+      "bankRemaining": 16999,
+      "reflexMode": false,
+      "provider": "groq",
+      "endpoint": "https://api.groq.com/openai/v1/chat/completions"
+    },
+    {
+      "tick": 1050,
+      "agentIndex": 1,
+      "action": "attack",
+      "tokensSpent": 396,
+      "reasoningTokens": 384,
+      "bankRemaining": 13750,
+      "reflexMode": false,
+      "provider": "groq",
+      "endpoint": "https://api.groq.com/openai/v1/chat/completions"
+    },
+    {
+      "tick": 1110,
+      "agentIndex": 0,
+      "action": "block",
+      "tokensSpent": 306,
+      "reasoningTokens": 294,
+      "bankRemaining": 16693,
+      "reflexMode": false,
+      "provider": "groq",
+      "endpoint": "https://api.groq.com/openai/v1/chat/completions"
+    },
+    {
+      "tick": 1110,
+      "agentIndex": 1,
+      "action": "attack",
+      "tokensSpent": 1685,
+      "reasoningTokens": 1673,
+      "bankRemaining": 12065,
+      "reflexMode": false,
+      "provider": "groq",
+      "endpoint": "https://api.groq.com/openai/v1/chat/completions"
+    },
+    {
+      "tick": 1140,
+      "agentIndex": 0,
+      "action": "block",
+      "tokensSpent": 482,
+      "reasoningTokens": 470,
+      "bankRemaining": 16211,
+      "reflexMode": false,
+      "provider": "groq",
+      "endpoint": "https://api.groq.com/openai/v1/chat/completions"
+    },
+    {
+      "tick": 1170,
+      "agentIndex": 0,
+      "action": "retreat",
+      "tokensSpent": 689,
+      "reasoningTokens": 677,
+      "bankRemaining": 15778,
+      "reflexMode": false,
+      "provider": "groq",
+      "endpoint": "https://api.groq.com/openai/v1/chat/completions"
+    },
+    {
+      "tick": 1170,
+      "agentIndex": 1,
+      "action": "special",
+      "tokensSpent": 450,
+      "reasoningTokens": 438,
+      "bankRemaining": 11615,
+      "reflexMode": false,
+      "provider": "groq",
+      "endpoint": "https://api.groq.com/openai/v1/chat/completions"
+    }
+  ],
+  "result": {
+    "outcome": "p2",
+    "endTick": 1200,
+    "endReason": "timeout",
+    "healthRemaining": [
+      32,
+      93
+    ]
+  },
+  "finalStateHash": "f6e2fa9a2423a56ec8d9282f02e1bd57ea65b1881bbefc4ef932fa2aa818794e",
+  "reasoningSidecar": "exhibition.reasoning.json"
+}

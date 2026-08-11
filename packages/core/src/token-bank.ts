@@ -44,6 +44,37 @@ export function createTokenBank(start: number = DEFAULT_TOKEN_BANK_START): Token
  * debit stays conservative -- the full `tokensSpent` is charged, including
  * whatever was actually served from cache -- rather than guessing a hit rate
  * that was never reported.
+ *
+ * ## A reported count larger than the spend is conservative, not fatal
+ *
+ * Until Story 12.12 this threw, on the reading that cached tokens must be a
+ * subset of the tokens spent. The first real provider call in this project's
+ * history disproved that reading and took the run with it: Groq answered a
+ * Match Decision Point with `completion_tokens: 186` and
+ * `prompt_tokens_details.cached_tokens: 256`, because this bank meters
+ * **completion** tokens while an OpenAI-compatible provider reports its cache
+ * signal against the **prompt**. The Scaffold is byte-identical on every call by
+ * construction (INV-7), so a warm prompt cache is not an edge case here -- it is
+ * what every call after the first looks like, and the generator crashed on
+ * Decision Point one.
+ *
+ * Two things must not happen. It must not throw, because a legitimate provider
+ * report is not a caller bug. And it must not subtract, because `186 - 256` is
+ * negative and would make the bank *grow* -- an Agent gaining budget by thinking,
+ * which is INV-5's failure mode with the sign flipped.
+ *
+ * So the two counts are treated as what they are: incommensurable. There is
+ * nothing to exclude, because prompt tokens were never billed in the first
+ * place, and AC5's conservative path is exactly the specified behaviour for a
+ * signal the debit cannot use -- the full `tokensSpent` is charged. The
+ * comparable case (a provider reporting cached *completion* tokens) is untouched
+ * and still excludes them.
+ *
+ * The deeper question this raises -- whether a prompt-cache count should reduce a
+ * completion-token debit *at all*, i.e. whether Story 3.5's AC4 has any effect
+ * against an OpenAI-compatible provider -- is a metering-semantics decision that
+ * belongs to whoever owns Story 3.5, not to a presentation epic. Recorded as
+ * deferred work by Story 12.12 rather than settled here.
  */
 export function debitTokenBank(
   bank: TokenBank,
@@ -61,10 +92,14 @@ export function debitTokenBank(
 
   let billable = tokensSpent;
   if (cachedTokens !== null) {
-    if (!Number.isSafeInteger(cachedTokens) || cachedTokens < 0 || cachedTokens > tokensSpent) {
+    if (!Number.isSafeInteger(cachedTokens) || cachedTokens < 0) {
       throw new Error(`debitTokenBank: Agent "${agentId}" reported an invalid cachedTokens: ${cachedTokens}`);
     }
-    billable = tokensSpent - cachedTokens;
+    // Only when the two counts are commensurable. Otherwise the conservative
+    // path above stands -- see the docblock.
+    if (cachedTokens <= tokensSpent) {
+      billable = tokensSpent - cachedTokens;
+    }
   }
 
   return { remaining: Math.max(0, bank.remaining - billable) };

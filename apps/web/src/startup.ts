@@ -95,8 +95,36 @@ import { ROUTE_BYOK, ROUTE_PLAY, ROUTE_REPLAY, ROUTE_SELECT, ROUTE_WATCH, SCREEN
  * demonstrated end to end.
  */
 
-/** Same-origin, so both are covered by the no-remote-asset sweep in `style-discipline.test.ts`. */
-export const DEMO_REPLAY_URL = '/replays/demo.command-log.json';
+/**
+ * The flagship replay the player opens on. Same-origin, so it is covered by the
+ * no-remote-asset sweep in `style-discipline.test.ts`.
+ *
+ * **Story 12.12 repointed this**, from `demo.command-log.json` -- a Baseline Bot
+ * against a Baseline Bot -- to the exhibition Match between two language models.
+ * The page's own description meta claims "language models fighting under a fixed
+ * token budget", and until this story the first thing a visitor saw was two
+ * scripted bots with `reasoning: null` on every one of their decisions. Story
+ * 4.3's hover reasoning is `docs/stories/README.md`'s stated centrepiece feature
+ * and a visitor hovering a Decision Point got nothing, because there was nothing
+ * in the corpus for it to show.
+ *
+ * The constant keeps its name. `demo` is what this slot *is* -- the demonstration
+ * replay the page mounts before a visitor chooses anything -- and renaming it
+ * would touch `startup.test.ts`'s four call sites and `spectate/manifest.ts`'s and
+ * `landing/leaderboard-view.ts`'s docblocks to say the same thing differently.
+ *
+ * `demo.command-log.json` is still committed and still built by
+ * `src/testing/demo-log.ts`: it is the v1 fixture ~81 test call sites read as a
+ * `CommandLog`, including `replay/film.test.ts`'s direct v1 `replayCommandLog`
+ * path (see Story 12.11's interpretation note). It is no longer what a visitor
+ * lands on.
+ *
+ * The exhibition log is **v2**, and nothing here branches on that: the cast below
+ * is the same cast this line always made, and `buildReplayFilm` dispatches on
+ * `schemaVersion` to `replayCommandLogV2`. That is the property Story 9.2 built
+ * and Story 12.11 relied on, now load-bearing on the landing path.
+ */
+export const DEMO_REPLAY_URL = '/replays/exhibition.command-log.json';
 /**
  * Story 11.2. The impact FX sheet's strip layout, authored in this repo beside
  * the image it describes. Same-origin like every other asset here, for INV-8's

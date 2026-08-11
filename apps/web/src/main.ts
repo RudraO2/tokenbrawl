@@ -659,8 +659,19 @@ export function reasoningView(
   }
 
   if (lookup.parseFailure) {
+    // Two different failures, and the shipped exhibition replay contains the
+    // second one -- which is how it was found (Story 12.12). At tick 960 a
+    // reasoning model spent 2,046 of its 2,048 completion tokens deliberating and
+    // emitted `content: ""`, so the log's `rawResponse` is the empty string. The
+    // single-message version of this branch then said "no valid Action could be
+    // read from this response" above an empty `<pre>`, which reads as a rendering
+    // bug rather than as the most interesting Parse Failure in the corpus. An
+    // empty completion is a fact worth stating, not a blank to be shown.
+    const emptyResponse = lookup.rawResponse === null || lookup.rawResponse.length === 0;
     return view(
-      'No valid Action could be read from this response, so the Fallback Action was applied. It was not retried.',
+      emptyResponse
+        ? 'This call returned no content at all, so there was no Action to read and the Fallback Action was applied. It was not retried.'
+        : 'No valid Action could be read from this response, so the Fallback Action was applied. It was not retried.',
       'tb-reasoning--warn',
       lookup.rawResponse,
     );
@@ -847,8 +858,12 @@ export function renderApp(
     const chips = panelView.chips
       .map((chip) => `<span class="tb-chip ${chip.modifier}">${escapeHtml(chip.label)}</span>`)
       .join('');
+    // An empty string is not a raw response worth framing: the block would be an
+    // outlined rectangle with nothing in it, and the body above already states
+    // that the call returned no content (Story 12.12). `null` and `''` are the
+    // same thing to a reader, so they take the same branch.
     const raw =
-      panelView.rawResponse === null
+      panelView.rawResponse === null || panelView.rawResponse.length === 0
         ? ''
         : `<p class="tb-reasoning-label">Raw response</p><pre class="tb-reasoning-raw">${escapeHtml(panelView.rawResponse)}</pre>`;
     const selected = selection.agentIndex === agentIndex ? ' tb-reasoning-card--selected' : '';

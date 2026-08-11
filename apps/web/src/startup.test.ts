@@ -581,7 +581,15 @@ describe("the document's own critical path (AC1)", () => {
     // has downloaded and executed -- one extra serial round trip, which on a
     // high-latency link costs more than every byte saved elsewhere. With it,
     // the log and the script land within 3 ms of each other on Fast 3G.
-    expect(html).toMatch(/rel="preload"[\s\S]*?href="\/replays\/demo\.command-log\.json"/);
+    //
+    // Asserted against `DEMO_REPLAY_URL` rather than against a literal path
+    // (Story 12.12). The two must be the same document or the preload is a wasted
+    // round trip on the critical path *plus* a cold fetch of the one that blocks,
+    // and a hardcoded literal here is a check that passes while they disagree --
+    // which is exactly what it did when this story repointed the flagship at the
+    // exhibition replay.
+    expect(html).toContain(`href="${DEMO_REPLAY_URL}"`);
+    expect(html).toMatch(/rel="preload"[\s\S]*?href="\/replays\//);
     // `crossorigin` is what makes the preload match a plain same-origin
     // `fetch()`. Without it the browser downloads the file twice, which is
     // slower than not preloading at all.

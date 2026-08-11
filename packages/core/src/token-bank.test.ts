@@ -105,10 +105,32 @@ describe('debitTokenBank (I/O matrix: cache exclusion, Story 3.5)', () => {
     expect(() => debitTokenBank(bank, 120, 'agent:the-culprit', bad)).toThrow(/agent:the-culprit/);
   });
 
-  it('throws when cachedTokens exceeds tokensSpent', () => {
+  /**
+   * Story 12.12. This asserted a throw until the first real provider call in
+   * this project's history disproved the reading behind it.
+   *
+   * Groq answered a Match Decision Point with `completion_tokens: 186` and
+   * `prompt_tokens_details.cached_tokens: 256`: this bank meters *completion*
+   * tokens and an OpenAI-compatible provider reports its cache signal against the
+   * *prompt*, so the second count is routinely the larger one -- the Scaffold is
+   * byte-identical on every call by construction (INV-7), which means every call
+   * after the first has a warm prompt cache. A throw made that a crash on
+   * Decision Point one; subtracting would have made the bank grow.
+   */
+  it('charges the full tokensSpent when cachedTokens exceeds it, rather than throwing', () => {
     const bank = createTokenBank(25_000);
+    const debited = debitTokenBank(bank, 186, 'agent:p1', 256);
 
-    expect(() => debitTokenBank(bank, 100, 'agent:p1', 101)).toThrow(/agent:p1/);
+    expect(debited.remaining).toBe(24_814);
+  });
+
+  it('never lets an over-large cachedTokens grow the bank', () => {
+    // The failure mode the old throw was really guarding: `186 - 256` is
+    // negative, and a negative debit is an Agent gaining budget by thinking.
+    const bank = createTokenBank(1_000);
+
+    expect(debitTokenBank(bank, 186, 'agent:p1', 256).remaining).toBeLessThan(1_000);
+    expect(debitTokenBank(bank, 1, 'agent:p1', 1_000_000).remaining).toBeLessThan(1_000);
   });
 });
 
