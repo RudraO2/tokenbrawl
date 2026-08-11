@@ -2349,8 +2349,20 @@ async function main() {
           // there and read the beam as a clipped fighter; the `cinematic`
           // exclusion catches the letterboxed acts but not this one.
           //
-          // So sample across a window longer than one cinematic freeze (~2.2s)
-          // and take the **median** fight frame per host -- not the cleanest.
+          // So sample across a window longer than one cinematic and take the
+          // **median** fight frame per host -- not the cleanest.
+          //
+          // Story 12.9 widened that window from 14 samples at 280ms (3.9s) to 24
+          // at 300ms (7.2s), because the original was measured against the
+          // *freeze* (~2.2s) and the frame that gets through is drawn during the
+          // **beam act**, which comes after it. Freeze plus release plus beam is
+          // 3-4s, comparable to the old window, so the beam was a near-majority
+          // of the samples and the median stepped into it rather than over it:
+          // two runs of this story failed here with 27 and 28 edge pixels at
+          // y=259-260 -- a horizontal pale-blue sweep at chest height, which is
+          // the beam and not a clipped fighter. A window twice the length of the
+          // whole cinematic puts it back in the minority, which is the condition
+          // the median needs to be a statement about the fight.
           // Median, not min, is the point: min would cherry-pick a single
           // unclipped frame and could slip a persistent clip through, whereas a
           // genuine framing defect clips a majority of frames and so clips the
@@ -2360,7 +2372,7 @@ async function main() {
           // median of its fight frames is a clean fight or the surface is broken.
           const fights = new Map();
           const fallback = new Map();
-          for (let attempt = 0; attempt < 14; attempt += 1) {
+          for (let attempt = 0; attempt < 24; attempt += 1) {
             for (const reading of await cdp.evaluate(arenaInkProbe('#spectate'))) {
               const key = reading.host ?? 'spectate';
               if (!fallback.has(key)) fallback.set(key, reading);
@@ -2369,7 +2381,7 @@ async function main() {
                 fights.get(key).push(reading);
               }
             }
-            await sleep(280);
+            await sleep(300);
           }
           // The median-edge fight frame; fall back to any reading (excluded by
           // `judged` if cinematic) so a host that was only ever cinematic is still
@@ -2530,6 +2542,50 @@ async function main() {
           ? 'no off-screen canvas found, so nothing was measured'
           : `${hiddenBefore.length} off-screen canvas(es)${moved.length === 0 ? ', none repainted' : ` REPAINTED: ${moved.map((c) => c.host ?? '?').join(', ')}`}`,
       );
+
+      // --- C4c2 hidden-screens-are-silent (Story 12.9) ---------------------
+      //
+      // `hidden-screens-are-idle` above says the pixels stop; this says the
+      // graph does. They are different failures with the same cause and only one
+      // of them was checkable before this story: a paused walk still leaves the
+      // *looping* music bed running, which is a screen a visitor cannot see
+      // playing music at them, and no canvas hash can see it.
+      //
+      // Measured in gain writes rather than in sources started, because a bus
+      // level is written on every frame a director presents and a source only
+      // when a cue fires -- so "sources stayed at 0" is also true of a surface
+      // that is driving the graph through a quiet stretch of a Match. Writes
+      // rising means a director is running; writes flat means none is.
+      if (!viewport.mobile) {
+        const writes = (stats) => stats.gainWrites.reduce((total, count) => total + count, 0);
+        await goto('/replay');
+        // A real navigation *away* and back, not a re-set of the same hash: the
+        // router only acts on a `hashchange`, so asking for the screen the page
+        // is already on runs no `onShow` and would sample whatever state the
+        // previous check happened to leave the panel in.
+        await goto('/watch');
+        await sleep(600);
+        const watchingBefore = await cdp.evaluate(AUDIO_STATS_PROBE);
+        await sleep(ANIMATION_SAMPLE_MS);
+        const watchingAfter = await cdp.evaluate(AUDIO_STATS_PROBE);
+        const buttons = await cdp.evaluate(SOUND_CONTROL_PROBE);
+
+        await goto('/play');
+        await sleep(600);
+        const hiddenSoundBefore = await cdp.evaluate(AUDIO_STATS_PROBE);
+        await sleep(ANIMATION_SAMPLE_MS);
+        const hiddenSoundAfter = await cdp.evaluate(AUDIO_STATS_PROBE);
+
+        const drivenOnWatch = writes(watchingAfter) - writes(watchingBefore);
+        const drivenOnPlay = writes(hiddenSoundAfter) - writes(hiddenSoundBefore);
+        record(
+          'hidden-screens-are-silent',
+          drivenOnWatch > 0 && drivenOnPlay === 0,
+          drivenOnWatch === 0
+            ? `the watch screen wrote no bus gains in ${String(ANIMATION_SAMPLE_MS)}ms, so nothing was measured — a shown screen that drives no audio is the failure this check inverts (page switch ${String(buttons.shell?.pressed)}, spectate button ${String(buttons.spectate?.pressed)})`
+            : `shown (#/watch) wrote ${drivenOnWatch} bus gains; hidden (on #/play, whose own screen has no audio) wrote ${drivenOnPlay}; sources started so far ${hiddenSoundAfter.started}, per-bus writes music/sfx/voice ${hiddenSoundAfter.gainWrites.join('/')}`,
+        );
+      }
 
       // --- C4d the HUD band (Story 12.6) ------------------------------------
       //

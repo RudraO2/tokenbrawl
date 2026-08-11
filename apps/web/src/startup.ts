@@ -1522,29 +1522,30 @@ export async function startup(globals: BrowserGlobals): Promise<StartupResult | 
     // `router.ts` for the same reason the CTAs are two callbacks rather than a
     // panel import: this is the one file that already holds every handle, and
     // the router must not learn what a Spectate walk or a playback clock is.
+    /**
+     * What the watch screen has to be told when it comes back.
+     *
+     * Story 12.4 remembered two things here: whether the stream was running and
+     * whether it was driving the page's audio. The second is gone, and its
+     * absence is load-bearing rather than a tidy-up.
+     *
+     * Both were remembered by reading the panel back on `onHide`. For the
+     * transport that is right -- a visitor who paused the stream must not come
+     * back to it playing. For the audio it stopped being right the moment Story
+     * 12.9 gave the page a switch: the router applies the current route *on
+     * construction*, and on any landing other than `#/watch` that means an
+     * `onHide` for a panel which has never been shown, whose `audioEnabled()` is
+     * still its own mount-time `false`. The page's default was therefore
+     * overwritten by the panel's initial state on every single load, and the
+     * watch screen came back muted with the switch reading on. The visual gate's
+     * `hidden-screens-are-silent` caught it.
+     *
+     * So the audio half is read from the switch at every show instead. There is
+     * one source of truth for whether the page makes noise, the panel's own
+     * button writes *into* it (`onAudioToggle`), and nothing reads it back out.
+     */
     const watch = {
       playing: spectatePanel?.isPlaying() ?? false,
-      /**
-       * Whether Spectate was driving the page's audio when its screen was
-       * hidden (Story 12.4).
-       *
-       * The stream's music bed is a looping source: pausing the walk stops new
-       * cues from starting but leaves the bed running, so a visitor who turned
-       * sound on and navigated away kept hearing Spectate from a screen they
-       * could not see. An independent review of this story found it.
-       *
-       * `setAudioEnabled` is the fix rather than a bare `sink.stopAll()`,
-       * because the panel's own toggle already owns both edges of this: turning
-       * it off calls `stopAll`, turning it back on re-arms the director from
-       * frame zero (`spectate/panel.ts`). Reusing it means the returning
-       * visitor gets their bed back rather than silence.
-       *
-       * Story 12.9 reversed the default. It is the page's switch that decides,
-       * not this surface: a visitor who has not turned sound off arrives on the
-       * watch screen with the stream audible, which is what "the sound is on"
-       * means on the surface that recorded the opposite decision in 11.6.
-       */
-      audible: soundControl?.enabled() ?? true,
     };
     const screens: Screen[] = SCREENS.map((spec) => {
       const element = (globals.document?.querySelector(spec.selector) ??
@@ -1566,14 +1567,13 @@ export async function startup(globals: BrowserGlobals): Promise<StartupResult | 
           ...base,
           onShow: (): void => {
             spectatePanel?.setPlaying(watch.playing);
-            spectatePanel?.setAudioEnabled(watch.audible);
+            // Story 12.9: from the page's switch, every time. See `watch`.
+            spectatePanel?.setAudioEnabled(soundControl?.enabled() ?? true);
           },
           onHide: (): void => {
-            // Remembered, not assumed: a visitor who paused the stream or
-            // muted it and navigated away must not come back to it playing or
-            // to sound they had turned off.
+            // Remembered, not assumed: a visitor who paused the stream and
+            // navigated away must not come back to it playing.
             watch.playing = spectatePanel?.isPlaying() ?? watch.playing;
-            watch.audible = spectatePanel?.audioEnabled() ?? watch.audible;
             spectatePanel?.setPlaying(false);
             // The looping bed outlives a paused walk; this is what actually
             // makes "a hidden screen makes no sound" true.
@@ -1644,7 +1644,6 @@ export async function startup(globals: BrowserGlobals): Promise<StartupResult | 
       // page: a visitor whose only interaction is turning sound back on must
       // not have to press something else to be heard.
       sink?.unlock();
-      watch.audible = enabled;
       if (!enabled) {
         spectatePanel?.setAudioEnabled(false);
         sink?.stopAll();
