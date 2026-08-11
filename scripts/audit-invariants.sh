@@ -734,6 +734,68 @@ else
   fi
 fi
 
+# --- Story 12.11: the Spectate corpus is v2, Ultimate-bearing, KO-heavy ------
+#
+# The stream a visitor watches has to contain the things this project built.
+# Three of these are file facts a grep can settle and this script owns them; the
+# deeper two -- that each log validates against the frozen v2 schema and replays
+# to its own Final-State Hash -- need Ajv and the engine, so they live in
+# `apps/web/src/spectate/corpus.test.ts` (run by `npm test`), which is the repo's
+# usual "checked twice" split: the audit pins the shape, the suite proves the
+# content.
+#
+# Scope is the Spectate *stream* -- the `spectate-*.command-log.json` logs the
+# manifest walks, enumerated from disk rather than a hardcoded list so a seventh
+# entry is swept the same as the first. `demo.command-log.json` is deliberately
+# not here: it is a separate artefact owned by `apps/web/src/testing/demo-log.ts`
+# with its own drift test and ~100 test call sites that read it as a v1
+# `CommandLog`, and it is not part of the regenerated stream. The replay player
+# reads it version-agnostically (`film.ts` dispatches on `schemaVersion`), so it
+# stays v1 by design; see the story file's Visual check finding for the reading.
+echo
+echo "Story 12.11  Spectate corpus is v2, carries an Ultimate in every entry, and ends at least half in KO"
+replays_dir="apps/web/public/replays"
+manifest_file="$replays_dir/manifest.json"
+if [ ! -d "$replays_dir" ] || [ ! -f "$manifest_file" ]; then
+  skip "no Spectate corpus yet"
+else
+  corpus_broken=""
+  shopt -s nullglob
+  corpus_logs=( "$replays_dir"/spectate-*.command-log.json )
+  shopt -u nullglob
+  corpus_n=${#corpus_logs[@]}
+  ko_n=0
+  if [ "$corpus_n" -eq 0 ]; then
+    corpus_broken="$corpus_broken no-spectate-logs-found"
+  fi
+  for log in "${corpus_logs[@]}"; do
+    base=$(basename "$log")
+    grep -q '"schemaVersion": "2.0.0"' "$log" \
+      || corpus_broken="$corpus_broken ${base}-is-not-schemaVersion-2.0.0"
+    # The Ultimate. Only `"action": "special"` matches this -- a bot's
+    # `"rawResponse": "random:special"` is a different key and is not counted.
+    if [ "$(grep -c '"action": "special"' "$log")" -lt 1 ]; then
+      corpus_broken="$corpus_broken ${base}-contains-no-Ultimate"
+    fi
+    grep -q '"endReason": "ko"' "$log" && ko_n=$((ko_n + 1))
+  done
+  # At least half of the stream ends in a KO rather than a timeout.
+  if [ "$corpus_n" -gt 0 ] && [ $((ko_n * 2)) -lt "$corpus_n" ]; then
+    corpus_broken="$corpus_broken only-${ko_n}-of-${corpus_n}-logs-end-in-ko"
+  fi
+  # Exactly one entry is marked the Ultimate showcase the visual gate selects.
+  marks=$(grep -c '"containsUltimate": true' "$manifest_file")
+  if [ "$marks" -ne 1 ]; then
+    corpus_broken="$corpus_broken manifest-marks-${marks}-ultimate-showcases-expected-exactly-1"
+  fi
+
+  if [ -n "$corpus_broken" ]; then
+    fail "Spectate corpus weakened:$corpus_broken"
+  else
+    pass "${corpus_n} spectate logs, all v2, each with an Ultimate, ${ko_n} ending in KO, one showcase marked"
+  fi
+fi
+
 # --- Not yet mechanisable ---------------------------------------------------
 cat <<'EOF'
 

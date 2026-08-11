@@ -1090,6 +1090,97 @@ const stripShift = (before, after) => {
   return Math.abs(best);
 };
 
+/**
+ * The four fighter aura colours, `#rrggbb` exact, copied from
+ * `apps/web/src/render/arena-palette.ts`'s `ARENA_PALETTE.aura` (Story 9.7).
+ *
+ * Duplicated for this file's standing reason -- dependency-free ESM run straight
+ * by Node cannot import a `.ts` module, the same as `STAGE_IDS` and `HUD_BAND`.
+ * `spectate-shows-an-ultimate` uses these to prove the Ultimate cinematic's
+ * *plate* drew: `juice-draw.ts`'s `drawCinematicPlate` strokes the caster's
+ * portrait border and fills the caster's **name** in `aura ?? theme.ink`, and
+ * both are drawn only when the Ultimate sheet AND the roster reached the paint
+ * (the portrait comes from `ult.portraitFor(caster)` and the caster id from the
+ * roster).
+ *
+ * The count is confined to **below the HUD band** (`y >= ARENA_TOP_PX`), and that
+ * confinement is load-bearing. `render/hud.ts`'s portrait plate fills its 44x44
+ * box with `auraFor(fighter)` as a flat rect, so a surface whose portrait sheet
+ * failed to decode still paints exact-aura HUD plates at the *top* of the frame
+ * -- the exact level-2 degrade this AC exists to catch (an independent review
+ * caught the whole-canvas version passing there). Counting the whole canvas would
+ * let that HUD plate satisfy the check while the cinematic drew no portrait and no
+ * name at all. The cinematic's own portrait border and name are drawn around the
+ * vertical centre (`juice-draw.ts`), well below the HUD, and nothing else there
+ * paints an exact aura -- the auras glow additively everywhere else, which blends
+ * them off their exact hex. So exact-aura ink below the HUD on a letterboxed frame
+ * is the caster's plate, the third-level render this story leans on (Story 11.6's
+ * degrade ladder), and it is absent in the degrade the HUD plate would otherwise
+ * mask.
+ */
+const ROSTER_AURA_RGB = [
+  [0xd9, 0x77, 0x06], // clawde
+  [0x10, 0xa3, 0x7f], // chatty
+  [0x42, 0x85, 0xf4], // gemini
+  [0x9c, 0xa3, 0xaf], // grokk
+];
+
+/** Exact-aura pixels a cinematic frame must carry for the caster's plate (portrait border + name) to have drawn. */
+const ULTIMATE_AURA_MIN = 30;
+
+/**
+ * Per the one visible canvas under `host`: whether the frame is letterboxed (the
+ * Ultimate cinematic's black plate, read off the bottom row exactly as the ink
+ * probes do), and how many pixels carry an exact fighter aura (the caster's
+ * portrait border and name). One probe for both halves of
+ * `spectate-shows-an-ultimate`, so "the plate is up" and "the caster's name drew"
+ * describe the same frame rather than two.
+ */
+const ultimatePlateProbe = (hostSelector) => `(() => {
+  const host = document.querySelector(${JSON.stringify(hostSelector)});
+  if (!host) return null;
+  const canvas = [...host.querySelectorAll('canvas')].find((c) => {
+    const rect = c.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+  });
+  if (!canvas) return null;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return null;
+
+  const lastRow = ctx.getImageData(0, canvas.height - 1, canvas.width, 1).data;
+  let black = 0;
+  for (let x = 0; x < canvas.width; x += 1) {
+    const i = x * 4;
+    if (lastRow[i] === 0 && lastRow[i + 1] === 0 && lastRow[i + 2] === 0) black += 1;
+  }
+  const cinematic = black >= Math.floor(canvas.width * 0.9);
+
+  // Below the HUD band only: the HUD's own aura-filled portrait plate lives
+  // above this line and must not be able to satisfy the check (see the docblock).
+  const top = ${ARENA_TOP_PX};
+  const auras = ${JSON.stringify(ROSTER_AURA_RGB)};
+  let auraPixels = 0;
+  if (canvas.height > top) {
+    const data = ctx.getImageData(0, top, canvas.width, canvas.height - top).data;
+    for (let i = 0; i < data.length; i += 4) {
+      if (data[i + 3] <= 8) continue;
+      const r = data[i], g = data[i + 1], b = data[i + 2];
+      for (let a = 0; a < auras.length; a += 1) {
+        if (r === auras[a][0] && g === auras[a][1] && b === auras[a][2]) { auraPixels += 1; break; }
+      }
+    }
+  }
+  return { cinematic, auraPixels };
+})()`;
+
+/** Plays the Spectate entry whose picker card carries `data-spectate-pick="<id>"` (Story 12.11). */
+const pickSpectate = (id) => `(() => {
+  const card = document.querySelector('[data-spectate-pick="' + ${JSON.stringify(id)} + '"]');
+  if (!card) return { ok: false, why: 'no picker card for ' + ${JSON.stringify(id)} };
+  card.click();
+  return { ok: true };
+})()`;
+
 /** Clicks the character-select card for stage `id` (Story 12.10). */
 const pickStage = (id) => `(() => {
   const card = document.querySelector('[data-select-stage="' + ${JSON.stringify(id)} + '"]');
@@ -1352,6 +1443,24 @@ async function main() {
   const labelIndex = args.indexOf('--label');
   const label = labelIndex >= 0 ? args[labelIndex + 1] : (process.env.VISUAL_GATE_LABEL ?? 'current');
   const shotDir = join(REPO_ROOT, 'docs', 'visual', label);
+
+  /**
+   * The Spectate entry the manifest marks as the Ultimate showcase (Story
+   * 12.11). Read from the committed manifest on disk rather than the page, so
+   * `spectate-shows-an-ultimate` drives exactly the entry the corpus promises
+   * carries a cinematic -- not a lucky autoplay pick. `null` if the manifest is
+   * missing or marks none, which the check reports as a failure rather than a
+   * silent skip.
+   */
+  let ultimateEntryId = null;
+  try {
+    const manifest = JSON.parse(
+      await readFile(join(WEB_DIR, 'public', 'replays', 'manifest.json'), 'utf8'),
+    );
+    ultimateEntryId = (manifest.entries ?? []).find((entry) => entry.containsUltimate === true)?.id ?? null;
+  } catch {
+    // Missing/unreadable manifest -> ultimateEntryId stays null and the check fails.
+  }
 
   const checks = [];
   /** Records one check. `ok: false` is a finding; the waiver file decides whether it is fatal. */
@@ -1765,7 +1874,46 @@ async function main() {
       for (const route of ARENA_ROUTES) {
         await goto(route);
         canvases.push(...(await cdp.evaluate(CANVAS_PROBE)).filter((c) => c.visible));
-        inkAcross.push(...(await cdp.evaluate(arenaInkProbe(null))));
+        if (route === '/watch') {
+          // Story 12.11: every Spectate entry now throws an Ultimate, and the
+          // beam act of the cinematic drops the letterbox while its screen-space
+          // FX still reaches the frame edge (`render/juice.ts`: "the bars are
+          // gone by the time the beam is sweeping"). A single sample can land
+          // there and read the beam as a clipped fighter; the `cinematic`
+          // exclusion catches the letterboxed acts but not this one.
+          //
+          // So sample across a window longer than one cinematic freeze (~2.2s)
+          // and take the **median** fight frame per host -- not the cleanest.
+          // Median, not min, is the point: min would cherry-pick a single
+          // unclipped frame and could slip a persistent clip through, whereas a
+          // genuine framing defect clips a majority of frames and so clips the
+          // median too, while a brief Ultimate is a minority the median steps
+          // over. Spectate holds the fighters camera-centred every fight frame
+          // (unlike arcade's wall), so its only edge ink is the Ultimate; the
+          // median of its fight frames is a clean fight or the surface is broken.
+          const fights = new Map();
+          const fallback = new Map();
+          for (let attempt = 0; attempt < 14; attempt += 1) {
+            for (const reading of await cdp.evaluate(arenaInkProbe('#spectate'))) {
+              const key = reading.host ?? 'spectate';
+              if (!fallback.has(key)) fallback.set(key, reading);
+              if (reading.cinematic !== true && hasSpriteInk(reading)) {
+                if (!fights.has(key)) fights.set(key, []);
+                fights.get(key).push(reading);
+              }
+            }
+            await sleep(280);
+          }
+          // The median-edge fight frame; fall back to any reading (excluded by
+          // `judged` if cinematic) so a host that was only ever cinematic is still
+          // reported rather than vanishing from the sweep.
+          for (const key of fallback.keys()) {
+            const pool = (fights.get(key) ?? []).slice().sort((a, b) => a.edgeInk - b.edgeInk);
+            inkAcross.push(pool.length > 0 ? pool[Math.floor(pool.length / 2)] : fallback.get(key));
+          }
+        } else {
+          inkAcross.push(...(await cdp.evaluate(arenaInkProbe(null))));
+        }
       }
       const blank = canvases.filter((c) => c.visible && c.readable && c.inkRatio < MIN_INK_RATIO);
       record(
@@ -1828,6 +1976,51 @@ async function main() {
           spectateBefore === undefined
             ? 'no canvas under #spectate'
             : `hash ${spectateBefore.hash} -> ${spectateAfter?.hash}`,
+        );
+
+        // --- C4g spectate-shows-an-ultimate (Story 12.11) -------------------
+        // The stream now contains what this project built. Select the entry the
+        // manifest marks as the Ultimate showcase from the picker -- not a lucky
+        // autoplay pick -- and watch it until the cinematic draws: a letterboxed
+        // frame (the black plate) that also carries the caster's aura (their
+        // portrait border and *name*, drawn only when the Ultimate sheet AND the
+        // roster both reached the paint -- Story 11.6's third degrade level, and
+        // the load-bearing detail this AC turns on).
+        //
+        // Sampled by polling the whole showcase entry, because Spectate has no
+        // scrub: the cinematic freeze holds for many frames, so a poll every
+        // ~180ms across the entry catches it without luck. Selecting the entry
+        // from the manifest (rather than watching whatever autoplays) is what
+        // makes the run reproducible -- every entry throws an Ultimate now, so
+        // the marker buys determinism, not content-precision: the check proves
+        // *the stream draws the cinematic*, which is the AC, and drives a fixed
+        // fight to do it rather than a lucky one.
+        const picked = ultimateEntryId === null ? { ok: false, why: 'no showcase in manifest' } : await cdp.evaluate(pickSpectate(ultimateEntryId));
+        let sawCinematic = false;
+        let sawPlate = false;
+        let bestAuraOnCinematic = 0;
+        if (picked.ok === true) {
+          // ~28s of the showcase entry (film + cinematic freeze) at ~180ms
+          // between samples. Breaks the moment both halves are seen on one frame.
+          for (let sample = 0; sample < 155; sample += 1) {
+            const reading = await cdp.evaluate(ultimatePlateProbe('#spectate'));
+            if (reading !== null && reading.cinematic === true) {
+              sawCinematic = true;
+              if (reading.auraPixels > bestAuraOnCinematic) bestAuraOnCinematic = reading.auraPixels;
+              if (reading.auraPixels >= ULTIMATE_AURA_MIN) {
+                sawPlate = true;
+                break;
+              }
+            }
+            await sleep(180);
+          }
+        }
+        record(
+          'spectate-shows-an-ultimate',
+          picked.ok === true && sawCinematic && sawPlate,
+          picked.ok !== true
+            ? `could not select the showcase entry: ${picked.why ?? 'unknown'}`
+            : `showcase ${ultimateEntryId}: letterbox ${sawCinematic ? 'seen' : 'NOT seen'}, caster-aura ink on a cinematic frame peaked at ${bestAuraOnCinematic} (min ${ULTIMATE_AURA_MIN})`,
         );
       }
 

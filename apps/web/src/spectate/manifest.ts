@@ -42,6 +42,14 @@ export interface SpectateManifestEntry {
   readonly reasoningUrl?: string;
   readonly schemaVersion: string;
   readonly frameCount: number;
+  /**
+   * Story 12.11. True on the one entry the generator selected as the Ultimate
+   * showcase -- the fight the visual gate (`spectate-shows-an-ultimate`) drives
+   * to prove the cinematic draws. Absent on every other entry; a corpus in which
+   * every entry contains an Ultimate still marks exactly one, because the gate
+   * needs a single, stable target rather than a set to search.
+   */
+  readonly containsUltimate?: boolean;
 }
 
 export interface SpectateManifest {
@@ -98,12 +106,18 @@ function parseEntry(raw: unknown, index: number): SpectateManifestEntry {
     fail(`${where}.reasoningUrl must be a non-empty string when present.`);
   }
 
+  const containsUltimateRaw = source['containsUltimate'];
+  if (containsUltimateRaw !== undefined && typeof containsUltimateRaw !== 'boolean') {
+    fail(`${where}.containsUltimate must be a boolean when present.`);
+  }
+
   const entry: SpectateManifestEntry = {
     id,
     commandLogUrl,
     schemaVersion,
     frameCount,
     ...(reasoningUrlRaw === undefined ? {} : { reasoningUrl: reasoningUrlRaw as string }),
+    ...(containsUltimateRaw === undefined ? {} : { containsUltimate: containsUltimateRaw as boolean }),
   };
   return Object.freeze(entry);
 }
