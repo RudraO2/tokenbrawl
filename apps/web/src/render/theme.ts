@@ -66,11 +66,11 @@ export interface Theme {
 }
 
 export const THEME: Theme = Object.freeze({
-  bg: '#0a0a0a',
-  ink: '#f5f5f0',
-  accent: '#c8ff00',
-  warn: '#ff3b30',
-  muted: '#6e6e68',
+  bg: '#07080f',
+  ink: '#eef2ff',
+  accent: '#16c7e4',
+  warn: '#ff4d5a',
+  muted: '#7d86ad',
   borderWidth: 4,
   shadowOffset: 6,
   displayFont: "800 20px 'Bricolage Grotesque', 'Arial Black', sans-serif",

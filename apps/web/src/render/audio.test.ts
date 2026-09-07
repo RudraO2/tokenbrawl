@@ -1209,30 +1209,33 @@ describe('per-character cues (Story 12.9)', () => {
     expect(new Set(ROSTER_IDS.map((id) => ROSTER_AUDIO[id].ko)).size).toBe(ROSTER_IDS.length);
   });
 
-  it('announces the Ultimate in the voice of whoever cast it, and two casters differ', () => {
+  it('announces the Ultimate in the stage voice, the same for every caster', () => {
+    // The announcement is the stage's shared `vo_ultimate`, not the caster's --
+    // matching the dev-reference game, whose `ultimate` cinematic plays the one
+    // announcer clip and keeps the caster's transform yell out of it. The roster
+    // is consulted for hits, hurt and KO; the Ultimate's voice ignores it.
     const juice = buildJuiceTrack(ultimateFilm());
     expect(juice.cinematics).toHaveLength(1);
     const caster = juice.cinematics[0].agentIndex;
 
-    const heard = (id: RosterId): readonly string[] => {
+    const announcedFrames = (id: RosterId): readonly number[] => {
       const pair: RosterPair = caster === 0 ? [id, 'clawde'] : ['clawde', id];
-      const audio = buildAudioTrack(juice, DEFAULT_AUDIO_TUNING, pair);
-      const found: string[] = [];
-      for (let clockIndex = 0; clockIndex < audio.frameCount; clockIndex += 1) {
-        for (const cue of audio.at(clockIndex).cues) {
-          if (cue.bus === 'voice') {
-            found.push(cue.name);
-          }
-        }
-      }
-      return found;
+      return framesNaming(
+        buildAudioTrack(juice, DEFAULT_AUDIO_TUNING, pair),
+        DEFAULT_AUDIO_TUNING.ultimateVoice,
+      );
     };
 
-    expect(heard('gemini')).toContain(ROSTER_AUDIO.gemini.ultimate);
-    expect(heard('grokk')).toContain(ROSTER_AUDIO.grokk.ultimate);
-    expect(ROSTER_AUDIO.gemini.ultimate).not.toBe(ROSTER_AUDIO.grokk.ultimate);
-    // And with no roster it is still the shared announcement, unchanged.
-    expect(framesNaming(buildAudioTrack(juice), DEFAULT_AUDIO_TUNING.ultimateVoice)).toHaveLength(1);
+    // Two different casters announce with the one shared line on the same frame:
+    // the announcement does not depend on who cast it.
+    const gemini = announcedFrames('gemini');
+    const grokk = announcedFrames('grokk');
+    expect(gemini).toHaveLength(1);
+    expect(grokk).toStrictEqual(gemini);
+    // And with no roster at all it is the same shared announcement, unchanged.
+    expect(framesNaming(buildAudioTrack(juice), DEFAULT_AUDIO_TUNING.ultimateVoice)).toStrictEqual(
+      gemini,
+    );
   });
 
   it('falls back to the shared cues for a fighter with no audio pack', () => {

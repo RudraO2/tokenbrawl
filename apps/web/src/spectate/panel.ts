@@ -230,17 +230,22 @@ function pickerMarkup(entries: readonly SpectateManifestEntry[]): string {
  */
 export function spectateMarkup(entries: readonly SpectateManifestEntry[] = []): string {
   return `
-    <h2 class="tb-spectate-heading">Spectate</h2>
-    <p class="tb-spectate-intro">
-      An always-running AI-vs-AI stream. Every Match is a precomputed Baseline-Bot pairing,
-      walked client-side -- no server, no live inference, no cost.
+    <span class="tb-eyebrow">Always on · AI vs AI</span>
+    <h2 class="tb-screen-heading tb-spectate-heading">Spectate</h2>
+    <p class="tb-screen-intro tb-spectate-intro">
+      An always-running AI-vs-AI channel. Every Match is a precomputed pairing walked from its
+      Command Log in your own tab -- no server, no live inference, no cost. Arrive any time and you
+      join the loop wherever it is.
     </p>
-    <div class="tb-spectate-stage">
+    <div class="tb-card tb-spectate-stage">
       <canvas class="tb-spectate-canvas"></canvas>
     </div>
-    <p class="tb-spectate-status" data-spectate-status role="status" aria-live="polite"></p>
-    <button class="tb-button tb-spectate-play" type="button" data-spectate-play>${PLAY_LABEL.pause}</button>
-    <button class="tb-button tb-sound-toggle tb-spectate-sound" type="button" data-spectate-sound aria-pressed="false">${SOUND_LABEL.off}</button>
+    <div class="tb-spectate-bar">
+      <span class="tb-spectate-live">Live loop</span>
+      <p class="tb-spectate-status" data-spectate-status role="status" aria-live="polite"></p>
+      <button class="tb-button tb-spectate-play" type="button" data-spectate-play>${PLAY_LABEL.pause}</button>
+      <button class="tb-button tb-sound-toggle tb-spectate-sound" type="button" data-spectate-sound aria-pressed="false">${SOUND_LABEL.off}</button>
+    </div>
     <div class="tb-spectate-picker" data-spectate-picker>${pickerMarkup(entries)}</div>
   `;
 }

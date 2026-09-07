@@ -1,0 +1,208 @@
+{
+  "label": "ultimate",
+  "ranAt": "2026-09-07T17:52:18.191Z",
+  "checks": [
+    {
+      "id": "hidden-screens-are-idle-on-load-desktop",
+      "ok": true,
+      "detail": "2 off-screen canvas(es) on the landing screen, none repainted"
+    },
+    {
+      "id": "sound-on-by-default",
+      "ok": true,
+      "detail": "shell control reads aria-pressed=true \"Sound: on\""
+    },
+    {
+      "id": "audio-starts-on-first-gesture",
+      "ok": true,
+      "detail": "clicked 1421,896 over <body> on #/watch: context suspended -> running, sources started 10 -> 12 within 700ms, looping sources live 0, gain writes music/sfx/voice 202/202/202"
+    },
+    {
+      "id": "audio-cues-resolve",
+      "ok": true,
+      "detail": "23 cue files, all 200"
+    },
+    {
+      "id": "sound-off-survives-a-reload",
+      "ok": true,
+      "detail": "after a reload straight to #/watch the page switch reads aria-pressed=false and Spectate's own button false; 0 source(s) started and 0 looping source(s) live (context running)"
+    },
+    {
+      "id": "one-screen-at-a-time-desktop",
+      "ok": true,
+      "detail": "6 screens, exactly one visible on each"
+    },
+    {
+      "id": "route-survives-reload-desktop",
+      "ok": true,
+      "detail": "loaded #/watch, showing spectate"
+    },
+    {
+      "id": "back-button-walks-the-screens-desktop",
+      "ok": true,
+      "detail": "after back: arcade; after forward: spectate"
+    },
+    {
+      "id": "cabinet-boots",
+      "ok": true,
+      "detail": "started=true src=/arena/index.html?mode=duel&cpu=2&rounds=3 canvas=1214x683 ink=98.7% status=\"Pick your fighter, then your opponent, then the arena. Enter confirms, G backs out.\""
+    },
+    {
+      "id": "cabinet-input-reaches-fight",
+      "ok": true,
+      "detail": "status=\"Fight on. Enter pauses. L throws the Ultimate at full meter.\" ink=99.1%"
+    },
+    {
+      "id": "canvas-not-blank-desktop",
+      "ok": true,
+      "detail": "2 canvas(es), ink app:73.7% spectate:71.0%"
+    },
+    {
+      "id": "fighters-inside-frame-desktop",
+      "ok": true,
+      "detail": "app edge=0 span=338..642 of 960 | spectate edge=0 span=424..530 of 960"
+    },
+    {
+      "id": "fight-is-centred-desktop",
+      "ok": true,
+      "detail": "app ink centre 490 of 960 | spectate ink centre 477 of 960"
+    },
+    {
+      "id": "spectate-animates",
+      "ok": true,
+      "detail": "hash -1786124354 -> -443692515"
+    },
+    {
+      "id": "spectate-shows-an-ultimate",
+      "ok": true,
+      "detail": "showcase spectate-04: letterbox seen, caster-aura ink on a cinematic frame peaked at 66 (min 30)"
+    },
+    {
+      "id": "hidden-screens-are-idle-desktop",
+      "ok": true,
+      "detail": "1 off-screen canvas(es), none repainted"
+    },
+    {
+      "id": "hidden-screens-are-silent",
+      "ok": true,
+      "detail": "shown (#/watch) wrote 129 bus gains with 1 looping source(s) live; hidden (on #/play, whose own screen has no audio of its own) wrote 0 with 0 live; sources started so far 60, per-bus writes music/sfx/voice 1404/1404/1404"
+    },
+    {
+      "id": "hud-has-all-five",
+      "ok": true,
+      "detail": "/replay 11 regions ok (portrait colours 1457/1490, timer gold 38) | /watch 11 regions ok (portrait colours 1457/1490, timer gold 51)"
+    },
+    {
+      "id": "hud-no-overlap",
+      "ok": true,
+      "detail": "6 row spans disjoint; 0 bar pixels in the callout's rows and 0 in the readout's"
+    },
+    {
+      "id": "hud-timer-counts-down",
+      "ok": true,
+      "detail": "frame 0..605: timer 847851843 -> 1639925867 -> 847851843"
+    },
+    {
+      "id": "hud-round-pips-advance",
+      "ok": true,
+      "detail": "64 gold pixels across both pip groups at the end of the Match"
+    },
+    {
+      "id": "match-end-overlay",
+      "ok": true,
+      "detail": "overlay gold frame 0: 0 -> tail: 189"
+    },
+    {
+      "id": "reasoning-panel-shows-text",
+      "ok": true,
+      "detail": "agent 0: body 999 chars as tb-reasoning--text (min 60 as tb-reasoning--text), provider \"groq\", endpoint \"https://api.groq.com/openai/v1/chat/completions\""
+    },
+    {
+      "id": "token-bank-hud-draws",
+      "ok": true,
+      "detail": "read at 20%, 35%, 50%, 65%: p1-bank:1330 p2-bank:1330 bar-frame pixels, 4/4 distinct levels per side"
+    },
+    {
+      "id": "hit-reads-as-impact",
+      "ok": true,
+      "detail": "#app blob 0..5892 (min 900); #spectate blob 0..7233"
+    },
+    {
+      "id": "no-debug-hitbox",
+      "ok": true,
+      "detail": "27 arena frames sampled across #app/#spectate, 0 with a hollow warn box"
+    },
+    {
+      "id": "character-select-reachable",
+      "ok": true,
+      "detail": "showing #select, fighters named: claude, chatgpt, gemini, grok, copilot, deepseek, llama, edison"
+    },
+    {
+      "id": "stage-cards-draw",
+      "ok": true,
+      "detail": "6 stages, every card visible with its art decoded"
+    },
+    {
+      "id": "play-as-boots-on-fighter",
+      "ok": true,
+      "detail": "gemini: clicked=true onPlay=true src=/arena/index.html?mode=duel&cpu=2&rounds=3&p1=gemini ink=98.7% | grokk: clicked=true onPlay=true src=/arena/index.html?mode=duel&cpu=2&rounds=3&p1=grokk ink=98.7%"
+    },
+    {
+      "id": "hidden-screens-are-idle-on-load-mobile",
+      "ok": true,
+      "detail": "2 off-screen canvas(es) on the landing screen, none repainted"
+    },
+    {
+      "id": "one-screen-at-a-time-mobile",
+      "ok": true,
+      "detail": "6 screens, exactly one visible on each"
+    },
+    {
+      "id": "route-survives-reload-mobile",
+      "ok": true,
+      "detail": "loaded #/watch, showing spectate"
+    },
+    {
+      "id": "back-button-walks-the-screens-mobile",
+      "ok": true,
+      "detail": "after back: arcade; after forward: spectate"
+    },
+    {
+      "id": "cabinet-boots-mobile",
+      "ok": true,
+      "detail": "started=true frame=true canvas=356x267 ink=73.5% status=\"Pick your fighter, then your opponent, then the arena. Enter confirms, G backs out.\""
+    },
+    {
+      "id": "no-horizontal-overflow",
+      "ok": true,
+      "detail": "widest screen /: scrollWidth=390 clientWidth=390 widest: a.tb-nav-link@576px, a.tb-nav-link@462px"
+    },
+    {
+      "id": "canvas-not-blank-mobile",
+      "ok": true,
+      "detail": "2 canvas(es), ink app:73.7% spectate:71.9%"
+    },
+    {
+      "id": "fighters-inside-frame-mobile",
+      "ok": true,
+      "detail": "app edge=0 span=338..642 of 960 | spectate edge=0 span=384..539 of 960"
+    },
+    {
+      "id": "fight-is-centred-mobile",
+      "ok": true,
+      "detail": "app ink centre 490 of 960 | spectate ink centre 462 of 960"
+    },
+    {
+      "id": "hidden-screens-are-idle-mobile",
+      "ok": true,
+      "detail": "1 off-screen canvas(es), none repainted"
+    },
+    {
+      "id": "console-clean",
+      "ok": true,
+      "detail": "no errors or warnings"
+    }
+  ],
+  "waived": [],
+  "staleWaivers": []
+}

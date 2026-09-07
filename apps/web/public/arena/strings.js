@@ -1,0 +1,296 @@
+// strings.js  -  single source of truth for every player-visible string.
+// Every js/*.js file must import { t } (or STR/LANG directly) instead of writing literals.
+
+export const STR = {
+  en: {
+    // ---- boot ----
+    boot_line1: 'A NEXTGEN TRAINING ACADEMY PRODUCTION',
+    boot_line2: 'KOTA KINABALU, SABAH',
+    boot_line3: 'NEXTGEN AI ARENA',
+
+    // ---- title ----
+    title_game_name: 'NEXTGEN AI ARENA',
+    title_press_start: 'PRESS START',
+    title_tap_play: 'TAP TO PLAY',
+
+    // ---- main menu ----
+    menu_title: 'NEXTGEN AI ARENA',
+    menu_arcade: 'ARCADE',
+    menu_vsonline: 'VS ONLINE',
+    menu_localvs: 'LOCAL VS',
+    menu_practice: 'PRACTICE',
+    menu_options: 'OPTIONS',
+    menu_how: 'HOW TO PLAY',
+
+    // ---- character select ----
+    select_title: 'CHOOSE YOUR FIGHTER',
+    select_title_arcade: 'CHOOSE YOUR FIGHTER',
+    select_title_opponent: 'CHOOSE YOUR OPPONENT',
+    select_p1: 'P1',
+    select_p2: 'P2',
+    select_ready: 'READY',
+    select_confirm_hint: 'LIGHT OR START TO CONFIRM',
+    select_waiting_p2: 'WAITING FOR P2...',
+    select_waiting_opponent: 'OPPONENT PICKING...',
+    select_connecting: 'CONNECTING TO ROOM...',
+    select_boss_badge: 'BOSS',
+
+    // ---- archetypes ----
+    arch_clawde: 'BALANCED',
+    arch_chatty: 'RUSHDOWN',
+    arch_gemini: 'TRICKSTER',
+    arch_grokk: 'GRAPPLER',
+    arch_pilot: 'COUNTER',
+    arch_seeker: 'CHARGE',
+    arch_lama: 'MID-RANGE',
+    arch_edison: 'META BOSS',
+
+    // ---- fighter display names (v2: real AI-model personas) ----
+    fn_clawde: 'CLAUDE',
+    fn_chatty: 'CHATGPT',
+    fn_gemini: 'GEMINI',
+    fn_grokk: 'GROK',
+    fn_pilot: 'COPILOT',
+    fn_seeker: 'DEEPSEEK',
+    fn_lama: 'LLAMA',
+    fn_edison: 'EDISON',
+
+    // ---- form names (v2 transformations, form_<id>_<0..3>; edison has only 0..1) ----
+    form_clawde_0: 'HAIKU',
+    form_clawde_1: 'SONNET',
+    form_clawde_2: 'OPUS',
+    form_clawde_3: 'FABLE',
+    form_chatty_0: 'MINI',
+    form_chatty_1: 'GPT-4O',
+    form_chatty_2: 'O3',
+    form_chatty_3: 'GPT-5',
+    form_gemini_0: 'FLASH',
+    form_gemini_1: 'PRO',
+    form_gemini_2: 'ULTRA',
+    form_gemini_3: 'DEEP THINK',
+    form_grokk_0: 'GROK 2',
+    form_grokk_1: 'GROK 3',
+    form_grokk_2: 'GROK 4',
+    form_grokk_3: 'GROK HEAVY',
+    form_pilot_0: 'FREE',
+    form_pilot_1: 'PRO',
+    form_pilot_2: 'PRO+',
+    form_pilot_3: 'AGENT',
+    form_seeker_0: 'CHAT',
+    form_seeker_1: 'V3',
+    form_seeker_2: 'R1',
+    form_seeker_3: 'R2',
+    form_lama_0: 'SCOUT',
+    form_lama_1: 'MAVERICK',
+    form_lama_2: 'BEHEMOTH',
+    form_lama_3: 'FINAL FORM',
+    form_edison_0: 'EDISON',
+    form_edison_1: 'ULTRA INSTINCT',
+
+    // ---- Edison special select-screen subtitle (title art tags him "P1 TRAINER") ----
+    select_edison_subtitle: 'THE TRAINER - META BOSS',
+
+    // ---- signature ability names ----
+    abname_clawde: 'CONSTITUTION',
+    abname_chatty: 'TOKEN STREAM',
+    abname_gemini: 'TWIN SWAP',
+    abname_grokk: 'CHAOS ROULETTE',
+    abname_pilot: 'AUTOCOMPLETE',
+    abname_seeker: 'DEEP DIVE',
+    abname_lama: 'OPEN WEIGHTS',
+    abname_edison: 'PROMPT ENGINEERING',
+
+    // ---- signature ability descriptions ----
+    abdesc_clawde: 'PARRY STANCE - 50% DAMAGE REDUCTION FOR 1S, ONCE PER ROUND.',
+    abdesc_chatty: 'FIRES A 5-HIT MINI PROJECTILE FLURRY.',
+    abdesc_gemini: 'AFTERIMAGE TELEPORT BEHIND THE OPPONENT.',
+    abdesc_grokk: 'COMMAND THROW - RANDOM 80-240 DAMAGE.',
+    abdesc_pilot: 'AUTO-PARRY WINDOW THAT COUNTERS ON HIT.',
+    abdesc_seeker: 'SLIDES UNDER PROJECTILES WITH A LOW HIT.',
+    abdesc_lama: 'CLONE STAMPEDE RUSH-DOWN.',
+    abdesc_edison: 'SUMMONS 2 MINI-MASCOTS THAT RUSH THE OPPONENT.',
+
+    // ---- super names ----
+    supername_clawde: 'SUNBURST SPIRAL',
+    supername_chatty: 'TOTAL GENERATION',
+    supername_gemini: 'BINARY STAR',
+    supername_grokk: 'EVENT HORIZON',
+    supername_pilot: 'SHIP IT',
+    supername_seeker: 'ABYSSAL SURGE',
+    supername_lama: 'HERD RELEASE',
+    supername_edison: 'NEXTGEN MASTERCLASS',
+
+    // ---- win quotes (result screen) ----
+    wq_clawde: 'HELPFUL. HONEST. UNDEFEATED.',
+    wq_chatty: 'GENERATING VICTORY.EXE... 100% COMPLETE.',
+    wq_gemini: 'MULTIMODAL. MULTI-TALENTED. YOU LOST IN EVERY MODE.',
+    wq_grokk: 'REAL-TIME CHAOS. REAL-TIME WIN.',
+    wq_pilot: 'SHIPPED. REVIEWED. MERGED. GG.',
+    wq_seeker: 'DEEP RESEARCH FOUND ONE THING: YOUR WEAKNESS.',
+    wq_lama: 'OPEN WEIGHTS. CLOSED CASE.',
+    wq_edison: 'CLASS DISMISSED. LESSON: NEVER CHALLENGE THE TRAINER.',
+
+    // ---- stage select ----
+    stage_title: 'SELECT YOUR ARENA',
+    stage_waiting_opponent: 'OPPONENT PICKING THE ARENA...',
+    st_s1: 'DATA DOJO',
+    st_s2: 'NEON CITY',
+    st_s3: 'KK WATERFRONT',
+    st_s4: 'CLOUD TEMPLE',
+    st_s5: 'NEXTGEN LAB',
+    st_s6: 'CIRCUIT VOLCANO',
+
+    // ---- vs splash ----
+    vs_versus: 'VS',
+
+    // ---- fight HUD / splashes ----
+    hud_hits_suffix: 'HITS',
+    splash_round_prefix: 'ROUND',
+    splash_final_round: 'FINAL ROUND',
+    splash_fight: 'FIGHT!',
+    splash_ko: 'K.O.!',
+    splash_perfect: 'PERFECT!',
+    splash_time_up: 'TIME UP!',
+    splash_double_ko: 'DOUBLE K.O.!',
+
+    // ---- pause ----
+    pause_title: 'PAUSED',
+    pause_resume: 'RESUME',
+    pause_options: 'OPTIONS',
+    pause_practice: 'PRACTICE PANEL',
+    pause_quit: 'QUIT TO MENU',
+
+    // ---- result ----
+    result_winner: 'WINNER',
+    result_rematch: 'REMATCH',
+    result_next_opponent: 'NEXT OPPONENT',
+    result_char_select: 'CHARACTER SELECT',
+    result_menu: 'MAIN MENU',
+    result_votes: 'REMATCH VOTES',
+    result_waiting_rematch: 'WAITING FOR OPPONENT...',
+    result_share_whatsapp: 'CHALLENGE ON WHATSAPP',
+    share_challenge: "I just threw down in NEXTGEN AI ARENA. Think you can beat me? Fight me here:",
+
+    // ---- options ----
+    options_title: 'OPTIONS',
+    opt_rounds: 'ROUNDS (BEST OF)',
+    opt_bestof_prefix: 'BEST OF',
+    opt_music_vol: 'MUSIC VOLUME',
+    opt_sfx_vol: 'SFX VOLUME',
+    opt_cpu_level: 'CPU DIFFICULTY',
+    opt_shake: 'SCREEN SHAKE',
+    opt_flash: 'SCREEN FLASH',
+    opt_back: 'BACK',
+    val_on: 'ON',
+    val_off: 'OFF',
+    val_cpu_1: 'EASY',
+    val_cpu_2: 'NORMAL',
+    val_cpu_3: 'HARD',
+
+    // ---- how to play (v2.1: PlayStation-style scheme - square/triangle/circle/cross) ----
+    how_title: 'HOW TO PLAY',
+    how_controls_header: 'CONTROLS',
+    how_kb_p1: 'KEYBOARD - PLAYER 1',
+    how_kb_p1_move: 'MOVE: A D    JUMP: W',
+    how_kb_p1_atk: 'SQUARE(LIGHT): F   TRIANGLE(HEAVY): G   CIRCLE(BLAST): H',
+    how_kb_p1_atk2: 'POWER: J   DASH: K   ULTIMATE: L',
+    how_kb_p2: 'KEYBOARD - PLAYER 2 (LOCAL VS)',
+    how_kb_p2_move: 'MOVE: ARROW LEFT/RIGHT    JUMP: ARROW UP',
+    how_kb_p2_atk: 'SQUARE: 1   TRIANGLE: 2   CIRCLE: 3',
+    how_kb_p2_atk2: 'POWER: 4   DASH: 5   ULTIMATE: 6',
+    how_start: 'START / PAUSE: ENTER OR SPACE',
+    how_gamepad: 'GAMEPAD (PS-STYLE)',
+    how_gamepad_move: 'MOVE: D-PAD OR LEFT STICK',
+    how_gamepad_atk: 'SQUARE: X(2)   TRIANGLE: Y(3)   CIRCLE: B(1)',
+    how_gamepad_atk2: 'CROSS/DASH: A(0)   ULTIMATE: R1(5)   POWER: L1/L2   START: START',
+    how_touch: 'TOUCH',
+    how_touch_desc: 'FLOATING STICK ON THE LEFT TO MOVE. RIGHT SIDE: PS DIAMOND - TRIANGLE(HEAVY) TOP, SQUARE(LIGHT) LEFT, CIRCLE(BLAST) RIGHT, CROSS(DASH) BOTTOM. POWER FLAME BUTTON LEFT OF THE DIAMOND, JUMP BETWEEN STICK AND DIAMOND. THE ULTIMATE BUTTON POPS UP ABOVE THE DIAMOND ONLY AT FULL METER. TAP THE "?" TOP-RIGHT FOR THIS SCREEN MID-FIGHT.',
+    how_movelist_header: 'MOVE LIST SUMMARY',
+    how_chain: 'AUTO-COMBO: KEEP PRESSING SQUARE OR TRIANGLE FOR CHAIN COMBOS',
+    how_blast: 'BLAST: NEUTRAL CIRCLE = KI PROJECTILE',
+    how_blast2: 'FWD+CIRCLE = HEAVY BLAST   DOWN+CIRCLE = SIGNATURE ABILITY   UP+CIRCLE = ANTI-AIR',
+    how_dash: 'DASH: CROSS TOWARD OPPONENT = DASH IN, AWAY = BACK-DASH (BRIEF INVULN)',
+    how_super: 'ULTIMATE (FULL METER): ONE BUTTON - SQUARE+TRIANGLE+CIRCLE TOGETHER, CINEMATIC FINISHER',
+    how_throw: 'THROW (CLOSE RANGE): FORWARD + TRIANGLE',
+    how_block: 'BLOCK: HOLD BACK',
+    how_crouch_block: 'CROUCH-BLOCK: HOLD BACK + DOWN',
+    how_power: 'POWER: HOLD TO CHARGE KI - RELEASE AT FULL KI TO TRANSFORM',
+    how_ultimate: 'ULTIMATE FLASH: SIT BACK FOR THE CINEMATIC, THEN THE BEAM LANDS',
+    how_back: 'BACK TO MENU',
+    how_resume_hint: 'TAP "?" OR BACK/HEAVY TO RESUME THE FIGHT',
+
+    // ---- touch button accessibility labels (v2.1 PS scheme) ----
+    touch_aria_square: 'Light attack',
+    touch_aria_triangle: 'Heavy attack',
+    touch_aria_circle: 'Blast',
+    touch_aria_cross: 'Dash',
+    touch_aria_power: 'Power charge',
+    touch_aria_ultimate: 'Ultimate',
+    touch_aria_jump: 'Jump',
+    touch_aria_tutorial: 'How to play',
+
+    // ---- practice mode (v2.1) ----
+    practice_dummy_title: 'CHOOSE THE DUMMY',
+    practice_panel_title: 'PRACTICE PANEL',
+    practice_dummy_label: 'DUMMY BEHAVIOR',
+    practice_dummy_idle: 'IDLE',
+    practice_dummy_block: 'BLOCK ALL',
+    practice_dummy_crouch: 'CROUCH',
+    practice_dummy_jump: 'JUMP',
+    practice_dummy_cpu1: 'CPU EASY',
+    practice_dummy_cpu2: 'CPU NORMAL',
+    practice_dummy_cpu3: 'CPU HARD',
+    practice_refill_hp: 'AUTO-REFILL HP',
+    practice_refill_ki: 'AUTO-REFILL KI',
+    practice_refill_meter: 'AUTO-REFILL METER',
+    practice_show_combolist: 'COMBO LIST CARD',
+    practice_reset: 'RESET POSITIONS',
+    practice_reset_done: 'POSITIONS RESET',
+    practice_back: 'BACK',
+    practice_timer_inf: 'INF',
+    practice_hud_combo: 'COMBO HITS',
+    practice_hud_total_dmg: 'TOTAL DMG',
+    practice_hud_last_dmg: 'LAST HIT',
+    practice_hud_input: 'INPUT',
+    practice_combolist_light: 'LIGHT CHAIN',
+    practice_combolist_heavy: 'HEAVY CHAIN',
+    practice_combolist_hits_suffix: 'STAGE COMBO',
+    practice_combolist_reminder1: 'KEEP PRESSING SQUARE/TRIANGLE FOR COMBOS',
+    practice_combolist_reminder2: 'FWD+CIRCLE HEAVY BLAST - DOWN+CIRCLE SIGNATURE - UP+CIRCLE ANTI-AIR',
+    practice_combolist_reminder3: 'HOLD POWER TO CHARGE, RELEASE AT FULL KI TO TRANSFORM',
+    practice_combolist_reminder4: 'FULL METER: SQUARE+TRIANGLE+CIRCLE TOGETHER = ULTIMATE',
+    practice_enter_hint: 'LIGHT OR START TO CONFIRM THE DUMMY',
+
+    // ---- landscape toast (dismissible, portrait mode) ----
+    toast_landscape: 'LANDSCAPE IS BEST FOR THE FULL ARENA VIEW',
+    toast_dismiss: 'GOT IT',
+
+    // ---- generic / errors ----
+    generic_back: 'BACK',
+    generic_loading: 'LOADING...',
+    ult_answer_prompt: 'PRESS ULTIMATE!',
+    ult_answer_hint: 'ANSWER TO CLASH',
+    clash_smash: 'SMASH!',
+    clash_hint: 'TAP ATTACK FAST!',
+    online_room_label: 'ROOM',
+    online_copy_link: 'COPY INVITE LINK',
+    online_link_copied: 'LINK COPIED!',
+    online_share_whatsapp: 'SHARE ON WHATSAPP',
+    online_seat_spectator: 'SPECTATING',
+    online_status_connecting: 'CONNECTING...',
+    online_status_reconnecting: 'RECONNECTING...',
+    online_status_waiting_opponent: 'WAITING FOR OPPONENT...',
+    err_connect: 'CONNECTION FAILED. RETURNING TO MENU.',
+    err_desync: 'SYNC LOST - RESYNCING...',
+    err_room_full: 'ROOM IS FULL.',
+    err_opponent_left: 'OPPONENT LEFT THE MATCH.',
+    err_generic: 'SOMETHING WENT WRONG.',
+  },
+};
+
+export let LANG = 'en';
+
+export const t = (k) => {
+  const table = STR[LANG] || STR.en;
+  return (table && table[k] !== undefined) ? table[k] : k;
+};

@@ -1,10 +1,11 @@
+import { escapeHtml } from '../main';
 import {
-  mountCarousel,
-  type CarouselHost,
-  type CarouselPanel,
-  type ClipManifest,
-  type FetchLike as ClipFetchLike,
-} from './carousel';
+  CABINET_IDS,
+  CABINET_ROSTER,
+  cabinetFullUrl,
+  cabinetPortraitUrl,
+  type CabinetId,
+} from '../cabinet/roster';
 import {
   mountLeaderboardView,
   type FetchLike as LeaderboardFetchLike,
@@ -13,22 +14,13 @@ import {
 } from './leaderboard-view';
 
 /**
- * Story 9.8: the landing page.
+ * Story 9.8's landing page, rebuilt as the front of the cabinet.
  *
- * The capstone of Epic 9 -- the first above-the-fold experience a visitor
- * with no context lands on (FR-38, UJ-5). It assembles four things this file
- * does not itself compute: pitch copy, the clip carousel (`carousel.ts`), the
- * leaderboard view (`leaderboard-view.ts`), and two CTAs into the panels
- * `startup.ts` already mounts. Mirrors `arcade/panel.ts`'s/`spectate/panel.ts`'s
- * `mount*Panel(host, deps)` shape: its own host (`#landing`), structural DOM
- * interfaces throughout (`tsconfig.base.json` has no DOM lib).
- *
- * This module deliberately knows nothing about `ArcadePanel` or
- * `SpectatePanel`'s own types -- the CTAs are two injected callbacks
- * (`onPlayCta`, `onSpectateCta`), wired by `startup.ts`, which is the one
- * place that already holds both panel handles. That keeps this file testable
- * with a bare function and keeps `startup.ts` the single place that decides
- * what "activate Arcade" or "activate Spectate" means.
+ * The page has three jobs in order: make a visitor want to press the button,
+ * show them the fight is real (a real Match, re-simulated, in the motion
+ * panel), and say honestly what the benchmark measures and what it does not.
+ * The leaderboard stays at the bottom and stays honest: when nothing has
+ * cleared the rating floor it says so.
  */
 
 export type LandingEvent = 'click';
@@ -44,77 +36,137 @@ export interface LandingHost {
 }
 
 export interface LandingPanelDeps {
-  readonly fetch: ClipFetchLike & LeaderboardFetchLike;
-  /** Injectable so a test can supply a clip manifest with no network at all. */
-  readonly loadClipManifest?: (fetchImpl: ClipFetchLike) => Promise<ClipManifest>;
-  /** Injectable so a test can supply a leaderboard report fixture with no network at all. */
+  readonly fetch: LeaderboardFetchLike;
   readonly loadLeaderboard?: (fetchImpl: LeaderboardFetchLike) => Promise<LeaderboardReportShape>;
-  /** Fired when the visitor clicks "Play vs CPU" here. Wired by `startup.ts` to the real Arcade panel. */
   readonly onPlayCta: () => void;
-  /** Fired when the visitor clicks "Watch Spectate" here. Wired by `startup.ts` to the real Spectate panel. */
   readonly onSpectateCta: () => void;
+  readonly onByokCta?: () => void;
   readonly onWarning?: (message: string) => void;
 }
 
 export interface LandingPanel {
-  readonly carousel: CarouselPanel;
   readonly leaderboard: LeaderboardView;
 }
 
-/**
- * The panel's markup. Exported so the shell -- pitch copy, CTA buttons, and
- * the two sub-mount points -- can be asserted with no DOM, in the same spirit
- * as `arcadeMarkup`/`spectateMarkup`.
- */
+export const HERO_MOTION_URL = '/hero.gif';
+
+const HERO_PAIR: readonly [CabinetId, CabinetId] = ['clawde', 'gemini'];
+
+function rosterStrip(): string {
+  return CABINET_IDS.map((id) => {
+    const fighter = CABINET_ROSTER[id];
+    return `<a class="tb-card tb-roster-tile" href="#/select" data-landing-roster="${id}"><img src="${escapeHtml(cabinetPortraitUrl(id))}" alt="" loading="lazy" /><span>${escapeHtml(fighter.name)}</span></a>`;
+  }).join('');
+}
+
 export function landingMarkup(): string {
+  const [left, right] = HERO_PAIR;
   return `
     <header class="tb-landing-hero">
-      <h1 class="tb-landing-title">Tokenbrawl</h1>
-      <p class="tb-landing-tagline">
-        A fair head-to-head harness where compute budget is an adversarial in-match resource.
-      </p>
-      <p class="tb-landing-pitch">
-        Two language models fight in a deterministic 1v1 fighting game, polled at the same Decision
-        Points, each spending from a fixed Token Bank to answer. Run dry and you enter Reflex Mode --
-        an eight-token cap and instant, bad decisions. Every Match replays from a committed Command Log,
-        never from a wall clock, so the fight you watch is exactly the fight that was played.
-      </p>
-      <div class="tb-landing-cta-row">
-        <button class="tb-button tb-landing-cta-play" type="button" data-landing-play>
-          Play vs CPU
-        </button>
-        <button class="tb-button tb-landing-cta-spectate" type="button" data-landing-spectate>
-          Watch Spectate
-        </button>
+      <div class="tb-landing-copy">
+        <span class="tb-eyebrow">LLM benchmark · arcade cabinet</span>
+        <h1 class="tb-landing-title">Token<br />brawl</h1>
+        <p class="tb-landing-tagline">Language models fight. The token budget is the health bar.</p>
+        <p class="tb-landing-pitch">
+          Two models step into a deterministic 1v1 fighter, are polled at the same Decision Points,
+          and pay for every thought from a fixed Token Bank. Run dry and you drop into Reflex Mode --
+          eight tokens a call and instant, bad decisions. Watch the stream, replay any Match from its
+          Command Log, or take the left side of the cabinet and fight the CPU yourself.
+        </p>
+        <div class="tb-landing-cta-row">
+          <button class="tb-button tb-button--gold tb-button--large" type="button" data-landing-play>Insert coin · Play</button>
+          <button class="tb-button tb-button--primary tb-button--large" type="button" data-landing-spectate>Watch the stream</button>
+          <button class="tb-button tb-button--ghost" type="button" data-landing-byok>Run your own fight</button>
+        </div>
+        <p class="tb-landing-keys">No server. No signup. Every replay is re-simulated, never recorded.</p>
+      </div>
+      <div class="tb-landing-art" aria-hidden="true">
+        <img class="tb-landing-fighter tb-landing-fighter--p1" src="${escapeHtml(cabinetFullUrl(left))}" alt="" />
+        <span class="tb-landing-vs">VS</span>
+        <img class="tb-landing-fighter tb-landing-fighter--p2" src="${escapeHtml(cabinetFullUrl(right))}" alt="" />
       </div>
     </header>
-    <section class="tb-landing-carousel" aria-label="Fight clips">
-      <h2 class="tb-landing-section-heading">Tokenbrawl in motion</h2>
-      <div class="tb-landing-carousel-host" data-landing-carousel></div>
+
+    <div class="tb-landing-strip" aria-label="At a glance">
+      <div class="tb-card tb-stat"><p class="tb-stat-value">8</p><p class="tb-stat-label">Fighters, each a model family</p></div>
+      <div class="tb-card tb-stat"><p class="tb-stat-value">6</p><p class="tb-stat-label">Arenas</p></div>
+      <div class="tb-card tb-stat"><p class="tb-stat-value">40</p><p class="tb-stat-label">Decision Points per Match</p></div>
+      <div class="tb-card tb-stat"><p class="tb-stat-value">0</p><p class="tb-stat-label">Wall-clock reads in the engine</p></div>
+    </div>
+
+    <section class="tb-landing-section" aria-label="Modes">
+      <span class="tb-eyebrow">Three ways in</span>
+      <h2 class="tb-landing-section-heading">Pick a mode</h2>
+      <div class="tb-modes">
+        <a class="tb-card tb-mode tb-mode--gold" href="#/play" data-landing-mode="play">
+          <span class="tb-mode-kicker">Play</span>
+          <h3 class="tb-mode-title">You vs CPU</h3>
+          <p class="tb-mode-body">The arcade original, untouched: eight fighters, transformations, a cinematic Ultimate. Keyboard, gamepad or touch. You always take the left side.</p>
+          <span class="tb-mode-cta">Insert coin</span>
+        </a>
+        <a class="tb-card tb-mode" href="#/watch" data-landing-mode="watch">
+          <span class="tb-mode-kicker">Watch</span>
+          <h3 class="tb-mode-title">The stream</h3>
+          <p class="tb-mode-body">An always-on AI-vs-AI channel. Every Match is walked from a committed Command Log in your own tab -- no server, no live inference.</p>
+          <span class="tb-mode-cta">Tune in</span>
+        </a>
+        <a class="tb-card tb-mode" href="#/byok" data-landing-mode="byok">
+          <span class="tb-mode-kicker">Run</span>
+          <h3 class="tb-mode-title">Your own fight</h3>
+          <p class="tb-mode-body">Two free API keys, any OpenAI-compatible endpoint. The fight runs in your browser and the reasoning shows up under the fighters as they think.</p>
+          <span class="tb-mode-cta">Bring a key</span>
+        </a>
+      </div>
     </section>
-    <section class="tb-landing-leaderboard" aria-label="Leaderboard">
+
+    <section class="tb-landing-section" aria-label="A real Match">
+      <span class="tb-eyebrow">Re-simulated, never recorded</span>
+      <h2 class="tb-landing-section-heading">Tokenbrawl in motion</h2>
+      <div class="tb-card tb-motion">
+        <img class="tb-motion-frame" src="${HERO_MOTION_URL}" alt="A Tokenbrawl Match replaying: two fighters, health and meter bars, a Token Bank draining to zero, and the reasoning behind each Decision Point shown underneath." data-landing-motion />
+        <div class="tb-motion-copy">
+          <h3>What you are looking at</h3>
+          <p>A real Match -- real engine, real frame data, real Token Bank debits, real Command Log -- between a scripted stand-in and a Baseline Bot. Nothing here is a video: the page loads the log and re-runs the deterministic engine, so the fight you watch is exactly the fight that was played.</p>
+          <p>The Token Bank under each fighter is the thing being measured. When it hits zero, the model stops thinking and starts flinching.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="tb-landing-section" aria-label="How the benchmark works">
+      <span class="tb-eyebrow">The rules that make the number mean something</span>
+      <h2 class="tb-landing-section-heading">How it works</h2>
+      <div class="tb-rules">
+        <div class="tb-card tb-rule"><h3>Latency-fair</h3><p>The harness blocks on both Agents at every Decision Point and steps once both have answered. Time is Ticks, never a clock. A fast endpoint gains nothing.</p></div>
+        <div class="tb-card tb-rule"><h3>Thinking is metered, never set</h3><p>No reasoning-effort knob, no thinking budget. Only the Token Bank constrains a model, and when it runs dry the model enters Reflex Mode.</p></div>
+        <div class="tb-card tb-rule"><h3>Deployments, not models</h3><p>A row is a (provider, endpoint, model) triple. Two endpoints serving the same model name are two entrants. A result is a statement about what was called, on the day it was called.</p></div>
+        <div class="tb-card tb-rule"><h3>Skill separates first</h3><p>Before any model was rated, the scripted bots had to beat each other in a fixed order by committed margins. A game where skill does not separate cannot measure a model.</p></div>
+      </div>
+    </section>
+
+    <section class="tb-landing-section" aria-label="Roster">
+      <span class="tb-eyebrow">The roster</span>
+      <h2 class="tb-landing-section-heading">Eight fighters</h2>
+      <div class="tb-roster-strip">${rosterStrip()}</div>
+    </section>
+
+    <section class="tb-landing-section tb-landing-leaderboard" aria-label="Leaderboard">
+      <span class="tb-eyebrow">Ratings · honest by construction</span>
       <h2 class="tb-landing-section-heading">Leaderboard</h2>
-      <div class="tb-landing-leaderboard-host" data-landing-leaderboard></div>
+      <p class="tb-landing-section-lede">A pairing is rated only once it has been played enough times and from both sides on mirrored seeds. Below either floor it is provisional and contributes to nothing.</p>
+      <div class="tb-card tb-landing-leaderboard-host" data-landing-leaderboard></div>
     </section>
   `;
 }
 
-/**
- * Mounts the landing panel and wires its two CTAs immediately -- neither CTA
- * depends on the carousel or leaderboard fetch resolving, the same
- * critical-path discipline `startup.ts`'s own bootstrap follows: a visitor
- * must be able to click "Play vs CPU" the instant the page paints, not after
- * a network round trip for decoration.
- */
 export function mountLandingPanel(host: LandingHost, deps: LandingPanelDeps): LandingPanel {
   host.innerHTML = landingMarkup();
 
   const playButton = host.querySelector('[data-landing-play]');
   const spectateButton = host.querySelector('[data-landing-spectate]');
-  const carouselHost = host.querySelector('[data-landing-carousel]');
+  const byokButton = host.querySelector('[data-landing-byok]');
   const leaderboardHost = host.querySelector('[data-landing-leaderboard]');
 
-  if (playButton === null || spectateButton === null || carouselHost === null || leaderboardHost === null) {
+  if (playButton === null || spectateButton === null || leaderboardHost === null) {
     throw new Error('mountLandingPanel: the panel did not mount.');
   }
 
@@ -124,11 +176,8 @@ export function mountLandingPanel(host: LandingHost, deps: LandingPanelDeps): La
   spectateButton.addEventListener('click', () => {
     deps.onSpectateCta();
   });
-
-  const carousel = mountCarousel(carouselHost as unknown as CarouselHost, {
-    fetch: deps.fetch,
-    ...(deps.loadClipManifest === undefined ? {} : { loadManifest: deps.loadClipManifest }),
-    ...(deps.onWarning === undefined ? {} : { onWarning: deps.onWarning }),
+  byokButton?.addEventListener('click', () => {
+    deps.onByokCta?.();
   });
 
   const leaderboard = mountLeaderboardView(leaderboardHost, {
@@ -137,5 +186,5 @@ export function mountLandingPanel(host: LandingHost, deps: LandingPanelDeps): La
     ...(deps.onWarning === undefined ? {} : { onWarning: deps.onWarning }),
   });
 
-  return Object.freeze({ carousel, leaderboard });
+  return Object.freeze({ leaderboard });
 }

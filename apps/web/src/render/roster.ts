@@ -79,7 +79,7 @@ export const ROSTER_NAMES: Readonly<Record<RosterId, string>> = Object.freeze({
 /**
  * Story 12.9: the cues that belong to *this* fighter.
  *
- * Five names per fighter, and every one of them a written-out literal rather
+ * Four names per fighter, and every one of them a written-out literal rather
  * than a template. `` `sfx_${id}_hit_l` `` would read the same on this screen and
  * would resolve a name with no file behind it the moment a fifth fighter joined
  * the roster with no audio pack -- which is silence with nothing on screen to
@@ -105,8 +105,6 @@ export interface RosterAudioCues {
   readonly hurt: string;
   /** Voice, on the struck fighter, for a `ko`. Replaces the shared `vo_ko`. */
   readonly ko: string;
-  /** Voice, on the *caster*, for the Ultimate. Replaces the shared `vo_ultimate`. */
-  readonly ultimate: string;
 }
 
 export const ROSTER_AUDIO: Readonly<Record<RosterId, RosterAudioCues>> = Object.freeze({
@@ -115,28 +113,24 @@ export const ROSTER_AUDIO: Readonly<Record<RosterId, RosterAudioCues>> = Object.
     heavy: 'sfx_clawde_hit_h',
     hurt: 'vo_clawde_hurt',
     ko: 'vo_clawde_ko',
-    ultimate: 'vo_clawde_transform',
   }),
   chatty: Object.freeze({
     hit: 'sfx_chatty_hit_l',
     heavy: 'sfx_chatty_hit_h',
     hurt: 'vo_chatty_hurt',
     ko: 'vo_chatty_ko',
-    ultimate: 'vo_chatty_transform',
   }),
   gemini: Object.freeze({
     hit: 'sfx_gemini_hit_l',
     heavy: 'sfx_gemini_hit_h',
     hurt: 'vo_gemini_hurt',
     ko: 'vo_gemini_ko',
-    ultimate: 'vo_gemini_transform',
   }),
   grokk: Object.freeze({
     hit: 'sfx_grokk_hit_l',
     heavy: 'sfx_grokk_hit_h',
     hurt: 'vo_grokk_hurt',
     ko: 'vo_grokk_ko',
-    ultimate: 'vo_grokk_transform',
   }),
 });
 
@@ -145,8 +139,11 @@ export const ROSTER_AUDIO: Readonly<Record<RosterId, RosterAudioCues>> = Object.
  * project ships audio for.
  *
  * The `undefined` branch is what makes the shared `sfx_hit_l`/`sfx_hit_h`/
- * `vo_ko`/`vo_ultimate` fallback reachable: a roster id with no pack falls back
- * to a cue that exists rather than resolving a name that does not.
+ * `vo_ko` fallback reachable: a roster id with no pack falls back to a cue that
+ * exists rather than resolving a name that does not. The Ultimate's
+ * announcement is not on this table at all -- it is the stage's shared
+ * `vo_ultimate` for every caster (see `render/audio.ts`), matching the
+ * dev-reference game, which is why there is no per-character `ultimate` here.
  */
 export function audioCuesFor(id: RosterId): RosterAudioCues | undefined {
   return ROSTER_AUDIO[id];

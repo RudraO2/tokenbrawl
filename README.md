@@ -120,11 +120,19 @@ npm test                          # every workspace
 bash scripts/audit-invariants.sh  # the invariant gate
 ```
 
-Play the replay player locally:
+Run the site locally — the landing page, the Play cabinet, the Spectate
+stream, the replay player and the BYOK panel:
 
 ```bash
 npm run dev -w apps/web
 ```
+
+**Play** (`#/play`) is the author's own arcade fighter, shipped verbatim under
+`apps/web/public/arena/` and embedded in the page: eight fighters, six arenas,
+a transformation ladder and a one-button Ultimate, you on the left against the
+CPU. Nothing played there is rated. **Watch** (`#/watch`) is an always-on
+stream of committed Command Logs, and **Replay** re-simulates any one of them
+with the reasoning under each fighter.
 
 Run Matches from the command line (from the repository root, so relative paths
 in the config resolve where you expect):
@@ -195,6 +203,9 @@ Honest, because that is the point of this section:
 - The hero animation is a scripted stand-in, as stated at the top and on every
   frame of the image itself.
 - The MicroRTS environment (Epic 6) is deliberately absent, not started.
+- The Play cabinet is a human playing the reference fighter, not a model. It
+  shares the page, the roster names and the sound switch with the benchmark;
+  it shares none of the harness, and it never writes a Command Log.
 
 ## Licences
 

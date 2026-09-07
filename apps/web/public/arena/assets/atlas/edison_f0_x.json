@@ -1,0 +1,83 @@
+{
+  "image": "../sprites/edison_f0_x_sheet.png",
+  "cell": {
+    "w": 208,
+    "h": 208
+  },
+  "grid": {
+    "cols": 5,
+    "rows": 2
+  },
+  "poses": {
+    "c_straight": {
+      "cells": [
+        0
+      ],
+      "fps": 1,
+      "loop": false
+    },
+    "c_hook": {
+      "cells": [
+        1
+      ],
+      "fps": 1,
+      "loop": false
+    },
+    "c_launcher": {
+      "cells": [
+        2
+      ],
+      "fps": 1,
+      "loop": false
+    },
+    "c_body": {
+      "cells": [
+        3
+      ],
+      "fps": 1,
+      "loop": false
+    },
+    "c_knee": {
+      "cells": [
+        4
+      ],
+      "fps": 1,
+      "loop": false
+    },
+    "c_smash": {
+      "cells": [
+        5
+      ],
+      "fps": 1,
+      "loop": false
+    },
+    "dash_lunge": {
+      "cells": [
+        6
+      ],
+      "fps": 1,
+      "loop": false
+    },
+    "air_hurt": {
+      "cells": [
+        7
+      ],
+      "fps": 1,
+      "loop": false
+    },
+    "air_spin": {
+      "cells": [
+        8
+      ],
+      "fps": 1,
+      "loop": false
+    },
+    "lie_flat": {
+      "cells": [
+        9
+      ],
+      "fps": 1,
+      "loop": false
+    }
+  }
+}

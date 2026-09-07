@@ -88,9 +88,15 @@ import { audioCuesFor, type RosterPair } from './roster';
  * fighter died with the same cry -- four packs shipped, two cues wired, which is
  * the Story 9.7 defect shape in the mix instead of on the canvas. So
  * `buildAudioTrack` now takes the `RosterPair` the surface is drawing with, and
- * four of the cues it places are resolved *through* it: the struck fighter's own
+ * three of the cues it places are resolved *through* it: the struck fighter's own
  * hit and heavy SFX, the struck fighter's own KO line and a **hurt** line on a
- * heavy hit that no fighter had before, and the *caster's* own Ultimate line.
+ * heavy hit that no fighter had before.
+ *
+ * The Ultimate's announcement is deliberately *not* one of them. It is the
+ * stage's shared `vo_ultimate` for every caster, matching the dev-reference
+ * game, whose `ultimate` cinematic plays the one announcer clip and keeps the
+ * caster's transform yell out of it -- an Ultimate that announced itself in a
+ * fighter's grunt read as a hurt line, not as the stage calling the move.
  *
  * Two properties this keeps that a call site building `sfx_<id>_hit_l` would
  * not. The names live in one frozen table in `render/roster.ts` beside
@@ -492,15 +498,16 @@ export function buildAudioTrack(
       continue;
     }
     announcedClocks.push(clockIndex);
-    // Story 12.9. The caster's own line, and `cinematic.agentIndex` is the
-    // caster -- unlike a `JuiceEvent`'s, which names the struck fighter. It
-    // still claims *both* rate-limit slots: whose voice it is and whose moment
-    // it is are different questions, and the announcement is still the stage's
-    // moment (see `VoiceRequest.agents`).
-    const casterCues = roster === undefined ? undefined : audioCuesFor(roster[cinematic.agentIndex]);
+    // The Ultimate's announcement is the *stage's* shared line, not a fighter's
+    // -- `tuning.ultimateVoice` (`vo_ultimate`) for every caster, matching the
+    // dev-reference game, whose `ultimate` cinematic plays the one announcer
+    // clip and deliberately keeps the caster's transform yell out of it. So the
+    // roster is not consulted here, and the request claims *both* rate-limit
+    // slots because the line belongs to neither fighter (see
+    // `VoiceRequest.agents`).
     voiceRequests.push({
       clockIndex,
-      name: casterCues?.ultimate ?? tuning.ultimateVoice,
+      name: tuning.ultimateVoice,
       agents: BOTH_AGENTS,
       rank: VOICE_RANK_ANNOUNCE,
     });

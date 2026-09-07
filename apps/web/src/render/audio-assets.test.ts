@@ -60,11 +60,10 @@ describe('every cue name has a file, and every file has a name (Story 12.9)', ()
         'hit',
         'hurt',
         'ko',
-        'ultimate',
       ]);
     }
     expect(ROSTER_IDS).toHaveLength(4);
-    expect(everyCueName()).toHaveLength(27);
+    expect(everyCueName()).toHaveLength(23);
   });
 
   it('names each fighter after themselves, so a mis-keyed row is visible', () => {
@@ -80,7 +79,7 @@ describe('every cue name has a file, and every file has a name (Story 12.9)', ()
 });
 
 describe('no two fighters share a sample (Story 12.9)', () => {
-  it('hashes every per-character file and finds twenty distinct ones', () => {
+  it('hashes every per-character file and finds sixteen distinct ones', () => {
     // The acceptance criterion, and it exists because the sizes look wrong: all
     // four `sfx_*_hit_l` are 4 747 B and all four `vo_*_ko` are 14 685 B, which
     // reads exactly like one file copied four times. Same encoder, same
@@ -95,15 +94,15 @@ describe('no two fighters share a sample (Story 12.9)', () => {
         );
       }
     }
-    expect(digests.size).toBe(20);
-    expect(new Set(digests.values()).size).toBe(20);
+    expect(digests.size).toBe(16);
+    expect(new Set(digests.values()).size).toBe(16);
   });
 
   it('compares the four fighters event by event, which is where a copy would land', () => {
     // Cross-fighter, per event. The sweep above would also fail on two *events*
     // of one fighter colliding, which is a different and less likely mistake;
     // this is the shape the criterion actually names.
-    for (const event of ['hit', 'heavy', 'hurt', 'ko', 'ultimate'] as const) {
+    for (const event of ['hit', 'heavy', 'hurt', 'ko'] as const) {
       const digests = ROSTER_IDS.map((id) =>
         createHash('md5')
           .update(readFileSync(join(PUBLIC_AUDIO, `${ROSTER_AUDIO[id][event]}.mp3`)))
@@ -120,9 +119,11 @@ describe('the audio payload stays inside the budget this story recorded (Story 1
    *
    * Written as the numbers the story wrote rather than as "whatever is on disk
    * plus a margin": a budget that is re-derived from the tree is not a budget.
-   * The added figure is what the twenty per-character files cost; the total is
-   * everything under `public/audio/`, which is on the critical path of a static
-   * site with no CDN.
+   * The added figure is what the sixteen per-character files cost -- the four
+   * `vo_*_transform` grunts were dropped when the Ultimate's announcement became
+   * the stage's shared `vo_ultimate`, so they are no longer here to pay for. The
+   * total is everything under `public/audio/`, which is on the critical path of
+   * a static site with no CDN.
    */
   const ADDED_BUDGET_BYTES = 320 * 1024;
   const TOTAL_BUDGET_BYTES = 900 * 1024;
@@ -133,16 +134,16 @@ describe('the audio payload stays inside the budget this story recorded (Story 1
   const bytesOf = (names: readonly string[]): number =>
     names.reduce((total, name) => total + statSync(join(PUBLIC_AUDIO, `${name}.mp3`)).size, 0);
 
-  it('adds 283.6 KB of per-character audio against a 320 KB budget', () => {
+  it('adds 141.1 KB of per-character audio against a 320 KB budget', () => {
     const added = bytesOf(ROSTER_IDS.flatMap((id) => Object.values(ROSTER_AUDIO[id])));
     expect(added).toBeLessThanOrEqual(ADDED_BUDGET_BYTES);
-    expect(added).toBe(290_379);
+    expect(added).toBe(144_438);
   });
 
   it('keeps the whole directory under 900 KB', () => {
     const total = bytesOf(committedCues());
     expect(total).toBeLessThanOrEqual(TOTAL_BUDGET_BYTES);
-    expect(total - 290_379).toBe(SHARED_BYTES);
+    expect(total - 144_438).toBe(SHARED_BYTES);
   });
 });
 

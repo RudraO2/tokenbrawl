@@ -1,0 +1,152 @@
+{
+  "image": "../sprites/lama_f2_sheet.png",
+  "cell": {
+    "w": 208,
+    "h": 208
+  },
+  "grid": {
+    "cols": 5,
+    "rows": 5
+  },
+  "poses": {
+    "idle": {
+      "cells": [
+        0,
+        1
+      ],
+      "fps": 4,
+      "loop": true
+    },
+    "walk": {
+      "cells": [
+        2,
+        3
+      ],
+      "fps": 8,
+      "loop": true
+    },
+    "jump": {
+      "cells": [
+        4
+      ],
+      "fps": 1,
+      "loop": false
+    },
+    "crouch": {
+      "cells": [
+        5
+      ],
+      "fps": 1,
+      "loop": false
+    },
+    "block": {
+      "cells": [
+        6
+      ],
+      "fps": 1,
+      "loop": false
+    },
+    "punchL": {
+      "cells": [
+        7
+      ],
+      "fps": 1,
+      "loop": false
+    },
+    "punchH": {
+      "cells": [
+        8
+      ],
+      "fps": 1,
+      "loop": false
+    },
+    "kickL": {
+      "cells": [
+        9
+      ],
+      "fps": 1,
+      "loop": false
+    },
+    "kickH": {
+      "cells": [
+        10
+      ],
+      "fps": 1,
+      "loop": false
+    },
+    "special1": {
+      "cells": [
+        11,
+        12
+      ],
+      "fps": 10,
+      "loop": false
+    },
+    "super": {
+      "cells": [
+        13,
+        14
+      ],
+      "fps": 10,
+      "loop": false
+    },
+    "hit": {
+      "cells": [
+        15,
+        16
+      ],
+      "fps": 12,
+      "loop": false
+    },
+    "ko": {
+      "cells": [
+        17,
+        18
+      ],
+      "fps": 8,
+      "loop": false
+    },
+    "win": {
+      "cells": [
+        19
+      ],
+      "fps": 1,
+      "loop": false
+    },
+    "intro": {
+      "cells": [
+        20
+      ],
+      "fps": 1,
+      "loop": false
+    },
+    "taunt": {
+      "cells": [
+        21
+      ],
+      "fps": 1,
+      "loop": false
+    },
+    "throw": {
+      "cells": [
+        22
+      ],
+      "fps": 1,
+      "loop": false
+    },
+    "charge": {
+      "cells": [
+        23
+      ],
+      "fps": 1,
+      "loop": false
+    },
+    "burst": {
+      "cells": [
+        24
+      ],
+      "fps": 1,
+      "loop": false
+    }
+  }
+}

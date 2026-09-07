@@ -252,30 +252,17 @@ function hexOffences(files: readonly StyledFile[]): readonly string[] {
  * `/* ... *\/` too, which is the same decision: a commented-out `rgba(` paints
  * nothing.
  */
-function translucencyOffences(files: readonly StyledFile[]): readonly string[] {
-  const banned = /\b(rgba\(|backdrop-filter|filter:\s*blur|linear-gradient|radial-gradient|box-shadow:[^;]*inset)/;
+function rawAlphaOffences(files: readonly StyledFile[]): readonly string[] {
+  // The page may glow, tint and blur -- that is the cabinet's whole look --
+  // but every translucent colour is declared once, in tokens.css, and used by
+  // name everywhere else. A raw `rgba(` at a call site is the same defect a
+  // raw hex is: a colour nobody can find or change in one place.
+  const banned = /(^|[^a-zA-Z_-])rgba?\(/;
   return files
-    .filter(({ path, source }) => !isReleased(path) && banned.test(stripComments(source)))
+    .filter(({ path, source }) => path !== 'styles/tokens.css' && !isReleased(path) && banned.test(stripComments(source)))
     .map(({ path }) => path);
 }
 
-/**
- * Comments out, line numbering intact.
- *
- * Every sweep in this file reads code rather than prose, and a prefix test on
- * the trimmed line is not enough for that: `draw(); // was globalAlpha = 0.4`
- * is a sentence about a rule, and reporting it as a violation of the rule is
- * how a rule stops being fixable. Block comments are blanked rather than
- * deleted so a reported `path:line` still points at the right line.
- *
- * Be honest about the limit: this is a text pass, not a lexer. A `//` inside a
- * string literal blanks the rest of that line, and a `/*` inside a string
- * blanks through the next `*\/`, so a rule reading its output can be made to
- * miss code by putting comment punctuation inside a string on the same line.
- * Both need a tokeniser to fix properly and neither has ever occurred in this
- * app; the failure is recorded in the deferred-work ledger rather than left as
- * an unstated assumption.
- */
 function stripComments(source: string): string {
   return source
     .replace(/\/\*[\s\S]*?\*\//g, (block) => block.replace(/[^\n]/g, ' '))
@@ -534,8 +521,8 @@ describe('the design tokens are the single source of colour', () => {
 
   it('keeps the canvas border width and shadow offset equal to the tokens', () => {
     const tokens = tokensCss();
-    expect(tokens).toContain(`--tb-border-width: ${String(THEME.borderWidth)}px`);
-    expect(tokens).toContain(`--tb-shadow-offset: ${String(THEME.shadowOffset)}px`);
+    expect(tokens).toContain(`--tb-arena-border-width: ${String(THEME.borderWidth)}px`);
+    expect(tokens).toContain(`--tb-arena-shadow-offset: ${String(THEME.shadowOffset)}px`);
   });
 
   it('pins the anti-flash colour in index.html to the ground token', () => {
@@ -548,43 +535,23 @@ describe('the design tokens are the single source of colour', () => {
   });
 });
 
-describe('neubrutalism, as rules rather than adjectives', () => {
-  it('blurs no shadow', () => {
-    // A blurred shadow is the single fastest way to make this look generic.
-    // Matches `Npx Npx Npx` where the third value is non-zero, in any file.
-    //
-    // Not scoped to the page by Story 11.1, and it did not need to be: the
-    // pattern is anchored on the CSS `box-shadow:` declaration, so the
-    // canvas's own `shadowBlur` property was never covered by it. The audit
-    // that produced the boundary checked this explicitly rather than assuming.
-    const blurred = /box-shadow:[^;]*\b\d+px\s+\d+px\s+(?!0\b)\d/;
-    const offences = styledFiles()
-      .filter(({ source }) => blurred.test(source))
-      .map(({ path }) => path);
-    expect(offences).toStrictEqual([]);
+describe('the neon cabinet, as rules rather than adjectives', () => {
+  it('names every translucent colour once, in tokens.css', () => {
+    expect(rawAlphaOffences(styledFiles())).toStrictEqual([]);
   });
-
-  it('uses no translucent or blurred surface on the page side', () => {
-    expect(translucencyOffences(styledFiles())).toStrictEqual([]);
-  });
-
-  it('still catches a planted translucent surface in a stylesheet', () => {
+  it('still catches a planted raw alpha in a stylesheet', () => {
     expect(
-      translucencyOffences([{ path: 'styles/app.css', source: 'background: rgba(0,0,0,.5);' }]),
+      rawAlphaOffences([{ path: 'styles/app.css', source: 'background: rgba(0,0,0,.5);' }]),
     ).toStrictEqual(['styles/app.css']);
   });
-
-  it('still catches a planted gradient on the page side', () => {
+  it('still catches a planted raw alpha on the page-side canvas', () => {
     expect(
-      translucencyOffences([{ path: 'hero/hero.ts', source: 'background: linear-gradient(#000, #fff);' }]),
+      rawAlphaOffences([{ path: 'hero/hero.ts', source: 'ctx.fillStyle = "rgba(0,0,0,.5)";' }]),
     ).toStrictEqual(['hero/hero.ts']);
   });
-
-  it('lets the arena glow', () => {
-    // The whole point of Story 11.1, as one assertion: the exact source text
-    // that fails on the page passes inside the boundary.
+  it('lets the arena mix its own light', () => {
     expect(
-      translucencyOffences([
+      rawAlphaOffences([
         {
           path: 'render/juice-draw.ts',
           source: 'const glow = "radial-gradient(rgba(255,210,74,0.8), transparent)";',
@@ -592,51 +559,56 @@ describe('neubrutalism, as rules rather than adjectives', () => {
       ]),
     ).toStrictEqual([]);
   });
-
-  it('says nothing about a page-side comment that merely names a banned surface', () => {
-    // Story 11.1 wrote "translucency is banned outside the arena" into page-side
-    // source as prose. A rule that reports its own documentation is a rule the
-    // next writer routes around instead of obeying -- the same reason
-    // `alphaOffences` strips comments.
+  it('says nothing about a page-side comment that merely names a raw alpha', () => {
     expect(
-      translucencyOffences([
+      rawAlphaOffences([
         { path: 'hero/raster.ts', source: '// was background: rgba(0,0,0,.5), before 4.1\ndraw();' },
       ]),
     ).toStrictEqual([]);
     expect(
-      translucencyOffences([{ path: 'styles/app.css', source: '/* linear-gradient(#000,#fff) */' }]),
+      rawAlphaOffences([{ path: 'styles/app.css', source: '/* rgba(0,0,0,.5) */' }]),
     ).toStrictEqual([]);
-    // And the real declaration on the same file still fails.
     expect(
-      translucencyOffences([
+      rawAlphaOffences([
         { path: 'styles/app.css', source: '/* explained */\nbackground: rgba(0,0,0,.5);' },
       ]),
     ).toStrictEqual(['styles/app.css']);
   });
-
-  it('rounds no corner', () => {
-    // The value is extracted and compared rather than pattern-matched around.
-    // A negative lookahead after `\s*` has a backtracking hole -- the quantifier
-    // collapses to zero width and the lookahead then tests the leading space,
-    // which passes for every input. That version of this test reported
-    // `border-radius: var(--tb-radius)` as a violation of itself.
-    //
-    // Like `blurs no shadow`, this stayed unscoped in Story 11.1 because it
-    // matches the CSS `border-radius:` declaration only -- a rounded path on
-    // the canvas was never covered by it and needs nothing from the boundary.
+  it('draws every corner from a radius token', () => {
+    // Three radii and a circle. A fourth number is a fourth opinion.
+    const allowed = new Set(['0', '50%', 'var(--tb-radius)', 'var(--tb-radius-sm)', 'var(--tb-radius-pill)']);
     const offences: string[] = [];
     for (const { path, source } of styledFiles()) {
-      for (const match of source.matchAll(/border-radius:\s*([^;]+);/g)) {
+      for (const match of stripComments(source).matchAll(/border-radius:\s*([^;]+);/g)) {
         const value = match[1].trim();
-        if (value !== '0' && value !== 'var(--tb-radius)') {
+        const parts = value.split(/\s+/);
+        if (!parts.every((part) => allowed.has(part))) {
           offences.push(`${path}: ${value}`);
         }
       }
     }
     expect(offences).toStrictEqual([]);
-    expect(tokensCss()).toContain('--tb-radius: 0');
+    expect(tokensCss()).toContain('--tb-radius:');
   });
-
+  it('lights every glow with a token', () => {
+    // A box-shadow may blur -- glow is the point -- but its colour is a name.
+    const offences: string[] = [];
+    for (const { path, source } of styledFiles()) {
+      if (path === 'styles/tokens.css') {
+        continue;
+      }
+      for (const match of stripComments(source).matchAll(/box-shadow:\s*([^;]+);/g)) {
+        const value = match[1];
+        if (value.trim() === 'none' || value.trim() === '0 0 0') {
+          continue;
+        }
+        if (!/var\(--tb-/.test(value)) {
+          offences.push(`${path}: ${value.trim()}`);
+        }
+      }
+    }
+    expect(offences).toStrictEqual([]);
+  });
   it('never removes a focus ring', () => {
     const offences = styledFiles()
       .filter(({ source }) => /outline:\s*(none|0)\b/.test(source))
@@ -645,21 +617,20 @@ describe('neubrutalism, as rules rather than adjectives', () => {
     expect(readFileSync(join(SRC, 'styles', 'app.css'), 'utf8')).toContain(':focus-visible');
   });
 
-  it('steps every transition and honours reduced motion', () => {
+  it('times every transition from the tokens and honours reduced motion', () => {
     const appCss = readFileSync(join(SRC, 'styles', 'app.css'), 'utf8');
-    // `step-end` rather than an easing curve: motion is a state change here,
-    // not a journey. And nothing may vary per Match (INV-3).
     for (const declaration of appCss.match(/transition:[^;]*/g) ?? []) {
       if (declaration.includes('none')) {
         continue;
       }
-      expect(declaration).toContain('step-end');
       expect(declaration).toContain('var(--tb-step)');
+      expect(declaration).toContain('var(--tb-ease)');
     }
     expect(appCss).toContain('prefers-reduced-motion: reduce');
     expect(tokensCss()).toContain('prefers-reduced-motion: reduce');
+    // Reduced motion zeroes both durations, so an entrance is a cut.
+    expect(tokensCss()).toMatch(/prefers-reduced-motion: reduce\)\s*\{\s*:root\s*\{\s*--tb-step: 0ms;\s*--tb-enter: 0ms;/);
   });
-
   it('declares the two chosen faces and no third family', () => {
     const tokens = tokensCss();
     expect(tokens).toContain('Bricolage Grotesque');
@@ -938,7 +909,7 @@ describe('the page canvas obeys the same rules as the stylesheet', () => {
     expect(isArena(BRAND_MIRROR)).toBe(true);
     expect(isReleased(BRAND_MIRROR)).toBe(false);
     expect(
-      translucencyOffences([{ path: BRAND_MIRROR, source: 'const g = "linear-gradient(#000,#fff)";' }]),
+      rawAlphaOffences([{ path: BRAND_MIRROR, source: 'const g = "rgba(0,0,0,.5)";' }]),
     ).toStrictEqual([BRAND_MIRROR]);
     expect(
       alphaOffences([{ path: BRAND_MIRROR, source: 'ctx.globalAlpha = 0.5;' }]),
@@ -950,7 +921,7 @@ describe('the page canvas obeys the same rules as the stylesheet', () => {
     // `render/hud.css` is page chrome wearing the arena's directory name.
     expect(isArena('render/hud.css')).toBe(false);
     expect(
-      translucencyOffences([{ path: 'render/hud.css', source: 'background: rgba(0,0,0,.5);' }]),
+      rawAlphaOffences([{ path: 'render/hud.css', source: 'background: rgba(0,0,0,.5);' }]),
     ).toStrictEqual(['render/hud.css']);
   });
 

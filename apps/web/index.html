@@ -3,39 +3,17 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Tokenbrawl</title>
+    <title>Tokenbrawl — the LLM fighting-game benchmark</title>
     <meta
       name="description"
-      content="Tokenbrawl — language models fighting under a fixed token budget. Every replay is re-simulated from the Command Log, never recorded."
+      content="Tokenbrawl — language models fighting under a fixed token budget. Watch the stream, replay any Match from its Command Log, or step into the cabinet and fight the CPU yourself."
     />
-    <!--
-      The ground colour is declared here as well as in tokens.css so the first
-      paint is already dark. Without it the browser flashes white before the
-      stylesheet lands, which on a near-black site is the single most visible
-      loading artefact there is.
-    -->
     <meta name="color-scheme" content="dark" />
     <!--
-      Story 4.2. The hero replay is the one asset the first animated frame
-      genuinely cannot be drawn without, and without this line it is discovered
-      only after the module graph has downloaded and executed -- one extra
-      serial round trip, which on a high-latency link costs more than every
-      byte saved elsewhere on the page. `crossorigin` is required for an
-      `as="fetch"` preload to match a plain same-origin `fetch()`; without it
-      the browser downloads the file twice.
-
-      Deliberately the only preload here. Sprites, backdrop and the reasoning
-      sidecar are upgrades to an already-running fight (see startup.ts) and
-      preloading them would have them competing for the same narrow pipe as the
-      thing that actually blocks.
-
-      Story 12.12 repointed this at the exhibition replay, in the same change that
-      repointed `DEMO_REPLAY_URL`. The two must agree: a preload of a document the
-      page then does not fetch is a wasted round trip on the critical path AND a
-      cold fetch of the one that does block, which is the opposite of what this
-      line is for. `startup.test.ts` asserts the page's first request is
-      `DEMO_REPLAY_URL`; `exhibition-artefact.test.ts` asserts this href is the
-      same URL, because nothing else can see an HTML attribute.
+      The hero replay is the one asset the first animated frame cannot be drawn
+      without; preloading it saves a serial round trip on the critical path.
+      `startup.test.ts` asserts the page's first request is `DEMO_REPLAY_URL`,
+      and `exhibition-artefact.test.ts` asserts this href is the same URL.
     -->
     <link
       rel="preload"
@@ -44,82 +22,57 @@
       type="application/json"
       crossorigin
     />
+    <link rel="icon" href="/arena/assets/ui/favicon.png" />
     <!--
-      An empty data URL, which is the one-line way to stop the browser
-      speculatively requesting /favicon.ico. Measured: it was a 404 on every
-      cold load, competing for the same narrow pipe as the replay. A real mark
-      belongs with the rest of the site's presentation (Story 7.4), not here,
-      and a hex literal in this file would rightly fail the token sweep.
+      The ground colour is declared inline as well as in tokens.css so the first
+      paint is already dark. Pinned to `--tb-bg` by style-discipline.test.ts.
     -->
-    <link rel="icon" href="data:," />
     <style>
       html {
-        background: #0a0a0a;
+        background: #07080f;
       }
     </style>
   </head>
   <body>
     <!--
-      Story 12.4. The cabinet's nav strip, filled by `shell/nav.ts`. It sits
-      outside every screen because it is the one thing on the page that is not
-      a screen: it is how you leave the one you are on.
+      The cabinet's top bar: brand, screens and the page's one sound switch.
+      `shell/nav.ts` fills the nav; `shell/sound.ts` fills the switch. Both sit
+      outside every screen because they are how you leave the one you are on.
     -->
-    <div id="screen-nav"></div>
+    <header class="tb-topbar">
+      <div id="screen-nav"></div>
+      <div id="screen-sound"></div>
+    </header>
     <!--
-      Story 12.9. The page's sound switch, filled by `shell/sound.ts`. Outside
-      every screen for the reason the nav is: there is one audio graph for the
-      whole page, so the control that mutes it belongs to the page rather than
-      to whichever surface happens to be making the noise.
-    -->
-    <div id="screen-sound"></div>
-    <!--
-      Story 12.4. Every section below carries `data-screen`, and exactly one of
-      them carries `data-screen-active` at a time -- `shell/router.ts` moves the
-      attribute, `app.css` turns it into `display`. They are the same five
-      panels they have always been; what changed is that four of them are no
-      longer mounted, painting and audible while a visitor looks at the fifth.
-
-      Document order still matters for a visitor with the stylesheet missing:
-      they get the old stacked page rather than a blank one.
-    -->
-    <!--
-      Story 9.8's landing page, the default above-the-fold view (UJ-5). It
-      sits before #app in document order so a first-time visitor with no
-      context reads the pitch, the clip carousel and the leaderboard before
-      the replay player -- and its two CTAs are wired to the existing
-      #arcade/#spectate panels rather than duplicating what they do. Story
-      12.4 made those CTAs routes rather than scrolls.
+      Every section below carries `data-screen`, and exactly one of them
+      carries `data-screen-active` at a time -- `shell/router.ts` moves the
+      attribute, `app.css` turns it into `display`. Document order still
+      matters for a visitor with the stylesheet missing: they get a stacked
+      page rather than a blank one.
     -->
     <section class="tb-screen tb-landing" id="landing" data-screen></section>
+    <!--
+      Play: the arcade cabinet. `play/panel.ts` mounts the cabinet frame and
+      the settings; the fight itself runs inside `/arena/`, the reference
+      fighter, untouched.
+    -->
+    <section class="tb-screen tb-play" id="arcade" data-screen></section>
+    <section class="tb-screen tb-select" id="select" data-screen></section>
+    <section class="tb-screen tb-spectate" id="spectate" data-screen></section>
     <div class="tb-screen" id="app" data-screen></div>
     <!--
-      Story 4.6's BYOK panel, deliberately outside #app. `renderApp` rewrites
-      #app's innerHTML wholesale, and a completed BYOK Match re-mounts the
-      player through exactly that call -- a panel inside #app would delete
-      itself at the moment it succeeded.
+      The BYOK panel sits outside #app: `renderApp` rewrites #app's innerHTML
+      wholesale, and a completed BYOK Match re-mounts the player through exactly
+      that call -- a panel inside #app would delete itself the moment it
+      succeeded.
     -->
     <section class="tb-screen tb-byok" id="byok" data-screen></section>
-    <!--
-      Story 9.2's Play-vs-CPU panel, outside #app for the same reason #byok
-      is: a completed arcade Match re-mounts the player through the same
-      call BYOK's completion does, and a panel inside #app would delete
-      itself the moment it succeeded.
-    -->
-    <section class="tb-screen tb-arcade" id="arcade" data-screen></section>
-    <!--
-      Story 9.3's Spectate panel, outside #app for the same reason #byok and
-      #arcade are: it owns its own film/clock sequence (walking the manifest)
-      rather than joining the single-log player #app hosts.
-    -->
-    <section class="tb-screen tb-spectate" id="spectate" data-screen></section>
-    <!--
-      Story 12.4 registered this route; Story 12.5 filled it. `shell/select.ts`
-      writes the roster in here on mount, so the section is an empty host like
-      #arcade and #spectate rather than markup maintained in two places. A page
-      whose script never ran shows an empty screen, which is the same degrade
-      every other panel on this page takes.
-    -->
-    <section class="tb-screen tb-select" id="select" data-screen></section>
+    <footer class="tb-footer">
+      <span>Tokenbrawl · deterministic 1v1 · every replay re-simulated from its Command Log</span>
+      <span>
+        <a href="#/watch">Watch</a> · <a href="#/play">Play</a> · <a href="#/byok">Your keys</a>
+      </span>
+    </footer>
     <script type="module" src="/src/boot.ts"></script>
   </body>
 </html>

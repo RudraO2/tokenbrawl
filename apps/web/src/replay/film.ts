@@ -39,7 +39,13 @@ export const PLAYBACK_FPS = 60;
 /**
  * Playback frames each Decision Point occupies. 12 at 60fps means five
  * Decision Points per second, so a full 40-Decision-Point Match plays in eight
- * seconds -- long enough to follow, short enough to watch several.
+ * seconds before hitstop and the Ultimate cinematic stretch it -- long enough
+ * to follow, short enough to watch several.
+ *
+ * The audio layer's windows (`render/audio.ts`: the duck, the voice rate
+ * limit) and its fixtures are tuned against this cadence, so it is not a knob
+ * to turn for a longer-feeling stream; the Spectate corpus is built to prefer
+ * the longest fights instead (`scripts/build-spectate-manifest.mts`).
  *
  * A constant, never a function of the Match. This single fact is AC2.
  */

@@ -1,5 +1,6 @@
 import type { CommandLog } from '@tokenbrawl/contracts';
-import { mountArcadePanel, type ArcadeHost, type ArcadePanel } from './arcade/panel';
+import { mountPlayPanel, type PlayHost, type PlayPanel } from './cabinet/panel';
+import type { CabinetId } from './cabinet/roster';
 import { mountByokPanel, type ByokHost, type ByokPanel } from './byok/panel';
 import type { KeyStorage } from './byok/keys';
 import { escapeHtml, renderApp, type HostView, type MountPoint, type MountedApp } from './main';
@@ -223,7 +224,7 @@ export interface StartupResult {
    * The Play-vs-CPU panel, or `null` when the page has no `#arcade` host
    * (Story 9.2). Exposed for the same reason `byok` is.
    */
-  readonly arcade: ArcadePanel | null;
+  readonly play: PlayPanel | null;
   /**
    * The Spectate panel, or `null` when the page has no `#spectate` host
    * (Story 9.3). Exposed for the same reason `byok` and `arcade` are.
@@ -558,48 +559,46 @@ function mountByok(
 }
 
 /**
- * Mounts the Play-vs-CPU panel, or returns `null` when this page has no host
- * for it. Mirrors `mountByok` exactly, including the warn-not-throw failure
- * mode: the replay is the page's claim and the panel is an offer.
+ * Mounts the Play cabinet, or returns `null` when this page has no `#arcade`
+ * host. Mirrors `mountByok` exactly, including the warn-not-throw failure
+ * mode: the replay is the page's claim and the cabinet is an offer.
  *
- * `buildArcadeCommandLog` produces a v2 `CommandLogV2` -- a human `Agent`
- * has nowhere to go in the frozen v1 `AgentIdentity` shape -- so the value
- * handed to `mount` here is cast, the same way `startup()` below casts the
- * fetched demo document rather than re-validating it. This is no longer a
- * lie: `mount()` calls `renderApp`, which calls `mountPlayer`, which builds
- * the film through `buildReplayFilm` -- and that function now dispatches on
- * `schemaVersion`, routing a v2 document to `replayCommandLogV2` instead of
- * hard-failing it the way the v1-only reader once did. A v2 arcade log
- * therefore replays through exactly the same player a v1 log does, with no
- * arcade-specific branch anywhere in `main.ts` or `film.ts`'s public shape.
+ * The cabinet is the reference fighter under `/arena/`, loaded in an iframe
+ * and left exactly as it is. What this page owns is the frame around it: the
+ * coin slot, the difficulty and round switches, and the one message it sends
+ * in (whether sound is on). Every message the arena sends out arrives through
+ * the page's `message` event and is handed to the panel's `receive`.
  */
-function mountArcade(
+function mountPlay(
   globals: BrowserGlobals,
-  /** Story 12.2. The page's view, for the live arena's animation-frame clock. */
-  view: HostView,
-  /** Story 12.7. The set-result screen's "Return to character select", wired to the router. */
-  returnToSelect: () => void,
-): ArcadePanel | null {
+  soundEnabled: () => boolean,
+  onGesture: () => void,
+): PlayPanel | null {
   const host = globals.document?.querySelector('#arcade');
   if (host == null) {
     return null;
   }
   try {
-    return mountArcadePanel(host as unknown as ArcadeHost, {
-      // Story 12.2. The live view draws the fight while it is being played,
-      // through the same `drawJuicedFrame` the replay player uses. Handed the
-      // page's view so its clock can count animation-frame callbacks.
-      view,
-      // Story 12.7. An arcade set is best-of-three on this one screen, so a round
-      // finishing no longer re-mounts the replay player -- the set plays out here
-      // and ends on its own result screen. "Return to character select" is the
-      // one navigation it offers, handed to the router.
-      onReturnToSelect: returnToSelect,
+    const panel = mountPlayPanel(host as unknown as PlayHost, {
+      ...(globals.localStorage === undefined ? {} : { storage: globals.localStorage }),
+      soundEnabled,
+      onGesture,
     });
+    const view = globals.window as unknown as Partial<MessageView> | undefined;
+    if (view != null && typeof view.addEventListener === 'function') {
+      view.addEventListener('message', (event) => {
+        panel.receive(event?.data);
+      });
+    }
+    return panel;
   } catch (error) {
-    warn('Arcade panel unavailable', error);
+    warn('Play cabinet unavailable', error);
     return null;
   }
+}
+
+interface MessageView {
+  addEventListener(type: 'message', listener: (event?: { readonly data?: unknown }) => void): void;
 }
 
 /**
@@ -680,7 +679,6 @@ function mountSpectate(
  */
 function mountLanding(
   globals: BrowserGlobals,
-  arcade: ArcadePanel | null,
   onGesture: () => void,
   navigate: (route: string) => void,
 ): LandingPanel | null {
@@ -697,15 +695,14 @@ function mountLanding(
       onPlayCta: () => {
         onGesture();
         navigate(ROUTE_PLAY);
-        if (arcade === null) {
-          warn('Landing page', 'Play vs CPU is unavailable: the Arcade panel did not mount.');
-        } else {
-          arcade.play();
-        }
       },
       onSpectateCta: () => {
         onGesture();
         navigate(ROUTE_WATCH);
+      },
+      onByokCta: () => {
+        onGesture();
+        navigate(ROUTE_BYOK);
       },
     });
   } catch (error) {
@@ -715,22 +712,17 @@ function mountLanding(
 }
 
 /**
- * Mounts the character-select screen, or returns `null` when this page has no
- * `#select` host (Story 12.5). Mirrors every other mount here, warn-not-throw
- * included.
+ * Mounts the Fighters gallery, or returns `null` when this page has no
+ * `#select` host. Warn-not-throw, like every other mount here.
  *
- * The two callbacks are deliberately thin, exactly as the landing CTAs are:
- * `shell/select.ts` never imports `ArcadePanel`, so the screen knows how to
- * offer a roster and nothing whatever about how a Match starts. Navigation
- * happens *before* `play()` for the reason `mountLanding` records -- the live
- * arena does not paint while its screen is hidden, so starting the Match first
- * would drop its opening frames on the floor.
+ * The one callback is deliberately thin: `shell/select.ts` never imports the
+ * Play panel, so the gallery knows how to show a roster and nothing about how
+ * a fight starts. Navigation happens *before* `start()` so the cabinet's frame
+ * is on screen when it boots.
  */
 function mountSelect(
   globals: BrowserGlobals,
-  selection: RosterSelection,
-  stageSelection: StageSelection,
-  arcade: ArcadePanel | null,
+  play: PlayPanel | null,
   onGesture: () => void,
   navigate: (route: string) => void,
 ): SelectPanel | null {
@@ -740,26 +732,18 @@ function mountSelect(
   }
   try {
     return mountSelectPanel(host as unknown as SelectHost, {
-      pair: () => selection.pair(),
-      onPick: (side: RosterSide, id: RosterId) => {
-        selection.select(side, id);
-      },
-      stage: () => stageSelection.stage(),
-      onPickStage: (id: StageId) => {
-        stageSelection.select(id);
-      },
-      onFight: () => {
+      onPlayAs: (id: CabinetId) => {
         onGesture();
         navigate(ROUTE_PLAY);
-        if (arcade === null) {
-          warn('Character select', 'Play vs CPU is unavailable: the Arcade panel did not mount.');
+        if (play === null) {
+          warn('Fighters', 'Play is unavailable: the cabinet did not mount.');
         } else {
-          arcade.play();
+          play.start(id);
         }
       },
     });
   } catch (error) {
-    warn('Character select unavailable', error);
+    warn('Fighters unavailable', error);
     return null;
   }
 }
@@ -886,10 +870,21 @@ function mountRouter(globals: BrowserGlobals, screens: readonly Screen[]): Scree
             navHost,
             screens.map((screen) => ({ route: screen.route, label: screen.label })),
           );
+    // Every screen change starts at the top. A cabinet whose Fighters screen
+    // opens scrolled to wherever Play left the page reads as one long page,
+    // which is exactly what the router exists to stop.
+    const scrollTop = (shellView as { scrollTo?: (x: number, y: number) => void }).scrollTo;
     return createScreenRouter({
       view: shellView as ShellView,
       screens,
-      ...(markCurrent === null ? {} : { onRoute: markCurrent }),
+      onRoute: (route: string): void => {
+        markCurrent?.(route);
+        try {
+          scrollTop?.call(shellView, 0, 0);
+        } catch {
+          // A view with no scroll is a view already at the top.
+        }
+      },
     });
   } catch (error) {
     warn('Screen router unavailable, every panel will show at once', error);
@@ -1157,9 +1152,8 @@ export async function startup(globals: BrowserGlobals): Promise<StartupResult | 
      * -- which re-mount through `mount` and are dressed by it at line ~577 --
      * nothing else would ever hand it the art.
      */
-    const panels: { spectate: SpectatePanel | null; arcade: ArcadePanel | null } = {
+    const panels: { spectate: SpectatePanel | null } = {
       spectate: null,
-      arcade: null,
     };
 
     /**
@@ -1180,13 +1174,11 @@ export async function startup(globals: BrowserGlobals): Promise<StartupResult | 
       // Story 12.2. The Arcade live view draws through the same compositor now,
       // so a pack that reached only the player would leave a live Match on the
       // block artist for the whole session.
-      panels.arcade?.setArtist(agentIndex, artist);
     };
     const dressBackdrop = (backdrop: Backdrop): void => {
       dressing.backdrop = backdrop;
       player.mounted.setBackdrop(backdrop);
       panels.spectate?.setBackdrop(backdrop);
-      panels.arcade?.setBackdrop(backdrop);
     };
     /**
      * Story 11.2, widened by Story 11.6: both live surfaces, not the player
@@ -1199,7 +1191,6 @@ export async function startup(globals: BrowserGlobals): Promise<StartupResult | 
       player.mounted.setVfx(vfx);
       panels.spectate?.setVfx(vfx);
       // Story 12.2. The Arcade live view too, for the reason above.
-      panels.arcade?.setVfx(vfx);
     };
     /**
      * Story 11.4, widened by Story 11.6 for the reason `dressVfx` gives, and
@@ -1214,7 +1205,6 @@ export async function startup(globals: BrowserGlobals): Promise<StartupResult | 
     const dressUlt = (ult: UltSheet): void => {
       dressing.ult = ult;
       player.mounted.setUlt(ult);
-      panels.arcade?.setUlt(ult);
     };
     /**
      * Story 12.5. The stream's own art: the sprite packs and the Ultimate sheet
@@ -1249,7 +1239,6 @@ export async function startup(globals: BrowserGlobals): Promise<StartupResult | 
     const dressRoster = (pair: RosterPair): void => {
       dressing.roster = pair;
       player.mounted.setRoster(pair);
-      panels.arcade?.setRoster(pair);
     };
 
     /**
@@ -1412,35 +1401,13 @@ export async function startup(globals: BrowserGlobals): Promise<StartupResult | 
       );
     }
 
-    const arcadePanel = mountArcade(globals, view, () => shell.router?.go(ROUTE_SELECT));
-    panels.arcade = arcadePanel;
-    // Adopt whatever already landed, for the reason the Spectate block below
-    // gives: the upgrades started before this mount, so on a warm cache a pack
-    // resolves first and is recorded in `dressing` and pushed to nobody -- a
-    // live Arcade Match would then draw blocks precisely when the assets loaded
-    // fastest. The dressing lives on the panel's live arena, so this is correct
-    // even though the arena's canvas is not on screen until the visitor plays.
-    if (arcadePanel !== null) {
-      for (const agentIndex of [0, 1] as const) {
-        const artist = dressing.artists[agentIndex];
-        if (artist !== undefined) {
-          arcadePanel.setArtist(agentIndex, artist);
-        }
-      }
-      if (dressing.backdrop !== undefined) {
-        arcadePanel.setBackdrop(dressing.backdrop);
-      }
-      if (dressing.vfx !== undefined) {
-        arcadePanel.setVfx(dressing.vfx);
-      }
-      if (dressing.ult !== undefined) {
-        arcadePanel.setUlt(dressing.ult);
-      }
-      // Story 12.5, and unconditional for the reason the re-mount above is: a
-      // live arena left on `DEFAULT_ROSTER` would draw the visitor's chosen
-      // fighter's sprites under clawde's aura and clawde's name.
-      arcadePanel.setRoster(dressing.roster);
-    }
+    const playPanel = mountPlay(
+      globals,
+      () => soundControl?.enabled() ?? true,
+      () => {
+        sink?.unlock();
+      },
+    );
     const spectatePanel = mountSpectate(
       globals,
       () => {
@@ -1488,7 +1455,6 @@ export async function startup(globals: BrowserGlobals): Promise<StartupResult | 
     }
     const landingPanel = mountLanding(
       globals,
-      arcadePanel,
       () => {
         sink?.unlock();
       },
@@ -1498,9 +1464,7 @@ export async function startup(globals: BrowserGlobals): Promise<StartupResult | 
     );
     const selectPanel = mountSelect(
       globals,
-      selection,
-      stageSelection,
-      arcadePanel,
+      playPanel,
       () => {
         sink?.unlock();
       },
@@ -1555,10 +1519,13 @@ export async function startup(globals: BrowserGlobals): Promise<StartupResult | 
         return {
           ...base,
           onShow: (): void => {
-            arcadePanel?.setPaused(false);
+            playPanel?.setSound(soundControl?.enabled() ?? true);
           },
           onHide: (): void => {
-            arcadePanel?.setPaused(true);
+            // Leaving the screen mutes the cabinet and pauses its fight; the
+            // cabinet keeps its state, so coming back resumes where it was.
+            playPanel?.setSound(false);
+            playPanel?.pause();
           },
         };
       }
@@ -1642,7 +1609,12 @@ export async function startup(globals: BrowserGlobals): Promise<StartupResult | 
     const applySoundToCurrentScreen = (enabled: boolean): void => {
       if (!enabled) {
         spectatePanel?.setAudioEnabled(false);
+        playPanel?.setSound(false);
         sink?.stopAll();
+        return;
+      }
+      if (shell.router?.current() === ROUTE_PLAY) {
+        playPanel?.setSound(true);
         return;
       }
       if (shell.router?.current() === ROUTE_WATCH) {
@@ -1688,7 +1660,7 @@ export async function startup(globals: BrowserGlobals): Promise<StartupResult | 
       // not results, and every upgrade already handles its own failure.
       dressed: Promise.all(upgrades).then(() => undefined),
       byok: byokPanel,
-      arcade: arcadePanel,
+      play: playPanel,
       spectate: spectatePanel,
       landing: landingPanel,
       select: selectPanel,

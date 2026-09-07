@@ -310,6 +310,39 @@ origin, or over-runs its own image.
 frames generously and never agree on how much; get it wrong and the fighter
 floats above the floor or sinks through it.
 
+## The arcade cabinet (`apps/web/public/arena/`)
+
+The whole reference fighter — its eleven ES-module source files, its eight
+fighters' spritesheets and atlases, its six 1600×900 stages and crowd sprites,
+its FX sheets, its title art and its complete audio set (music, SFX, voice
+packs) — ships verbatim under `apps/web/public/arena/` and is what `/play`
+loads in an iframe.
+
+| Asset | Source | Licence | Checked |
+|---|---|---|---|
+| `apps/web/public/arena/**` (source, sprites, atlases, stages, FX, portraits, audio, title art, favicon) | the author's own prior project, copied as one directory | **Author-owned, used with permission** | 2026-09-07 |
+
+Per the note at the top of this file, that project and this repository have the
+same owner. The copy is deliberate and complete rather than curated: the point
+of the Play screen is that a visitor plays *that* game, with its pacing and its
+audio, and a partial copy would be a different game.
+
+Three files differ from the original and the difference is recorded here so it
+is never mistaken for drift:
+
+- `js/screens.js` gains a `duel` mode (pick your fighter, pick the CPU's, pick
+  the arena, fight) that the page selects with `?mode=duel`, plus a
+  `postMessage` report of each screen change and each result. No fight logic
+  changed.
+- `js/audio.js` gains `audio.mute(flag)`, one switch over its three buses, so
+  the page's sound control reaches it.
+- `index.html` gains the host bridge that carries those messages, and drops
+  the marketplace bootstrap comment that had no meaning outside the original
+  host.
+
+`strings.js` gains one string, the opponent-pick title. Everything else is
+byte-for-byte the extracted original.
+
 ## Audio
 
 Story 9.7 lands the five cues `apps/web/src/render/audio.ts`'s

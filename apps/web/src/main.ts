@@ -802,11 +802,11 @@ export function renderApp(
   // focusing, or seeking.
   root.innerHTML = `
     <header class="tb-masthead">
-      <h1 class="tb-wordmark">Tokenbrawl</h1>
-      <p class="tb-tagline">Replay &mdash; re-simulated, never recorded</p>
+      <h1 class="tb-wordmark">Replay</h1>
+      <p class="tb-tagline">Re-simulated from the Command Log, never recorded</p>
     </header>
     <div class="tb-arena">
-      <div class="tb-stage">
+      <div class="tb-card tb-stage">
         <canvas class="tb-canvas"></canvas>
         <button
           class="tb-fighter-target tb-fighter-target--p1"
@@ -821,10 +821,10 @@ export function renderApp(
           aria-describedby="tb-reasoning-panel"
         ></button>
       </div>
-      <div class="tb-reasoning" id="tb-reasoning-panel" data-reasoning></div>
+      <div class="tb-card tb-reasoning" id="tb-reasoning-panel" data-reasoning></div>
       <p class="tb-visually-hidden" data-announce role="status" aria-live="polite"></p>
     </div>
-    <div class="tb-transport">
+    <div class="tb-card tb-transport">
       <label class="tb-visually-hidden" for="tb-timeline">Seek to a Decision Point</label>
       <input class="tb-timeline" id="tb-timeline" type="range" min="0" value="0" step="1" data-timeline />
       <p class="tb-timeline-readout" data-timeline-readout></p>

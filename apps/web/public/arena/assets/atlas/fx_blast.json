@@ -1,0 +1,237 @@
+{
+  "image": "../fx/fx_blast.png",
+  "cell": {
+    "w": 208,
+    "h": 208
+  },
+  "grid": {
+    "cols": 4,
+    "rows": 8
+  },
+  "poses": {
+    "blast_clawde_head": {
+      "cells": [
+        0
+      ],
+      "fps": 12,
+      "loop": false
+    },
+    "blast_clawde_travel": {
+      "cells": [
+        1
+      ],
+      "fps": 12,
+      "loop": false
+    },
+    "blast_clawde_impact1": {
+      "cells": [
+        2
+      ],
+      "fps": 16,
+      "loop": false
+    },
+    "blast_clawde_impact2": {
+      "cells": [
+        3
+      ],
+      "fps": 16,
+      "loop": false
+    },
+    "blast_chatty_head": {
+      "cells": [
+        4
+      ],
+      "fps": 12,
+      "loop": false
+    },
+    "blast_chatty_travel": {
+      "cells": [
+        5
+      ],
+      "fps": 12,
+      "loop": false
+    },
+    "blast_chatty_impact1": {
+      "cells": [
+        6
+      ],
+      "fps": 16,
+      "loop": false
+    },
+    "blast_chatty_impact2": {
+      "cells": [
+        7
+      ],
+      "fps": 16,
+      "loop": false
+    },
+    "blast_gemini_head": {
+      "cells": [
+        8
+      ],
+      "fps": 12,
+      "loop": false
+    },
+    "blast_gemini_travel": {
+      "cells": [
+        9
+      ],
+      "fps": 12,
+      "loop": false
+    },
+    "blast_gemini_impact1": {
+      "cells": [
+        10
+      ],
+      "fps": 16,
+      "loop": false
+    },
+    "blast_gemini_impact2": {
+      "cells": [
+        11
+      ],
+      "fps": 16,
+      "loop": false
+    },
+    "blast_grokk_head": {
+      "cells": [
+        12
+      ],
+      "fps": 12,
+      "loop": false
+    },
+    "blast_grokk_travel": {
+      "cells": [
+        13
+      ],
+      "fps": 12,
+      "loop": false
+    },
+    "blast_grokk_impact1": {
+      "cells": [
+        14
+      ],
+      "fps": 16,
+      "loop": false
+    },
+    "blast_grokk_impact2": {
+      "cells": [
+        15
+      ],
+      "fps": 16,
+      "loop": false
+    },
+    "blast_pilot_head": {
+      "cells": [
+        16
+      ],
+      "fps": 12,
+      "loop": false
+    },
+    "blast_pilot_travel": {
+      "cells": [
+        17
+      ],
+      "fps": 12,
+      "loop": false
+    },
+    "blast_pilot_impact1": {
+      "cells": [
+        18
+      ],
+      "fps": 16,
+      "loop": false
+    },
+    "blast_pilot_impact2": {
+      "cells": [
+        19
+      ],
+      "fps": 16,
+      "loop": false
+    },
+    "blast_seeker_head": {
+      "cells": [
+        20
+      ],
+      "fps": 12,
+      "loop": false
+    },
+    "blast_seeker_travel": {
+      "cells": [
+        21
+      ],
+      "fps": 12,
+      "loop": false
+    },
+    "blast_seeker_impact1": {
+      "cells": [
+        22
+      ],
+      "fps": 16,
+      "loop": false
+    },
+    "blast_seeker_impact2": {
+      "cells": [
+        23
+      ],
+      "fps": 16,
+      "loop": false
+    },
+    "blast_lama_head": {
+      "cells": [
+        24
+      ],
+      "fps": 12,
+      "loop": false
+    },
+    "blast_lama_travel": {
+      "cells": [
+        25
+      ],
+      "fps": 12,
+      "loop": false
+    },
+    "blast_lama_impact1": {
+      "cells": [
+        26
+      ],
+      "fps": 16,
+      "loop": false
+    },
+    "blast_lama_impact2": {
+      "cells": [
+        27
+      ],
+      "fps": 16,
+      "loop": false
+    },
+    "blast_edison_head": {
+      "cells": [
+        28
+      ],
+      "fps": 12,
+      "loop": false
+    },
+    "blast_edison_travel": {
+      "cells": [
+        29
+      ],
+      "fps": 12,
+      "loop": false
+    },
+    "blast_edison_impact1": {
+      "cells": [
+        30
+      ],
+      "fps": 16,
+      "loop": false
+    },
+    "blast_edison_impact2": {
+      "cells": [
+        31
+      ],
+      "fps": 16,
+      "loop": false
+    }
+  }
+}

@@ -99,7 +99,7 @@ const SURFACES = [
 const SCREEN_ROUTES = ['/', '/play', '/select', '/watch', '/replay', '/byok'];
 
 /** The screens that hold an arena canvas, and therefore the ones the framing checks sample. */
-const ARENA_ROUTES = ['/replay', '/play', '/watch'];
+const ARENA_ROUTES = ['/replay', '/watch'];
 
 /**
  * Every stage, in list order. Mirrors `apps/web/src/render/stages.ts` (Story
@@ -114,6 +114,9 @@ const ARENA_ROUTES = ['/replay', '/play', '/watch'];
  * not the other shows up as a drift reading rather than an unchecked stage.
  */
 const STAGE_IDS = ['stage-1', 'stage-2', 'stage-3', 'stage-4', 'stage-5', 'stage-6'];
+
+/** The cabinet's six arenas, as `cabinet/roster.ts` names them; the Fighters screen shows one card each. */
+const CABINET_STAGE_IDS = ['s1', 's2', 's3', 's4', 's5', 's6'];
 
 /**
  * Console lines that are environmental rather than defects.
@@ -173,16 +176,12 @@ const AUDIO_CUES = [
   "sfx_special",
   "vo_chatty_hurt",
   "vo_chatty_ko",
-  "vo_chatty_transform",
   "vo_clawde_hurt",
   "vo_clawde_ko",
-  "vo_clawde_transform",
   "vo_gemini_hurt",
   "vo_gemini_ko",
-  "vo_gemini_transform",
   "vo_grokk_hurt",
   "vo_grokk_ko",
-  "vo_grokk_transform",
   "vo_ko",
   "vo_ultimate"
 ];
@@ -487,23 +486,63 @@ const CHARACTER_SELECT_PROBE = `(() => {
     .find((el) => el.getBoundingClientRect().height > 0);
   if (!shown) return { reached: false, found: [] };
   const text = (shown.textContent || '').toLowerCase();
-  const roster = ['clawde', 'chatty', 'gemini', 'grokk'];
+  const roster = ['claude', 'chatgpt', 'gemini', 'grok', 'copilot', 'deepseek', 'llama', 'edison'];
   return { reached: true, screen: shown.id, found: roster.filter((name) => text.includes(name)) };
 })()`;
 
 /**
- * Clicks the character-select card for `id` on `side` (Story 12.5).
- *
- * By the card's own `data-select-pick` attribute rather than by its visible
- * text, because the plate and the id differ in case and a text match would go
- * green on the *opponent's* card just as happily as the visitor's.
+ * Reads the Play cabinet: the iframe under `#arcade`, the arena canvas inside
+ * it (same-origin, so its pixels are readable), and the status line the page
+ * writes from the arena's own messages. The arena is the reference fighter
+ * shipped verbatim, so nothing here knows its layout -- only that it drew.
  */
-const pickFighter = (side, id) => `(() => {
-  const card = document.querySelector('[data-select-pick="' + ${JSON.stringify(String(side))} + ':' + ${JSON.stringify(id)} + '"]');
-  if (!card) return { ok: false, why: 'no card for ' + ${JSON.stringify(id)} };
-  card.click();
-  return { ok: true, pressed: card.getAttribute('aria-pressed') };
+const CABINET_PROBE = `(() => {
+  const frame = document.querySelector('#arcade [data-play-frame]');
+  if (!frame) return { framePresent: false };
+  const rect = frame.getBoundingClientRect();
+  let canvas = null, ink = 0, sampled = 0;
+  try {
+    const doc = frame.contentDocument;
+    const c = doc && doc.querySelector('#game');
+    if (c) {
+      const ctx = c.getContext('2d');
+      const data = ctx.getImageData(0, 0, c.width, c.height).data;
+      for (let i = 0; i < data.length; i += 28) {
+        sampled++;
+        if (data[i] + data[i + 1] + data[i + 2] > 36) ink++;
+      }
+      canvas = c.width + 'x' + c.height;
+    }
+  } catch (error) {
+    canvas = null;
+  }
+  const status = document.querySelector('#arcade [data-play-status]');
+  return {
+    framePresent: true,
+    src: frame.getAttribute('src') || '',
+    visible: rect.width > 0 && rect.height > 0,
+    boxWidth: Math.round(rect.width),
+    canvas,
+    inkRatio: sampled ? ink / sampled : 0,
+    status: status ? status.textContent.trim() : '',
+  };
 })()`;
+
+/**
+ * Presses one key inside the cabinet. The arena listens on its own window,
+ * so the event is dispatched there, with a release a beat later -- its input
+ * sampler latches a press for one tick, so a tap registers exactly once.
+ */
+const cabinetKey = (code) => `(() => {
+  const frame = document.querySelector('#arcade [data-play-frame]');
+  const win = frame && frame.contentWindow;
+  if (!win) return false;
+  win.dispatchEvent(new win.KeyboardEvent('keydown', { code: ${JSON.stringify(code)}, key: ${JSON.stringify(code)}, bubbles: true }));
+  setTimeout(() => win.dispatchEvent(new win.KeyboardEvent('keyup', { code: ${JSON.stringify(code)}, key: ${JSON.stringify(code)}, bubbles: true })), 80);
+  return true;
+})()`;
+
+const CABINET_MIN_INK = 0.02;
 
 /**
  * Scrolls a surface's *canvas* to the middle of the viewport, or the surface
@@ -618,7 +657,7 @@ const HUD_BAND = JSON.parse(`{
  * proven by `--tb-ink`, and `gold` is what a won round's pip fills with.
  */
 const HUD_FRAME_RGB = [0x5a, 0x64, 0x80];
-const HUD_NAME_RGB = [0xf5, 0xf5, 0xf0];
+const HUD_NAME_RGB = [0xee, 0xf2, 0xff];
 const HUD_GOLD_RGB = [0xff, 0xd2, 0x4a];
 
 /** Pixels of the proving colour below which a region counts as empty. */
@@ -710,7 +749,7 @@ const EDGE_COLUMNS = 4;
  */
 const FLASH_WHITE_MIN = 248;
 const FLASH_BLOB_MIN = 900;
-const WARN_RGB = [0xff, 0x3b, 0x30];
+const WARN_RGB = [0xff, 0x4d, 0x5a];
 const WARN_BOX_MIN = 60;
 
 /**
@@ -1414,16 +1453,14 @@ const pickSpectate = (id) => `(() => {
   return { ok: true };
 })()`;
 
-/** Clicks the character-select card for stage `id` (Story 12.10). */
-const pickStage = (id) => `(() => {
-  const card = document.querySelector('[data-select-stage="' + ${JSON.stringify(id)} + '"]');
-  if (!card) return { ok: false, why: 'no card for ' + ${JSON.stringify(id)} };
-  card.click();
-  return { ok: true, pressed: card.getAttribute('aria-pressed') };
-})()`;
 
-/** How many stage cards the character-select screen renders, for the drift guard. */
-const STAGE_CARD_COUNT_PROBE = `document.querySelectorAll('[data-select-stage]').length`;
+
+/** Every stage card on the Fighters screen, with whether its art decoded. */
+const STAGE_CARDS_PROBE = `[...document.querySelectorAll('[data-select-stage]')].map((card) => {
+  const img = card.querySelector('img');
+  const rect = card.getBoundingClientRect();
+  return { id: card.getAttribute('data-select-stage'), visible: rect.width > 0 && rect.height > 0, decoded: !!(img && img.complete && img.naturalWidth > 0) };
+})`;
 
 /**
  * The arena hashed in two halves, left and right, plus its sprite ink (Story
@@ -2249,13 +2286,13 @@ async function main() {
         // left running, which also gives the mobile capture a live fight and
         // gives `hidden-screens-are-idle` a second canvas that would move.
         await goto('/play');
-        const startedOnPhone = await cdp.evaluate(clickIn('#arcade', '^play vs cpu$'));
-        await sleep(1500);
-        const phoneArcade = await cdp.evaluate(hostCanvasProbe('#arcade'));
+        const startedOnPhone = await cdp.evaluate(clickIn('#arcade', '^insert coin$'));
+        await sleep(3000);
+        const phoneCabinet = await cdp.evaluate(CABINET_PROBE);
         record(
-          'arcade-live-canvas-mobile',
-          startedOnPhone.ok === true && phoneArcade.visible > 0,
-          `started=${String(startedOnPhone.ok)} canvases=${phoneArcade.canvases} visible=${phoneArcade.visible}`,
+          'cabinet-boots-mobile',
+          startedOnPhone.ok === true && phoneCabinet.visible === true && phoneCabinet.canvas !== null && phoneCabinet.inkRatio >= CABINET_MIN_INK,
+          `started=${String(startedOnPhone.ok)} frame=${String(phoneCabinet.visible)} canvas=${String(phoneCabinet.canvas)} ink=${(phoneCabinet.inkRatio * 100).toFixed(1)}% status="${phoneCabinet.status}"`,
         );
         overflowReadings.push({
           route: '/play (match running)',
@@ -2277,108 +2314,39 @@ async function main() {
         );
       }
 
-      // --- C1 arcade-live-canvas -------------------------------------------
-      // The mode a visitor is most likely to try first. Today the Match runs
-      // headlessly and there is no canvas in `#arcade` at all.
+      // --- C1 cabinet-boots ------------------------------------------------
+      // The mode a visitor is most likely to try first. The cabinet is the
+      // reference fighter in an iframe; "Insert coin" loads it straight onto
+      // character select, and the arena's canvas must have drawn something.
       if (!viewport.mobile) {
-        // Story 12.4: navigate first. The Play button is on a screen now, and
-        // the live arena does not paint while its screen is hidden.
         await goto('/play');
-        const started = await cdp.evaluate(clickIn('#arcade', '^play vs cpu$'));
-        await sleep(1200);
-        const arcade = await cdp.evaluate(hostCanvasProbe('#arcade'));
+        const started = await cdp.evaluate(clickIn('#arcade', '^insert coin$'));
+        await sleep(3000);
+        const cabinet = await cdp.evaluate(CABINET_PROBE);
         record(
-          'arcade-live-canvas',
-          started.ok === true && arcade.visible > 0,
-          `started=${String(started.ok)} canvases=${arcade.canvases} visible=${arcade.visible}`,
+          'cabinet-boots',
+          started.ok === true &&
+            cabinet.visible === true &&
+            cabinet.src.includes('mode=duel') &&
+            cabinet.canvas !== null &&
+            cabinet.inkRatio >= CABINET_MIN_INK,
+          `started=${String(started.ok)} src=${cabinet.src} canvas=${String(cabinet.canvas)} ink=${(cabinet.inkRatio * 100).toFixed(1)}% status="${cabinet.status}"`,
         );
 
-        // --- C1c camera-frames-the-fight (Story 12.3) ----------------------
-        // Sampled here, before a single key is pressed, because this is the
-        // only moment any surface is reliably at a Match's *opening positions*
-        // -- the arcade Match hangs at its first Decision Point waiting for the
-        // visitor (Story 12.2), so what is on screen is `startPosition`, which
-        // is [320, 640] of a 0..960 arena. With the fighters 1:1 on the canvas
-        // that put them in the middle third with the outer thirds empty; the
-        // camera has to bring them in without pushing either into the outer
-        // fifth on the way.
-        const opening = await cdp.evaluate(arenaInkProbe('#arcade'));
-        record(
-          'camera-frames-the-fight',
-          verdict(opening, framesTheFight),
-          opening.length === 0
-            ? 'no visible canvas under #arcade to frame'
-            : `${opening.map(describeFraming).join(' | ')}${skipNote(opening)}`,
-        );
-
-        // --- C1b arcade-input-moves-fighter (Story 12.2) -------------------
-        // The Match is now waiting on the visitor at its first Decision Point.
-        // Thirty real ArrowRight keydowns walk the fighter across the stage; the
-        // arena the fighter is drawn in must change between the first press and
-        // the last. Driven through `keydown` on the page, not a call into the
-        // panel, so it exercises the listener a keyboard reaches.
-        //
-        // Hashed below the HUD band: the `TICK` readout and the bars advance on
-        // their own every Decision Point, so a whole-canvas hash would pass on a
-        // frozen fighter. See `ARENA_TOP_PX`.
-        const arcadeHashBefore = await cdp.evaluate(hostArenaHashProbe('#arcade'));
-        // Story 12.10. The same centre-to-wall pan drives `stage-parallax-has-depth`:
-        // sample a far strip and a near strip before the pan and after it, and the
-        // near strip must move by more pixels than the far one. Read here, off the
-        // one pan the gate already makes, rather than staging a second.
-        const stripsBefore = await cdp.evaluate(arenaStripsProbe('#arcade'));
-        for (let press = 0; press < 30; press += 1) {
-          await cdp.evaluate(dispatchKeydown('#arcade [data-arcade-keys]', 'ArrowRight'));
-          await sleep(40);
+        // --- C1b cabinet-input-reaches-fight ---------------------------------
+        // Three Enters: confirm the fighter, confirm the opponent, confirm the
+        // arena. The VS splash runs 84 frames, then the fight starts and the
+        // arena tells the page so -- which is what the status line reads.
+        for (let press = 0; press < 3; press += 1) {
+          await cdp.evaluate(cabinetKey('Enter'));
+          await sleep(500);
         }
-        // Let the live clock draw through the states the presses queued. The
-        // clock advances one film frame per animation-frame callback and 30
-        // presses queue far more than that, so this waits for the drain rather
-        // than sampling mid-flight -- see the story's note on live-view pacing.
-        await sleep(4_000);
-        const arcadeHashAfter = await cdp.evaluate(hostArenaHashProbe('#arcade'));
+        await sleep(3000);
+        const fighting = await cdp.evaluate(CABINET_PROBE);
         record(
-          'arcade-input-moves-fighter',
-          arcadeHashBefore !== null && arcadeHashAfter !== null && arcadeHashBefore !== arcadeHashAfter,
-          arcadeHashBefore === null
-            ? 'no visible canvas under #arcade to drive'
-            : `arena hash ${arcadeHashBefore} -> ${arcadeHashAfter}`,
-        );
-
-        // --- C1e stage-parallax-has-depth (Story 12.10) --------------------
-        const stripsAfter = await cdp.evaluate(arenaStripsProbe('#arcade'));
-        const cinematicStrip =
-          stripsBefore === null ||
-          stripsAfter === null ||
-          stripsBefore.cinematic === true ||
-          stripsAfter.cinematic === true;
-        const farShift = cinematicStrip ? -1 : stripShift(stripsBefore.upper, stripsAfter.upper);
-        const nearShift = cinematicStrip ? -1 : stripShift(stripsBefore.lower, stripsAfter.lower);
-        record(
-          'stage-parallax-has-depth',
-          // The far strip slid at all (a flat backdrop would not, so this proves
-          // the scene parallaxes), and the near strip slid strictly further --
-          // which is depth. A cinematic frame is not judged.
-          !cinematicStrip && farShift > 0 && nearShift > farShift,
-          cinematicStrip
-            ? 'a cinematic frame was on screen; parallax not judged this run'
-            : `far strip slid ${farShift}px, near strip slid ${nearShift}px (near must exceed far, far must exceed 0)`,
-        );
-
-        // --- C1d fighters-inside-frame, at the wall (Story 12.3) -----------
-        // Thirty ArrowRight presses is 30 * moveUnitsPerTick * ticksPerDecision
-        // past `startPosition`, which is well past `arenaMax`: the fighter is
-        // standing on the right wall. That is the case the 1:1 mapping drew
-        // centred on the canvas's right edge, with half the sprite outside the
-        // frame. Same check as the page sweep below, re-sampled where it used
-        // to fail hardest.
-        const atWall = await cdp.evaluate(arenaInkProbe('#arcade'));
-        record(
-          'fighters-inside-frame-at-the-wall',
-          verdict(atWall, (c) => hasSpriteInk(c) && c.edgeInk === 0),
-          atWall.length === 0
-            ? 'no visible canvas under #arcade'
-            : `${describeInk(atWall)}${skipNote(atWall)}`,
+          'cabinet-input-reaches-fight',
+          /fight on/i.test(fighting.status) && fighting.inkRatio >= CABINET_MIN_INK,
+          `status="${fighting.status}" ink=${(fighting.inkRatio * 100).toFixed(1)}%`,
         );
       }
 
@@ -2969,19 +2937,6 @@ async function main() {
           if (reading !== null && reading.cinematic !== true) specHit.push(reading);
         }
 
-        // `#arcade` for the regression sweep only. The Match resumes on /play;
-        // feed a few real inputs so it advances through Decision Points that
-        // draw fighters (and, when the CPU connects, a flash) rather than
-        // hanging on its first.
-        await goto('/play');
-        const arcadeHit = [];
-        for (let press = 0; press < 8; press += 1) {
-          await cdp.evaluate(dispatchKeydown('#arcade [data-arcade-keys]', press % 2 === 0 ? 'ArrowRight' : 'z'));
-          await sleep(160);
-          const reading = await cdp.evaluate(arenaHitProbe('#arcade'));
-          if (reading !== null && reading.cinematic !== true) arcadeHit.push(reading);
-        }
-
         // Measured on the two surfaces a hit can be reached without luck: `#app`
         // by scrubbing a deterministic committed film, `#spectate` by letting an
         // autoplaying committed log (dense with hits) run. `#arcade` draws the
@@ -2995,14 +2950,14 @@ async function main() {
           `${describeBlob('#app', appHit)} (min ${FLASH_BLOB_MIN}); ${describeBlob('#spectate', specHit)}`,
         );
 
-        const allHit = [...appHit, ...specHit, ...arcadeHit];
+        const allHit = [...appHit, ...specHit];
         const hollow = allHit.filter((s) => s.hollowWarn);
         record(
           'no-debug-hitbox',
           allHit.length > 0 && hollow.length === 0,
           allHit.length === 0
             ? 'no arena frame could be sampled'
-            : `${allHit.length} arena frames sampled across #app/#spectate/#arcade, ${hollow.length} with a hollow warn box`,
+            : `${allHit.length} arena frames sampled across #app/#spectate, ${hollow.length} with a hollow warn box`,
         );
       }
 
@@ -3014,73 +2969,32 @@ async function main() {
         const select = await cdp.evaluate(CHARACTER_SELECT_PROBE);
         record(
           'character-select-reachable',
-          select.reached === true && select.found.length === 4,
+          select.reached === true && select.found.length === 8,
           `showing #${select.screen ?? 'nothing'}, fighters named: ${select.found.join(', ') || 'none'}`,
         );
 
       }
 
-      // --- C4f every-stage-draws (Story 12.10) ------------------------------
-      // Iterates the stage list rather than a hardcoded count, so a stage added
-      // and left unwired fails rather than ships. For each stage: pick it on the
-      // select screen, let its scenery decode, then scrub the replay player to a
-      // fixed frame and hash the arena below the HUD. The fighters are identical
-      // across all six -- same log, same scrub frame -- so the only thing that
-      // can change the hash is which stage was drawn. Two stages that both failed
-      // to load would hash identically (a flat arena over the same fighters), so
-      // requiring all six hashes distinct catches an unwired stage where an ink
-      // floor cannot: the backdrop fills the frame and reports ~98% either way.
+      // --- C4f stage-cards-draw ----------------------------------------------
+      // The Fighters screen shows every arena the cabinet ships, from the
+      // cabinet's own art. Iterates the stage list rather than a hardcoded
+      // count, so a stage added and left off the screen fails rather than ships.
       if (!viewport.mobile) {
-        // The drift guard the duplicated `STAGE_IDS` needs: the select screen
-        // renders one card per stage in the module, so a mismatch here means the
-        // gate's copy has drifted from `render/stages.ts`.
         await goto('/select');
-        const stageCardCount = await cdp.evaluate(STAGE_CARD_COUNT_PROBE);
-
-        const stageReadings = [];
-        for (const id of STAGE_IDS) {
-          await load(`${viewport.name}-stage-${id}`, '/select');
-          // The packs and the stage are late upgrades to an already-running
-          // page; a probe fired before they land measures the flat arena.
-          await sleep(2500);
-          const picked = await cdp.evaluate(pickStage(id));
-          // The pick starts the fetch; this is the decode.
-          await sleep(2000);
-          await goto('/replay');
-          await cdp.evaluate(scrubTo(40));
-          await sleep(500);
-          const hash = await cdp.evaluate(hostArenaHashProbe('#app'));
-          const canvases = await cdp.evaluate(CANVAS_PROBE);
-          const app = canvases.find((c) => c.host === 'app');
-          stageReadings.push({
-            id,
-            picked: picked.ok === true && picked.pressed === 'true',
-            hash,
-            ink: app ? app.inkRatio : 0,
-          });
-        }
-        const distinctHashes = new Set(stageReadings.map((r) => r.hash));
-        const measured = stageReadings.every((r) => r.picked && r.hash !== null);
-        const belowInk = stageReadings.filter((r) => r.ink < MIN_INK_RATIO);
+        await sleep(2500);
+        const stageCards = await cdp.evaluate(STAGE_CARDS_PROBE);
+        const missing = CABINET_STAGE_IDS.filter((id) => !stageCards.some((card) => card.id === id));
+        const undrawn = stageCards.filter((card) => !card.visible || !card.decoded);
         record(
-          'every-stage-draws',
-          stageCardCount === STAGE_IDS.length &&
-            measured &&
-            distinctHashes.size === STAGE_IDS.length &&
-            belowInk.length === 0,
-          stageCardCount !== STAGE_IDS.length
-            ? `the page renders ${stageCardCount} stage cards but this gate iterates ${STAGE_IDS.length} — STAGE_IDS has drifted from render/stages.ts`
-            : !measured
-            ? `a stage did not pick or did not draw: ${stageReadings
-                .map((r) => `${r.id}(picked=${String(r.picked)} hash=${String(r.hash)})`)
-                .join(', ')}`
-            : distinctHashes.size !== STAGE_IDS.length
-            ? `only ${distinctHashes.size} distinct arenas across ${STAGE_IDS.length} stages — two stages drew the same, one is unwired: ${stageReadings
-                .map((r) => `${r.id}:${String(r.hash)}`)
-                .join(' ')}`
-            : belowInk.length > 0
-            ? `below the 2% ink floor: ${belowInk.map((r) => `${r.id}:${(r.ink * 100).toFixed(1)}%`).join(', ')}`
-            : `${STAGE_IDS.length} stages, ${distinctHashes.size} distinct arenas, all above the ink floor`,
+          'stage-cards-draw',
+          stageCards.length === CABINET_STAGE_IDS.length && missing.length === 0 && undrawn.length === 0,
+          stageCards.length !== CABINET_STAGE_IDS.length
+            ? `the page renders ${stageCards.length} stage cards but this gate iterates ${CABINET_STAGE_IDS.length} — CABINET_STAGE_IDS has drifted from cabinet/roster.ts`
+            : missing.length > 0
+            ? `no card for ${missing.join(', ')}`
+            : undrawn.length > 0
+            ? `art did not decode for ${undrawn.map((card) => card.id).join(', ')}`
+            : `${stageCards.length} stages, every card visible with its art decoded`,
         );
       }
 
@@ -3103,10 +3017,10 @@ async function main() {
         // Conditional and therefore idempotent: the mobile pass leaves a Match
         // running from the overflow section and must not have it restarted.
         if (surface.id === 'arcade') {
-          const live = await cdp.evaluate(hostCanvasProbe('#arcade'));
-          if (live.hostPresent === true && live.visible === 0) {
-            await cdp.evaluate(clickIn('#arcade', '^play vs cpu$'));
-            await sleep(1800);
+          const cabinet = await cdp.evaluate(CABINET_PROBE);
+          if (cabinet.framePresent === true && !cabinet.src.includes('mode=duel')) {
+            await cdp.evaluate(clickIn('#arcade', '^insert coin$'));
+            await sleep(3000);
           }
         }
         const present = await cdp.evaluate(scrollSurfaceIntoView(surface.selector));
@@ -3152,48 +3066,40 @@ async function main() {
       // page on a chosen fighter: run earlier, every committed screenshot would
       // show grokk rather than what a first-time visitor meets.
       if (!viewport.mobile) {
+        // "Play as X" on the Fighters screen must land the visitor in the
+        // cabinet already standing on X: the route changes, the frame boots in
+        // duel mode with `p1=X`, and the arena draws.
         const asFighter = [];
         for (const id of ['gemini', 'grokk']) {
           await load(`${viewport.name}-as-${id}`, '/select');
-          // The same wait the captures take: the packs are upgrades to an
-          // already-running page, and a probe fired before they land measures
-          // the block artist, which is identical for both fighters.
-          await sleep(2500);
-          const picked = await cdp.evaluate(pickFighter(0, id));
-          // The pick starts the fetch; this is the decode.
-          await sleep(2000);
-          await goto('/play');
-          const started = await cdp.evaluate(clickIn('#arcade', '^play vs cpu$'));
-          await sleep(2000);
-          const arena = await cdp.evaluate(arenaHalvesProbe('#arcade'));
-          asFighter.push({
-            id,
-            // `aria-pressed` asserted, not merely reported: "a card exists and
-            // was clicked" is true of a card wired to nothing.
-            picked: picked.ok === true && picked.pressed === 'true',
-            started: started.ok === true,
-            arena,
-          });
+          await sleep(800);
+          const clicked = await cdp.evaluate(`(() => {
+            const button = document.querySelector('[data-select-play="${id}"]');
+            if (!button) return false;
+            button.click();
+            return true;
+          })()`);
+          await sleep(3000);
+          const screens = await cdp.evaluate(SCREEN_BOXES_PROBE);
+          const cabinet = await cdp.evaluate(CABINET_PROBE);
+          asFighter.push({ id, clicked, onPlay: screens.some((entry) => entry.id === 'arcade' && entry.area > 0), cabinet });
         }
-        const [first, second] = asFighter;
-        const measured = asFighter.every(
-          (run) => run.picked && run.started && run.arena !== null,
-        );
         record(
-          'selected-fighter-is-drawn',
-          measured &&
-            asFighter.every((run) => run.arena.ink >= MIN_FIGHT_INK) &&
-            first.arena.left !== second.arena.left &&
-            first.arena.right === second.arena.right,
+          'play-as-boots-on-fighter',
+          asFighter.every(
+            (run) =>
+              run.clicked &&
+              run.onPlay &&
+              run.cabinet.src.includes(`p1=${run.id}`) &&
+              run.cabinet.canvas !== null &&
+              run.cabinet.inkRatio >= CABINET_MIN_INK,
+          ),
           asFighter
             .map(
               (run) =>
-                `${run.id}: picked=${String(run.picked)} played=${String(run.started)} left=${String(run.arena?.left)} right=${String(run.arena?.right)} spriteInk=${String(run.arena?.ink)}`,
+                `${run.id}: clicked=${String(run.clicked)} onPlay=${String(run.onPlay)} src=${run.cabinet.src || '-'} ink=${(run.cabinet.inkRatio * 100).toFixed(1)}%`,
             )
-            .join(' | ') +
-            (measured && first.arena.right !== second.arena.right
-              ? ' — the UNPICKED side moved too, so the pick did not reach the side that made it'
-              : ''),
+            .join(' | '),
         );
       }
     }

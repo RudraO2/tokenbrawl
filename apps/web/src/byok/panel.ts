@@ -304,8 +304,9 @@ export function byokMarkup(catalogue: readonly ByokProviderOption[]): string {
   `;
 
   return `
-    <h2 class="tb-byok-heading">Run your own fight</h2>
-    <p class="tb-byok-intro">
+    <span class="tb-eyebrow">Bring your own keys · never rated</span>
+    <h2 class="tb-screen-heading tb-byok-heading">Run your own fight</h2>
+    <p class="tb-screen-intro tb-byok-intro">
       Two free API keys, your browser, no server. Each key is sent to the provider you pick and to
       no other origin — this site is static and has no backend to send one to. Keys are not stored
       unless you tick the box.

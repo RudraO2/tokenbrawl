@@ -125,8 +125,19 @@ const CORPUS_SPECS: readonly CorpusSpec[] = [
   { id: 'spectate-03', seedBase: 9_303, p1: 'random', p2: 'aggressive', require: 'special', fixedSeed: 9_303 },
   { id: 'spectate-04', seedBase: 93_040, p1: 'random', p2: 'aggressive', require: 'ko' },
   { id: 'spectate-05', seedBase: 93_050, p1: 'spacing', p2: 'random', require: 'special' },
-  { id: 'spectate-06', seedBase: 93_060, p1: 'aggressive', p2: 'random', require: 'special' },
+  { id: 'spectate-06', seedBase: 93_060, p1: 'aggressive', p2: 'random', require: 'ko' },
 ];
+
+/**
+ * Every searched entry must carry at least `MIN_ULTIMATES` Ultimate; a timeout
+ * entry must also run for at least `MIN_DECISIONS` Decision Points, and a KO
+ * entry is the longest decisive fight its seed window holds. A stream of short fights that
+ * ended on the clock with one cinematic between them read as a highlight reel;
+ * the corpus is meant to read as a card. The pinned fixture is exempt -- it is
+ * a fixture, and its identity is what five test files rely on.
+ */
+const MIN_ULTIMATES = 1;
+const MIN_DECISIONS = 30;
 
 /** How many consecutive seeds a spec's search tries before giving up (a loud failure, never a silent skip). */
 const SEED_SEARCH_LIMIT = 2_000;
@@ -207,10 +218,15 @@ function summarise(spec: CorpusSpec, seed: number, match: MatchResult): BuiltMat
 }
 
 function meets(built: BuiltMatch): boolean {
-  if (built.specialCount < 1) {
+  if (built.specialCount < MIN_ULTIMATES) {
     return false;
   }
-  return built.spec.require === 'special' || built.isKo;
+  if (built.spec.require === 'special') {
+    // Two agents decide at every Decision Point, so the log holds two entries each.
+    return built.log.decisions.length >= MIN_DECISIONS * 2;
+  }
+  // A KO entry takes the longest decisive fight the window holds; see searchSpec.
+  return built.isKo;
 }
 
 async function playSeed(spec: CorpusSpec, seed: number): Promise<BuiltMatch> {
@@ -247,16 +263,31 @@ async function searchSpec(
     return built;
   }
 
+  // The whole window is searched and the *longest* qualifying fight wins
+  // (most Decision Points, then most Ultimates, then the lowest seed so the
+  // choice is stable): a KO that lands at Decision Point 38 is a fight, a KO
+  // at 14 is a highlight.
+  let best: BuiltMatch | null = null;
   for (let offset = 0; offset < SEED_SEARCH_LIMIT; offset += 1) {
     const seed = spec.seedBase + offset;
     if (usedSeeds.has(seed)) {
       continue;
     }
     const built = await playSeed(spec, seed);
-    if (meets(built) && extra(built)) {
-      usedSeeds.add(seed);
-      return built;
+    if (!meets(built) || !extra(built)) {
+      continue;
     }
+    if (
+      best === null ||
+      built.log.decisions.length > best.log.decisions.length ||
+      (built.log.decisions.length === best.log.decisions.length && built.specialCount > best.specialCount)
+    ) {
+      best = built;
+    }
+  }
+  if (best !== null) {
+    usedSeeds.add(best.seed);
+    return best;
   }
   throw new Error(
     `build-spectate-manifest: no seed in [${spec.seedBase}, ${spec.seedBase + SEED_SEARCH_LIMIT}) satisfied ${spec.id} (require ${spec.require}, plus the corpus constraint). Widen the range or the pairing.`,

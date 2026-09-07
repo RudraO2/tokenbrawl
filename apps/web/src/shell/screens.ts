@@ -1,62 +1,28 @@
 /**
- * Story 12.4: the screen registry.
+ * Story 12.4. The cabinet's screens: one route, one label, one element.
  *
- * The list of screens the cabinet has, as data: route, label, and the section
- * each one shows. Separate from `router.ts` (which knows how to switch between
- * screens but not which exist) and from `startup.ts` (which knows what each
- * screen must do when it is shown or hidden, because it holds the panel
- * handles). One place to add a screen, and the nav, the router and the visual
- * gate all read the same list.
- *
- * Order is nav order, and it is the order a visitor meets the product in:
- * the pitch, then the thing they came to do, then the roster, then the two
- * watching surfaces, then the advanced one.
+ * The order here is the order of the nav. `#arcade` keeps its id because the
+ * router, the visual gate and index.html all name it; what it hosts is the
+ * Play cabinet.
  */
-
 export interface ScreenSpec {
-  /** The path half of the hash, leading slash included. */
   readonly route: string;
-  /** What the nav strip calls it. */
   readonly label: string;
-  /** The section this screen shows. */
   readonly selector: string;
 }
 
-/**
- * Every screen, in nav order.
- *
- * `/select` was registered by Story 12.4 with nothing behind it and its
- * `character-select-reachable` check waived; Story 12.5 filled it with the
- * roster (`shell/select.ts`) and deleted the waiver. Registering the route a
- * story early is what gave 12.5 a place to land rather than a shell to
- * renegotiate.
- */
 export const SCREENS: readonly ScreenSpec[] = Object.freeze([
   Object.freeze({ route: '/', label: 'Home', selector: '#landing' }),
-  Object.freeze({ route: '/play', label: 'Play vs CPU', selector: '#arcade' }),
-  Object.freeze({ route: '/select', label: 'Characters', selector: '#select' }),
+  Object.freeze({ route: '/play', label: 'Play', selector: '#arcade' }),
+  Object.freeze({ route: '/select', label: 'Fighters', selector: '#select' }),
   Object.freeze({ route: '/watch', label: 'Watch', selector: '#spectate' }),
   Object.freeze({ route: '/replay', label: 'Replay', selector: '#app' }),
-  Object.freeze({ route: '/byok', label: 'Own key', selector: '#byok' }),
+  Object.freeze({ route: '/byok', label: 'Your keys', selector: '#byok' }),
 ]);
 
-/** The landing screen. `parseRoute` sends an unknown route here. */
 export const ROUTE_HOME = '/';
-/** Play vs CPU. Where the landing CTA and a finished character select both go. */
 export const ROUTE_PLAY = '/play';
-/** Character select: four fighters, two picks, and the Fight button (Story 12.5). */
 export const ROUTE_SELECT = '/select';
-/** The Spectate stream. */
 export const ROUTE_WATCH = '/watch';
-/**
- * The replay player.
- *
- * Also where a finished Match lands: an arcade or BYOK Match re-mounts the
- * player on `#app`, and before this story that happened on whatever section the
- * visitor was scrolled to. On a cabinet it has to be a navigation, or a visitor
- * finishes a fight and is shown a status line saying so with the replay of it
- * playing on a screen they are not on.
- */
 export const ROUTE_REPLAY = '/replay';
-/** Bring your own key. */
 export const ROUTE_BYOK = '/byok';

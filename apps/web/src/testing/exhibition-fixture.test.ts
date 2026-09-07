@@ -237,9 +237,9 @@ describe('a Parse Failure reads as a Parse Failure (AC4)', () => {
     expect(fine.chips.map((chip) => chip.label)).not.toContain('Parse failure');
   });
 
-  it('is styled as --tb-bg ink on a --tb-warn fill, not warn text (docs/DESIGN.md)', () => {
-    // `--tb-warn` on `--tb-bg` measures 4.26:1 and misses the text floor; the
-    // same pair inverted clears it because the block is solid. The rule is in
+  it('is styled as warn ink on a warn tint, so it reads as a warning (docs/DESIGN.md)', () => {
+    // The warning block carries the warn colour as both its tint and its ink,
+    // so the failure reads as a failure and not as body copy. The rule is in
     // the stylesheet and this is the assertion that it stays there -- a
     // behavioural test cannot see a colour, and the AC is about the colour.
     const cssPath = join(
@@ -252,8 +252,8 @@ describe('a Parse Failure reads as a Parse Failure (AC4)', () => {
     const rule = css.slice(css.indexOf('.tb-reasoning--warn'));
     const block = rule.slice(0, rule.indexOf('}'));
 
-    expect(block).toMatch(/background:\s*var\(--tb-warn\)/);
-    expect(block).toMatch(/color:\s*var\(--tb-bg\)/);
+    expect(block).toMatch(/background:\s*var\(--tb-tint-warn\)/);
+    expect(block).toMatch(/color:\s*var\(--tb-warn\)/);
   });
 });
 

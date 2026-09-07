@@ -1,19 +1,19 @@
 {
   "schemaVersion": "1.0.0",
   "loopStartEpochMs": 1754000000000,
-  "totalLoopDurationMs": 61400,
+  "totalLoopDurationMs": 62800,
   "entries": [
     {
       "id": "spectate-01",
       "commandLogUrl": "/replays/spectate-01.command-log.json",
       "schemaVersion": "2.0.0",
-      "frameCount": 594
+      "frameCount": 642
     },
     {
       "id": "spectate-02",
       "commandLogUrl": "/replays/spectate-02.command-log.json",
       "schemaVersion": "2.0.0",
-      "frameCount": 630
+      "frameCount": 626
     },
     {
       "id": "spectate-03",
@@ -25,20 +25,20 @@
       "id": "spectate-04",
       "commandLogUrl": "/replays/spectate-04.command-log.json",
       "schemaVersion": "2.0.0",
-      "frameCount": 610,
+      "frameCount": 642,
       "containsUltimate": true
     },
     {
       "id": "spectate-05",
       "commandLogUrl": "/replays/spectate-05.command-log.json",
       "schemaVersion": "2.0.0",
-      "frameCount": 606
+      "frameCount": 602
     },
     {
       "id": "spectate-06",
       "commandLogUrl": "/replays/spectate-06.command-log.json",
       "schemaVersion": "2.0.0",
-      "frameCount": 614
+      "frameCount": 626
     }
   ]
 }

@@ -1,0 +1,92 @@
+{
+  "image": "../fx/fx_sheet.png",
+  "cell": {
+    "w": 208,
+    "h": 208
+  },
+  "grid": {
+    "cols": 5,
+    "rows": 5
+  },
+  "poses": {
+    "spark_l": {
+      "cells": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "fps": 20,
+      "loop": false
+    },
+    "star": {
+      "cells": [
+        4
+      ],
+      "fps": 1,
+      "loop": false
+    },
+    "spark_h": {
+      "cells": [
+        5,
+        6,
+        7,
+        8
+      ],
+      "fps": 20,
+      "loop": false
+    },
+    "slash": {
+      "cells": [
+        9
+      ],
+      "fps": 1,
+      "loop": false
+    },
+    "block": {
+      "cells": [
+        10,
+        11,
+        12
+      ],
+      "fps": 18,
+      "loop": false
+    },
+    "dust_puff": {
+      "cells": [
+        13,
+        14
+      ],
+      "fps": 12,
+      "loop": false
+    },
+    "dust": {
+      "cells": [
+        15,
+        16,
+        17,
+        18
+      ],
+      "fps": 12,
+      "loop": false
+    },
+    "streak": {
+      "cells": [
+        19
+      ],
+      "fps": 1,
+      "loop": false
+    },
+    "ko_burst": {
+      "cells": [
+        20,
+        21,
+        22,
+        23,
+        24
+      ],
+      "fps": 16,
+      "loop": false
+    }
+  }
+}

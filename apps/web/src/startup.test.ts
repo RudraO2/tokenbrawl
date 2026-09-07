@@ -6,7 +6,8 @@ import type { CommandLog } from '@tokenbrawl/contracts';
 import { DEFAULT_FIGHTER_CONFIG } from '../../../packages/env-fighter/src/config';
 import type { Canvas2D } from './render/canvas2d';
 import type { MountPoint, MountPointChild } from './main';
-import { DEFAULT_ROSTER, ROSTER_IDS, ROSTER_NAMES, spriteLayoutUrlFor } from './render/roster';
+import { CABINET_IDS, CABINET_ROSTER, cabinetPortraitUrl } from './cabinet/roster';
+import { DEFAULT_ROSTER, ROSTER_IDS, spriteLayoutUrlFor } from './render/roster';
 import { imageUrlsFor, validateUltSheetLayout } from './render/ult-sheet';
 import { DEMO_REPLAY_URL, resolveSidecarUrl, startup, type BrowserGlobals } from './startup';
 import { runByokMatch } from './byok/run';
@@ -1344,29 +1345,20 @@ describe('the BYOK panel and the player it replaces (Story 4.6)', () => {
  * Cast through `unknown` at the call site rather than widening that shared
  * type for one caller.
  */
-describe('the arcade panel and the player it replaces (Story 9.2)', () => {
-  const KEYS = ['ArrowRight', 'z', 'x', 'c', 'ArrowLeft'] as const;
-
-  function fireKey(host: FakeRoot, selector: string, key: string): void {
-    (host.fire as unknown as (selector: string, type: string, event?: { key?: string }) => void)(
-      selector,
-      'keydown',
-      { key },
-    );
-  }
-
+describe('the Play cabinet and the player beside it', () => {
   it('mounts the panel into its own host, outside the player shell', async () => {
     const { log } = await buildDemoBundle();
     const harness = createHarness(log);
 
     const result = await startup(harness.globals);
 
-    expect(result?.arcade).not.toBeNull();
-    expect(harness.arcadeHost.innerHTML).toContain('Play vs CPU');
+    expect(result?.play).not.toBeNull();
+    expect(harness.arcadeHost.innerHTML).toContain('Insert coin');
+    expect(harness.arcadeHost.innerHTML).toContain('data-play-frame');
     // Neither the player's shell nor the BYOK panel is touched by it.
-    expect(harness.root.innerHTML).not.toContain('Play vs CPU');
+    expect(harness.root.innerHTML).not.toContain('Insert coin');
     expect(harness.root.innerHTML).toContain('tb-canvas');
-    expect(harness.byokHost.innerHTML).not.toContain('Play vs CPU');
+    expect(harness.byokHost.innerHTML).not.toContain('Insert coin');
   });
 
   it('leaves the player alone when the page has no arcade host at all', async () => {
@@ -1375,65 +1367,61 @@ describe('the arcade panel and the player it replaces (Story 9.2)', () => {
 
     const result = await startup(harness.globals);
 
-    expect(result?.arcade).toBeNull();
+    expect(result?.play).toBeNull();
     expect(result?.mounted.clock.isRunning()).toBe(true);
   });
-
-  /**
-   * Story 12.7 changed what an arcade set does when it plays: it is best-of-three
-   * on the `#arcade` screen now, so a round finishing no longer re-mounts the
-   * replay player. The demo player on `#app` is left exactly where it was, and
-   * the set ends on its own result screen. Each round still produces a full,
-   * unmodified `CommandLogV2` -- that these carry the human identity and verify
-   * their own hash is proved in `arcade/run.test.ts` and `arcade/session.test.ts`,
-   * where the log can be inspected; here the wiring is what is under test.
-   */
-  it('plays the set on its own screen without replacing the demo player', async () => {
+  it('boots the cabinet on its own screen without replacing the demo player', async () => {
     const { log } = await buildDemoBundle();
     const harness = createHarness(log);
     const result = await startup(harness.globals);
     const demo = result?.mounted;
 
-    harness.arcadeHost.fire('[data-arcade-play]', 'click');
+    harness.arcadeHost.fire('[data-play-start]', 'click');
 
-    // The set is running on `#arcade`, and the replay player on `#app` is
-    // untouched -- no re-mount, no navigation away from the fight in progress.
-    expect(result?.arcade?.state()).toBe('running');
+    expect(result?.play?.state()).toBe('booting');
     expect(result?.current()).toBe(demo);
-    expect(harness.arcadeHost.innerHTML).toContain('best of three');
+    // The arena boots straight onto character select, in duel mode.
+    const frame = harness.arcadeHost.node('[data-play-frame]') as unknown as { src?: string } | null;
+    expect(frame?.src).toContain('/arena/index.html?mode=duel');
   });
-
-  it('never re-mounts a rated-or-not chip into the player from an arcade set', async () => {
-    // Before 12.7 the arcade re-mounted the replay of its Match, which carried
-    // the exclusion chip. The set now stays on its own screen, so the player's
-    // shell never gains that chip from arcade play at all.
+  it('never re-mounts a rated-or-not chip into the player from the cabinet', async () => {
     const { log } = await buildDemoBundle();
     const harness = createHarness(log);
     const result = await startup(harness.globals);
     const demo = result?.mounted;
 
     expect(harness.root.html()).not.toContain('not rated');
-    harness.arcadeHost.fire('[data-arcade-play]', 'click');
+    harness.arcadeHost.fire('[data-play-start]', 'click');
     expect(result?.current()).toBe(demo);
     expect(harness.root.html()).not.toContain('not rated');
   });
-
-  it('never crashes on an unmapped key mid-set, and the demo player is untouched', async () => {
+  it('never crashes on a message it does not recognise, and the demo player is untouched', async () => {
     const { log } = await buildDemoBundle();
     const harness = createHarness(log);
     const result = await startup(harness.globals);
     const demo = result?.mounted;
 
-    harness.arcadeHost.fire('[data-arcade-play]', 'click');
-    for (let index = 0; index < 12; index += 1) {
-      expect(() => fireKey(harness.arcadeHost, '[data-arcade-keys]', 'Escape')).not.toThrow();
-      expect(() =>
-        fireKey(harness.arcadeHost, '[data-arcade-keys]', KEYS[index % KEYS.length]),
-      ).not.toThrow();
+    harness.arcadeHost.fire('[data-play-start]', 'click');
+    for (const message of [null, 'x', 42, { source: 'other' }, { source: 'tb-arena' }, { source: 'tb-arena', type: 'nope' }]) {
+      expect(() => result?.play?.receive(message)).not.toThrow();
     }
 
-    expect(result?.arcade?.state()).toBe('running');
+    expect(result?.play?.state()).toBe('booting');
     expect(result?.current()).toBe(demo);
+  });
+
+  it('records a set the visitor wins, and reads the arena screen changes', async () => {
+    const { log } = await buildDemoBundle();
+    const harness = createHarness(log);
+    const result = await startup(harness.globals);
+
+    harness.arcadeHost.fire('[data-play-start]', 'click');
+    result?.play?.receive({ source: 'tb-arena', type: 'screen', screen: 'fight' });
+    expect(result?.play?.state()).toBe('fighting');
+    result?.play?.receive({ source: 'tb-arena', type: 'result', p1: 'clawde', p2: 'edison', wins: [2, 1], winner: 1 });
+    expect(result?.play?.state()).toBe('result');
+    expect(result?.play?.record()).toStrictEqual({ wins: 1, losses: 0 });
+    expect(harness.arcadeHost.node('[data-play-status]')?.innerHTML).toContain('You win');
   });
 });
 
@@ -1992,14 +1980,13 @@ describe('choosing a fighter changes what is drawn (Story 12.5)', () => {
     const result = await startup(harness.globals);
 
     expect(result?.select).not.toBeNull();
-    for (const id of ROSTER_IDS) {
-      // All four named on the screen a visitor lands on -- which is exactly
+    for (const id of CABINET_IDS) {
+      // All eight named on the screen a visitor lands on -- which is exactly
       // what the gate's `character-select-reachable` measures in a browser.
-      expect(harness.selectHost.innerHTML).toContain(ROSTER_NAMES[id]);
-      expect(harness.selectHost.innerHTML).toContain(`/portraits/${id}.png`);
+      expect(harness.selectHost.innerHTML).toContain(CABINET_ROSTER[id].name);
+      expect(harness.selectHost.innerHTML).toContain(cabinetPortraitUrl(id));
     }
   });
-
   it('still plays the replay on a page with no character-select screen', async () => {
     // The same warn-not-throw degrade every other panel here takes: the roster
     // is an offer, the replay is the page's claim.
@@ -2040,12 +2027,10 @@ describe('the Spectate stream keeps its own art (Story 12.5)', () => {
     return STARTUP_SOURCE.slice(at, end);
   }
 
-  it('hands a chosen pack to the player and the arena, and not to the stream', () => {
+  it('hands a chosen pack to the player, and not to the stream', () => {
     expect(body('dressArtist')).toContain('player.mounted.setArtist');
-    expect(body('dressArtist')).toContain('panels.arcade?.setArtist');
     expect(body('dressArtist')).not.toContain('panels.spectate');
   });
-
   it("hands the chosen pair's Ultimate sheet nowhere near the stream", () => {
     // This sheet holds two of four portraits by design, so giving it to
     // Spectate takes the other two fighters' cut-ins away from every committed
